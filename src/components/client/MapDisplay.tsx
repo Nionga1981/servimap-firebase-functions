@@ -10,35 +10,64 @@ import type { Provider } from '@/types';
 import { ProviderPreviewCard } from './ProviderPreviewCard';
 import { useState, useEffect } from 'react';
 
-// Mock providers for demo - kept for ProviderPreviewCard, but not shown on map for this iteration
-const mockProviders: Provider[] = [
-  { 
-    id: '1', name: 'Alice Smith', avatarUrl: 'https://placehold.co/100x100.png?text=AS', rating: 4.8, isAvailable: true,
-    services: [{ id: 's1', title: 'Expert Plumbing', description: 'Fixing leaks and pipes', price: 60, category: 'plumbing', providerId: '1' }],
-    location: { lat: 34.0522, lng: -118.2437 } 
+// Mock plumbers for demoing the "3 plumbers nearby" scenario
+const mockPlumbers: Provider[] = [
+  {
+    id: 'plumber1',
+    name: 'Mario Fontanería Express',
+    avatarUrl: 'https://placehold.co/100x100.png?text=MF',
+    rating: 4.9,
+    isAvailable: true,
+    services: [{
+      id: 's_p1', title: 'Reparaciones Urgentes 24/7', description: 'Solución rápida a fugas y atascos.', price: 90, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200.png?text=Fugas+24/7'
+    }],
+    location: { lat: 34.0540, lng: -118.2450 } // Example location
   },
-  { 
-    id: '2', name: 'Bob Johnson', avatarUrl: 'https://placehold.co/100x100.png?text=BJ', rating: 4.5, isAvailable: true,
-    services: [{ id: 's2', title: 'Electrical Wiring', description: 'Safe and certified', price: 80, category: 'electrical', providerId: '2' }],
-    location: { lat: 34.0550, lng: -118.2450 }
+  {
+    id: 'plumber2',
+    name: 'Luigi Soluciones Hidráulicas',
+    avatarUrl: 'https://placehold.co/100x100.png?text=LS',
+    rating: 4.7,
+    isAvailable: true,
+    services: [{
+      id: 's_p2', title: 'Instalación Grifería', description: 'Moderniza tu cocina y baño.', price: 70, category: 'plumbing', providerId: 'plumber2', imageUrl: 'https://placehold.co/300x200.png?text=Grifos'
+    }],
+    location: { lat: 34.0500, lng: -118.2420 } // Example location
   },
-  { 
-    id: '3', name: 'Carol White', avatarUrl: 'https://placehold.co/100x100.png?text=CW', rating: 4.9, isAvailable: false,
-    services: [{ id: 's3', title: 'Deep Cleaning Services', description: 'Home and office', price: 120, category: 'cleaning', providerId: '3' }],
-    location: { lat: 34.0500, lng: -118.2400 }
+  {
+    id: 'plumber3',
+    name: 'Fontanería Princesa Peach',
+    avatarUrl: 'https://placehold.co/100x100.png?text=PP',
+    rating: 4.8,
+    isAvailable: false, // Example of one unavailable
+    services: [{
+      id: 's_p3', title: 'Desatascos Profesionales', description: 'Tuberías como nuevas.', price: 120, category: 'plumbing', providerId: 'plumber3', imageUrl: 'https://placehold.co/300x200.png?text=Desatascos'
+    }],
+    location: { lat: 34.0560, lng: -118.2480 } // Example location
   },
 ];
 
 export function MapDisplay() {
-  const [selectedProvider, setSelectedProvider] = useState<Provider | null>(mockProviders[0]); // Keep for preview card
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isLoadingLocation, setIsLoadingLocation] = useState(true);
   const [locationError, setLocationError] = useState<string | null>(null);
-  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>({ lat: 34.0522, lng: -118.2437 }); // Default center
+  const [providersToDisplay, setProvidersToDisplay] = useState<Provider[]>([]);
+  // const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>({ lat: 34.0522, lng: -118.2437 }); // Default center
 
   useEffect(() => {
     handleRequestUserLocation();
   }, []);
+
+  useEffect(() => {
+    // Simulate finding plumbers when location is available FOR THIS PREVIEW
+    if (userLocation) {
+      // In a real app, this would be the result of an API call filtering by "plumbing" and location.
+      // For this demo, we directly use the mockPlumbers.
+      setProvidersToDisplay(mockPlumbers);
+    } else {
+      setProvidersToDisplay([]);
+    }
+  }, [userLocation]);
 
   const handleRequestUserLocation = () => {
     setIsLoadingLocation(true);
@@ -51,7 +80,7 @@ export function MapDisplay() {
             lng: position.coords.longitude,
           };
           setUserLocation(coords);
-          setMapCenter(coords);
+          // setMapCenter(coords); // Not strictly needed for placeholder updates
           setIsLoadingLocation(false);
         },
         (error) => {
@@ -67,8 +96,10 @@ export function MapDisplay() {
 
   const handleSearchAtMyLocation = () => {
     if (userLocation) {
-      alert(`Searching for services near your location: ${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}`);
-      // Here you would typically trigger an API call or filter providers
+      alert(`Buscando servicios cerca de tu ubicación: ${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}. (Simulación: mostrando plomeros de ejemplo)`);
+      // For demo, we've already set mockPlumbers if userLocation is available.
+      // In a real app, this would trigger a new search or filter.
+      setProvidersToDisplay(mockPlumbers);
     }
   };
 
@@ -79,11 +110,25 @@ export function MapDisplay() {
     mapPlaceholderText = "Getting your location...";
     mapDataAiHint = "loading map";
   } else if (locationError) {
-    mapPlaceholderText = `Location Error: ${locationError.substring(0,50)}`; // Keep it short
+    mapPlaceholderText = `Error de Ubicación: ${locationError.substring(0,50)}`;
     mapDataAiHint = "map error";
   } else if (userLocation) {
-    mapPlaceholderText = `Your Location: ${userLocation.lat.toFixed(2)}, ${userLocation.lng.toFixed(2)}`;
-    mapDataAiHint = "map user location";
+    // Check if the providersToDisplay are plumbers (for this specific simulation)
+    const activePlumbers = providersToDisplay.filter(p => p.services.some(s => s.category === 'plumbing'));
+    if (activePlumbers.length > 0) {
+      mapPlaceholderText = `Tu Ubicación (${activePlumbers.length} Plomero${activePlumbers.length === 1 ? '' : 's'} Cerca)`;
+      mapDataAiHint = "map user location plumbers";
+    } else if (providersToDisplay.length > 0) { // Some other providers might be shown if search changes
+        mapPlaceholderText = `Tu Ubicación (${providersToDisplay.length} Proveedores Cerca)`;
+        mapDataAiHint = "map user location providers";
+    }
+    else {
+      mapPlaceholderText = `Tu Ubicación: ${userLocation.lat.toFixed(2)}, ${userLocation.lng.toFixed(2)} (No se encontraron plomeros en esta demo)`;
+      mapDataAiHint = "map user location";
+    }
+  } else {
+    mapPlaceholderText = "Área del Mapa. Permite tu ubicación o busca.";
+    mapDataAiHint = "map city default";
   }
   
   const mapImageUrl = `https://placehold.co/800x500.png?text=${encodeURIComponent(mapPlaceholderText)}`;
@@ -92,21 +137,21 @@ export function MapDisplay() {
     <Card className="shadow-xl overflow-hidden">
       <CardHeader className="border-b">
         <CardTitle className="flex items-center gap-2 text-2xl">
-          <MapPinned className="text-primary" /> Find Providers Near You
+          <MapPinned className="text-primary" /> Encuentra Proveedores Cerca de Ti
         </CardTitle>
         <CardDescription>
-          Use your current location or search manually to find services.
+          Usa tu ubicación actual o busca manualmente para encontrar servicios.
         </CardDescription>
         <div className="mt-4 flex flex-col sm:flex-row gap-2">
           <div className="relative flex-grow">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input type="search" placeholder="Search by service, name, or category..." className="pl-8 w-full" />
+            <Input type="search" placeholder="Buscar por servicio, nombre, o categoría..." className="pl-8 w-full" />
           </div>
           <Button variant="outline" onClick={handleRequestUserLocation} disabled={isLoadingLocation}>
             <LocateFixed className={`h-4 w-4 ${isLoadingLocation ? 'animate-spin' : ''}`} />
-            {isLoadingLocation ? "Locating..." : userLocation ? "My Location" : "Get My Location"}
+            {isLoadingLocation ? "Localizando..." : userLocation ? "Mi Ubicación" : "Obtener Mi Ubicación"}
           </Button>
-          <Button variant="outline">Filters</Button>
+          <Button variant="outline">Filtros</Button>
         </div>
       </CardHeader>
       <CardContent className="p-0 md:flex">
@@ -155,17 +200,29 @@ export function MapDisplay() {
             <p className="text-sm text-destructive text-center">{locationError}</p>
           )}
 
-          {selectedProvider ? (
-            <ProviderPreviewCard provider={selectedProvider} onSelectProvider={() => alert(`View full profile of ${selectedProvider.name}`)} />
+          {providersToDisplay.length > 0 ? (
+            providersToDisplay.map(provider => (
+              <ProviderPreviewCard 
+                key={provider.id} 
+                provider={provider} 
+                onSelectProvider={() => alert(`Ver perfil de ${provider.name} (simulación)`)}
+              />
+            ))
           ) : (
-            <div className="flex items-center justify-center h-full text-muted-foreground">
-              <p>Select a provider to see details.</p>
-            </div>
+            !isLoadingLocation && !locationError && userLocation && ( // Only show if location is available but no providers
+              <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
+                <p>No se encontraron plomeros para esta simulación. En una app real, aquí verías resultados o un mensaje de "no encontrado".</p>
+              </div>
+            )
           )}
+           {!isLoadingLocation && !locationError && !userLocation && ( // Message when location is not yet available
+              <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
+                <p>Obtén tu ubicación para ver proveedores cercanos.</p>
+              </div>
+            )
+          }
         </div>
       </CardContent>
     </Card>
   );
 }
-
-    
