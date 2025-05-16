@@ -12,7 +12,7 @@ import { ProviderPreviewCard } from './ProviderPreviewCard';
 
 // Log environment variable at module level - for debugging .env issues
 const apiKeyFromEnv = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-console.log('[MapDisplay Module] process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:', apiKeyFromEnv);
+console.log('[MapDisplay Module] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:', apiKeyFromEnv);
 
 // Mock plumbers for demoing the "3 plumbers nearby" scenario
 const mockPlumbers: Provider[] = [
@@ -191,28 +191,16 @@ export function MapDisplay() {
     }
   }, [userLocation]);
 
-  const handleSearchAtMyLocation = () => {
-    if (userLocation) {
-      // Aquí iría la lógica real para buscar proveedores basada en userLocation
-      // Por ahora, solo mostramos los mocks y centramos el mapa.
-      setProvidersToDisplay(mockPlumbers.filter(p => p.location));
-      setMapCenter(userLocation);
-      setMapZoom(14);
-    } else {
-        alert("No podemos buscar en tu ubicación porque no se ha podido obtener. Intenta permitir el acceso a tu ubicación.");
-        handleRequestUserLocation(); // Intentar obtener ubicación de nuevo
-    }
-  };
 
   const onMapLoadCallback = useCallback((mapInstance: google.maps.Map) => {
     console.log("Componente Google Map cargado exitosamente. Instancia del mapa:", mapInstance);
     setIsMapComponentLoaded(true);
-  }, []); // Eliminado setIsMapComponentLoaded de dependencias ya que es un setter
+  }, []);
 
   const onMapUnmountCallback = useCallback(() => {
     console.log("Componente Google Map desmontado.");
     setIsMapComponentLoaded(false);
-  }, []); // Eliminado setIsMapComponentLoaded de dependencias ya que es un setter
+  }, []);
 
   const onLoadScriptError = useCallback((error: Error) => {
     console.error("Error al cargar LoadScript:", error);
@@ -310,15 +298,6 @@ export function MapDisplay() {
           {renderMapArea()}
         </div>
         <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-[500px] md:overflow-y-auto space-y-4">
-          <Button
-            className="w-full"
-            onClick={handleSearchAtMyLocation}
-            disabled={!userLocation || isLoadingLocation || !googleMapsApiKey || !!isMapApiLoadingError}
-          >
-            <Search className="mr-2 h-4 w-4" />
-            Buscar servicios en mi ubicación
-          </Button>
-
           {/* Mensajes informativos en el panel derecho */}
           {(!googleMapsApiKey || isMapApiLoadingError || (locationError && !userLocation)) && (
             <div className="flex flex-col items-center justify-center text-muted-foreground p-4 text-center">
