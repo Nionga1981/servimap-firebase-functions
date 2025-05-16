@@ -27,15 +27,16 @@ export function AppHeader() {
   const [currentLanguage, setCurrentLanguage] = useState<'ES' | 'EN'>('ES');
 
   const toggleLanguage = () => {
-    setCurrentLanguage((prevLang) => (prevLang === 'ES' ? 'EN' : 'ES'));
+    const newLang = currentLanguage === 'ES' ? 'EN' : 'ES';
+    setCurrentLanguage(newLang);
     // En una implementación real, aquí llamarías a tu lógica de i18n para cambiar el idioma.
-    console.log(`Idioma cambiado a: ${currentLanguage === 'ES' ? 'Inglés' : 'Español'}. Funcionalidad de i18n completa pendiente.`);
-    alert(`Simulación: Idioma cambiado a ${currentLanguage === 'ES' ? 'Inglés' : 'Español'}.\nLa traducción completa de la interfaz requiere un sistema i18n.`);
+    console.log(`Idioma cambiado a: ${newLang}. Funcionalidad de i18n completa pendiente.`);
+    alert(`Simulación: Idioma cambiado a ${newLang === 'EN' ? 'Inglés' : 'Español'}.\nLa traducción completa de la interfaz requiere un sistema i18n.`);
   };
 
   const handleCategorySelect = (categoryName: string) => {
-    alert(`Categoría seleccionada: ${categoryName}. (Funcionalidad de filtrado pendiente)`);
-    // Aquí se podría implementar la lógica para filtrar servicios por categoría
+    alert(`Has seleccionado la categoría: "${categoryName}".\n\nActualmente, esto solo muestra esta alerta.\nLa funcionalidad para filtrar proveedores por esta categoría aún no está implementada.`);
+    // Aquí se podría implementar la lógica para filtrar servicios por categoría en el futuro
   };
 
   return (
