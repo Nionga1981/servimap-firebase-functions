@@ -7,7 +7,7 @@ export default function HomePage() {
   return (
     <div className="container mx-auto py-12 px-4">
       <header className="text-center mb-12">
-        <h1 className="text-5xl font-bold text-primary mb-4">Welcome to ServiMap Prototype A</h1>
+        <h1 className="text-5xl font-bold text-primary mb-4">Welcome to ServiMap</h1>
         <p className="text-xl text-foreground/80 max-w-2xl mx-auto">
           Your one-stop platform to connect with skilled professionals or offer your expert services. Fast, reliable, and secure.
         </p>

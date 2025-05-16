@@ -10,7 +10,7 @@ const inter = Inter({ // Initialize Inter font
 });
 
 export const metadata: Metadata = {
-  title: 'ServiMap Prototype A',
+  title: 'ServiMap',
   description: 'Connect with skilled professionals in real-time.',
 };
 
