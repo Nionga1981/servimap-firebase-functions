@@ -64,8 +64,6 @@ const defaultCenter = {
   lng: -118.2437
 };
 
-const libraries: ("places" | "drawing" | "geometry" | "localContext" | "visualization")[] = useMemo(() => ['places'], []);
-
 // Define MapContentComponent outside MapDisplay
 const MapContentComponent = React.memo(({
   center,
@@ -133,8 +131,11 @@ export function MapDisplay() {
   const [providersToDisplay, setProvidersToDisplay] = useState<Provider[]>([]);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [mapZoom, setMapZoom] = useState(10);
-  const [, setIsMapComponentLoaded] = useState(false); // Renamed to avoid confusion, but still used by callbacks
+  const [, setIsMapComponentLoaded] = useState(false); 
   const [isMapApiLoadingError, setIsMapApiLoadingError] = useState<string | null>(null);
+
+  // Moved libraries declaration inside the component
+  const libraries: ("places" | "drawing" | "geometry" | "localContext" | "visualization")[] = useMemo(() => ['places'], []);
 
   // TEMPORARY HARDCODED API KEY - REMOVE FOR PRODUCTION AND USE .env
   const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU"; 
@@ -202,12 +203,12 @@ export function MapDisplay() {
   const onMapLoadCallback = useCallback((mapInstance: google.maps.Map) => {
     console.log("Google Map component successfully loaded. Map Instance:", mapInstance);
     setIsMapComponentLoaded(true);
-  }, [setIsMapComponentLoaded]);
+  }, []); // Removed setIsMapComponentLoaded from dependencies as it's a setter
 
   const onMapUnmountCallback = useCallback(() => {
     console.log("Google Map component unmounted.");
     setIsMapComponentLoaded(false);
-  }, [setIsMapComponentLoaded]);
+  }, []); // Removed setIsMapComponentLoaded from dependencies as it's a setter
 
   const onLoadScriptError = useCallback((error: Error) => {
     console.error("LoadScript error:", error);
