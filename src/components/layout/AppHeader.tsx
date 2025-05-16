@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from 'next/link';
@@ -17,7 +18,7 @@ import { DEFAULT_USER_AVATAR } from '@/lib/constants';
 import React, { useState } from 'react';
 
 const navLinks = [
-  { href: "/client", label: "Buscar Servicios" },
+  // { href: "/client", label: "Buscar Servicios" }, // Eliminado
   { href: "/provider", label: "Ofrecer Servicios" },
   { href: "/chat", label: "Demo de Chat" },
 ];
