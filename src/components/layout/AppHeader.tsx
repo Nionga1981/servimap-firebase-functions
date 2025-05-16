@@ -1,7 +1,7 @@
 "use client";
 
 import Link from 'next/link';
-import { Menu, Package2, UserCircle } from 'lucide-react';
+import { Menu, Package2, UserCircle, Globe } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import {
@@ -14,14 +14,24 @@ import {
 } from '@/components/ui/dropdown-menu';
 import Image from 'next/image';
 import { DEFAULT_USER_AVATAR } from '@/lib/constants';
+import React, { useState } from 'react';
 
 const navLinks = [
-  { href: "/client", label: "Find Services" },
-  { href: "/provider", label: "Offer Services" },
-  { href: "/chat", label: "Chat Demo" },
+  { href: "/client", label: "Buscar Servicios" },
+  { href: "/provider", label: "Ofrecer Servicios" },
+  { href: "/chat", label: "Demo de Chat" },
 ];
 
 export function AppHeader() {
+  const [currentLanguage, setCurrentLanguage] = useState<'ES' | 'EN'>('ES');
+
+  const toggleLanguage = () => {
+    setCurrentLanguage((prevLang) => (prevLang === 'ES' ? 'EN' : 'ES'));
+    // En una implementación real, aquí llamarías a tu lógica de i18n para cambiar el idioma.
+    console.log(`Idioma cambiado a: ${currentLanguage === 'ES' ? 'Inglés' : 'Español'}. Funcionalidad de i18n completa pendiente.`);
+    alert(`Simulación: Idioma cambiado a ${currentLanguage === 'ES' ? 'Inglés' : 'Español'}.\nLa traducción completa de la interfaz requiere un sistema i18n.`);
+  };
+
   return (
     <header className="sticky top-0 z-50 flex h-16 items-center gap-4 border-b bg-background px-4 md:px-6 shadow-sm">
       <nav className="hidden flex-col gap-6 text-lg font-medium md:flex md:flex-row md:items-center md:gap-5 md:text-sm lg:gap-6">
@@ -51,7 +61,7 @@ export function AppHeader() {
             className="shrink-0 md:hidden"
           >
             <Menu className="h-5 w-5" />
-            <span className="sr-only">Toggle navigation menu</span>
+            <span className="sr-only">Alternar menú de navegación</span>
           </Button>
         </SheetTrigger>
         <SheetContent side="left">
@@ -76,8 +86,11 @@ export function AppHeader() {
           </nav>
         </SheetContent>
       </Sheet>
-      <div className="flex w-full items-center gap-4 md:ml-auto md:gap-2 lg:gap-4 justify-end">
-        {/* Future search bar could go here */}
+      <div className="flex w-full items-center gap-2 md:ml-auto md:gap-2 lg:gap-4 justify-end">
+        <Button variant="outline" size="sm" onClick={toggleLanguage} className="gap-1">
+          <Globe className="h-4 w-4" />
+          {currentLanguage === 'ES' ? 'EN' : 'ES'}
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="secondary" size="icon" className="rounded-full">
@@ -85,20 +98,20 @@ export function AppHeader() {
                 src={DEFAULT_USER_AVATAR}
                 width={36}
                 height={36}
-                alt="User Avatar"
+                alt="Avatar de Usuario"
                 className="rounded-full"
                 data-ai-hint="user avatar"
               />
-              <span className="sr-only">Toggle user menu</span>
+              <span className="sr-only">Alternar menú de usuario</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuLabel>My Account</DropdownMenuLabel>
+            <DropdownMenuLabel>Mi Cuenta</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Profile</DropdownMenuItem>
-            <DropdownMenuItem>Settings</DropdownMenuItem>
+            <DropdownMenuItem>Perfil</DropdownMenuItem>
+            <DropdownMenuItem>Configuración</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Logout</DropdownMenuItem>
+            <DropdownMenuItem>Cerrar Sesión</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

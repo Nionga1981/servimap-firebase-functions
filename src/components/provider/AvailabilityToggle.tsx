@@ -14,7 +14,7 @@ export function AvailabilityToggle() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-xl">
           {isAvailable ? <Wifi className="text-green-500" /> : <WifiOff className="text-red-500" />}
-          Availability Status
+          Estado de Disponibilidad
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -23,14 +23,14 @@ export function AvailabilityToggle() {
             id="availability-mode"
             checked={isAvailable}
             onCheckedChange={setIsAvailable}
-            aria-label="Toggle availability"
+            aria-label="Alternar disponibilidad"
           />
           <Label htmlFor="availability-mode" className="text-lg font-medium cursor-pointer">
-            {isAvailable ? 'You are Online & Available' : 'You are Offline & Unavailable'}
+            {isAvailable ? 'Estás Conectado y Disponible' : 'Estás Desconectado y No Disponible'}
           </Label>
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
-          Toggle this switch to control whether clients can see you as available for new service requests.
+          Usa este interruptor para controlar si los clientes te ven como disponible para nuevas solicitudes de servicio.
         </p>
       </CardContent>
     </Card>

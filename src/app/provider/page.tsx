@@ -10,23 +10,23 @@ import { ListChecks } from 'lucide-react';
 
 export default function ProviderPage() {
   const [services, setServices] = useState<Service[]>([
-    // Sample initial service
+    // Servicio inicial de ejemplo
     {
       id: '1',
-      title: 'Initial Plumbing Service',
-      description: 'This is a sample plumbing service to get you started. Describe your awesome skills here!',
+      title: 'Servicio Inicial de Plomería',
+      description: 'Este es un servicio de plomería de ejemplo para que comiences. ¡Describe tus increíbles habilidades aquí!',
       price: 75,
-      category: 'plumbing',
+      category: 'plumbing', // ID de categoría de src/lib/constants.ts
       providerId: 'currentUser', // Placeholder
-      imageUrl: 'https://placehold.co/300x200.png?text=Plumbing+Pro'
+      imageUrl: 'https://placehold.co/300x200.png?text=Plomero+Pro'
     }
   ]);
 
   const handleAddService = (newServiceData: Omit<Service, 'id' | 'providerId' | 'imageUrl'>) => {
     const newService: Service = {
       ...newServiceData,
-      id: Date.now().toString(), // Simple ID generation for demo
-      providerId: 'currentUser', // Placeholder for actual provider ID
+      id: Date.now().toString(), // Generación simple de ID para la demo
+      providerId: 'currentUser', // Placeholder para ID de proveedor real
       imageUrl: `https://placehold.co/300x200.png?text=${encodeURIComponent(newServiceData.title.substring(0,15))}`
     };
     setServices(prevServices => [newService, ...prevServices]);
@@ -36,14 +36,14 @@ export default function ProviderPage() {
     setServices(prevServices => prevServices.filter(service => service.id !== serviceId));
   };
 
-  // Placeholder for edit functionality
+  // Placeholder para funcionalidad de editar
   const handleEditService = (serviceId: string) => {
-    alert(`Edit service with ID: ${serviceId} (not implemented)`);
+    alert(`Editar servicio con ID: ${serviceId} (no implementado)`);
   };
 
   return (
     <div className="container mx-auto py-8">
-      <h1 className="text-3xl font-bold mb-8 text-primary">Provider Dashboard</h1>
+      <h1 className="text-3xl font-bold mb-8 text-primary">Panel de Proveedor</h1>
       
       <section className="mb-12">
         <AvailabilityToggle />
@@ -59,10 +59,10 @@ export default function ProviderPage() {
 
       <section>
         <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2">
-          <ListChecks className="text-primary" /> Your Listed Services
+          <ListChecks className="text-primary" /> Tus Servicios Publicados
         </h2>
         {services.length === 0 ? (
-          <p className="text-muted-foreground text-center py-4">You haven't listed any services yet. Add one above to get started!</p>
+          <p className="text-muted-foreground text-center py-4">Aún no has publicado ningún servicio. ¡Añade uno arriba para empezar!</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {services.map((service) => (

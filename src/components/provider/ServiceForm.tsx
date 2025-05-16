@@ -29,17 +29,17 @@ import { useToast } from "@/hooks/use-toast";
 import { PlusCircle } from "lucide-react";
 
 const serviceFormSchema = z.object({
-  title: z.string().min(5, { message: "Title must be at least 5 characters." }).max(100),
-  description: z.string().min(20, { message: "Description must be at least 20 characters." }).max(500),
-  price: z.coerce.number().positive({ message: "Price must be a positive number." }),
-  category: z.string().min(1, { message: "Please select a category." }),
-  // imageUrl: z.string().url().optional(), // Optional for now
+  title: z.string().min(5, { message: "El título debe tener al menos 5 caracteres." }).max(100),
+  description: z.string().min(20, { message: "La descripción debe tener al menos 20 caracteres." }).max(500),
+  price: z.coerce.number().positive({ message: "El precio debe ser un número positivo." }),
+  category: z.string().min(1, { message: "Por favor selecciona una categoría." }),
+  // imageUrl: z.string().url().optional(), // Opcional por ahora
 });
 
 type ServiceFormValues = z.infer<typeof serviceFormSchema>;
 
 interface ServiceFormProps {
-  onAddService: (service: Omit<Service, 'id' | 'providerId' | 'imageUrl'>) => void; // Adjusted to match usage
+  onAddService: (service: Omit<Service, 'id' | 'providerId' | 'imageUrl'>) => void; // Ajustado para coincidir con el uso
 }
 
 export function ServiceForm({ onAddService }: ServiceFormProps) {
@@ -57,8 +57,8 @@ export function ServiceForm({ onAddService }: ServiceFormProps) {
   function onSubmit(data: ServiceFormValues) {
     onAddService(data);
     toast({
-      title: "Service Added!",
-      description: `"${data.title}" has been successfully listed.`,
+      title: "¡Servicio Añadido!",
+      description: `"${data.title}" ha sido publicado exitosamente.`,
     });
     form.reset();
   }
@@ -67,10 +67,10 @@ export function ServiceForm({ onAddService }: ServiceFormProps) {
     <Card className="shadow-md">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-xl">
-         <PlusCircle className="text-primary" /> Add New Service
+         <PlusCircle className="text-primary" /> Añadir Nuevo Servicio
         </CardTitle>
         <CardDescription>
-          Fill in the details below to list a new service you offer.
+          Completa los detalles a continuación para publicar un nuevo servicio que ofreces.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -81,9 +81,9 @@ export function ServiceForm({ onAddService }: ServiceFormProps) {
               name="title"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Service Title</FormLabel>
+                  <FormLabel>Título del Servicio</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., Expert Plumbing Repairs" {...field} />
+                    <Input placeholder="Ej: Reparaciones Expertas de Plomería" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -94,10 +94,10 @@ export function ServiceForm({ onAddService }: ServiceFormProps) {
               name="description"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Service Description</FormLabel>
+                  <FormLabel>Descripción del Servicio</FormLabel>
                   <FormControl>
                     <Textarea
-                      placeholder="Describe your service in detail..."
+                      placeholder="Describe tu servicio en detalle..."
                       className="resize-none"
                       rows={4}
                       {...field}
@@ -113,9 +113,9 @@ export function ServiceForm({ onAddService }: ServiceFormProps) {
                 name="price"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Price (USD)</FormLabel>
+                    <FormLabel>Precio (USD)</FormLabel>
                     <FormControl>
-                      <Input type="number" placeholder="e.g., 50" {...field} />
+                      <Input type="number" placeholder="Ej: 50" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -126,11 +126,11 @@ export function ServiceForm({ onAddService }: ServiceFormProps) {
                 name="category"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Category</FormLabel>
+                    <FormLabel>Categoría</FormLabel>
                     <Select onValueChange={field.onChange} defaultValue={field.value}>
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select a service category" />
+                          <SelectValue placeholder="Selecciona una categoría de servicio" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
@@ -150,7 +150,7 @@ export function ServiceForm({ onAddService }: ServiceFormProps) {
               />
             </div>
             <Button type="submit" className="w-full md:w-auto">
-              <PlusCircle className="mr-2 h-4 w-4" /> List Service
+              <PlusCircle className="mr-2 h-4 w-4" /> Publicar Servicio
             </Button>
           </form>
         </Form>

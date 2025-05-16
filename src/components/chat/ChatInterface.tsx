@@ -8,13 +8,13 @@ import { ChatMessage } from './ChatMessage';
 import type { ChatMessage as ChatMessageType } from '@/types';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Send, MessageCircle } from 'lucide-react';
-import { chatGuard, type ChatGuardOutput } from '@/ai/flows/chat-guard'; // Import the GenAI flow
+import { chatGuard, type ChatGuardOutput } from '@/ai/flows/chat-guard'; // Importar el flujo GenAI
 
 export function ChatInterface() {
   const [messages, setMessages] = useState<ChatMessageType[]>([
-    { id: '1', sender: 'provider', text: 'Hi there! How can I help you with your plumbing today?', timestamp: Date.now() - 60000 },
-    { id: '2', sender: 'user', text: 'I have a leaky faucet in my kitchen.', timestamp: Date.now() - 30000 },
-    { id: '3', sender: 'system', text: 'This is a system message for demonstration.', timestamp: Date.now() - 10000 },
+    { id: '1', sender: 'provider', text: '¡Hola! ¿Cómo puedo ayudarte con tu plomería hoy?', timestamp: Date.now() - 60000 },
+    { id: '2', sender: 'user', text: 'Tengo un grifo que gotea en mi cocina.', timestamp: Date.now() - 30000 },
+    { id: '3', sender: 'system', text: 'Este es un mensaje del sistema para demostración.', timestamp: Date.now() - 10000 },
   ]);
   const [inputValue, setInputValue] = useState('');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -38,8 +38,8 @@ export function ChatInterface() {
     try {
       guardResult = await chatGuard({ message: inputValue });
     } catch (error) {
-      console.error("Chat guard error:", error);
-      // Optionally, show a toast to the user
+      console.error("Error del guardián de chat:", error);
+      // Opcionalmente, mostrar un toast al usuario
     }
     setIsCheckingMessage(false);
 
@@ -55,13 +55,13 @@ export function ChatInterface() {
     setMessages((prevMessages) => [...prevMessages, newMessage]);
     setInputValue('');
 
-    // Simulate a provider response
-    if (guardResult?.isSafe !== false) { // Only respond if message is safe
+    // Simular una respuesta del proveedor
+    if (guardResult?.isSafe !== false) { // Solo responder si el mensaje es seguro
       setTimeout(() => {
         const providerResponse: ChatMessageType = {
           id: Date.now().toString() + '-provider',
           sender: 'provider',
-          text: `Okay, a leaky faucet. Can you tell me more or send a picture?`,
+          text: `De acuerdo, un grifo que gotea. ¿Puedes darme más detalles o enviar una foto?`,
           timestamp: Date.now(),
         };
         setMessages((prevMessages) => [...prevMessages, providerResponse]);
@@ -73,7 +73,7 @@ export function ChatInterface() {
     <Card className="w-full max-w-2xl mx-auto shadow-xl flex flex-col h-[calc(100vh-10rem)] max-h-[700px]">
       <CardHeader className="border-b">
         <CardTitle className="flex items-center gap-2 text-xl">
-          <MessageCircle className="text-primary" /> Chat with Provider
+          <MessageCircle className="text-primary" /> Chat con Proveedor
         </CardTitle>
       </CardHeader>
       <CardContent className="flex-grow p-0">
@@ -89,7 +89,7 @@ export function ChatInterface() {
         <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-2">
           <Input
             type="text"
-            placeholder={isCheckingMessage ? "Checking message..." : "Type your message..."}
+            placeholder={isCheckingMessage ? "Verificando mensaje..." : "Escribe tu mensaje..."}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             className="flex-grow"
@@ -97,7 +97,7 @@ export function ChatInterface() {
           />
           <Button type="submit" size="icon" disabled={!inputValue.trim() || isCheckingMessage}>
             <Send className="h-4 w-4" />
-            <span className="sr-only">Send message</span>
+            <span className="sr-only">Enviar mensaje</span>
           </Button>
         </form>
       </CardFooter>

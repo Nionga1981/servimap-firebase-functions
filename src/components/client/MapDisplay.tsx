@@ -60,7 +60,7 @@ const mapContainerStyle: React.CSSProperties = {
 };
 
 const defaultCenter = {
-  lat: 34.0522, // Los Angeles
+  lat: 34.0522, // Los Angeles (Ejemplo, idealmente centrado en la región del usuario)
   lng: -118.2437
 };
 
@@ -89,6 +89,9 @@ const MapContentComponent = React.memo(({
         streetViewControl: false,
         mapTypeControl: false,
         fullscreenControl: false,
+        // Considerar deshabilitar zoom y scroll si es solo visualización
+        // gestureHandling: 'none', 
+        // zoomControl: false,
       }}
       onLoad={onLoad}
       onUnmount={onUnmount}
@@ -108,13 +111,12 @@ const MapContentComponent = React.memo(({
         />
       )}
       {providersToDisplay.map(provider =>
-        provider.location && provider.isAvailable && (
+        provider.location && provider.isAvailable && ( // Solo mostrar proveedores disponibles con ubicación
           <MarkerF
             key={provider.id}
             position={provider.location}
             title={provider.name}
-            // onClick={() => alert(`Abrir perfil de ${provider.name}`)} // Consider opening a modal or sidebar instead of alert
-            // Add custom icons per category later if needed
+            // onClick={() => setSelectedProvider(provider)} // Implementar lógica para seleccionar proveedor
           />
         )
       )}
@@ -130,8 +132,8 @@ export function MapDisplay() {
   const [locationError, setLocationError] = useState<string | null>(null);
   const [providersToDisplay, setProvidersToDisplay] = useState<Provider[]>([]);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
-  const [mapZoom, setMapZoom] = useState(10);
-  const [, setIsMapComponentLoaded] = useState(false); 
+  const [mapZoom, setMapZoom] = useState(10); // Zoom inicial más alejado
+  const [, setIsMapComponentLoaded] = useState(false); // Para seguir si el componente mapa se cargó
   const [isMapApiLoadingError, setIsMapApiLoadingError] = useState<string | null>(null);
 
   // Moved libraries declaration inside the component
@@ -157,10 +159,10 @@ export function MapDisplay() {
           };
           setUserLocation(coords);
           setIsLoadingLocation(false);
-          console.log("User location obtained:", coords);
+          console.log("Ubicación del usuario obtenida:", coords);
         },
         (error) => {
-          console.error("Geolocation error:", error);
+          console.error("Error de geolocalización:", error);
           setLocationError(`Error obteniendo ubicación: ${error.message}. Por favor, habilita los permisos de ubicación.`);
           setIsLoadingLocation(false);
         }
@@ -178,40 +180,42 @@ export function MapDisplay() {
   useEffect(() => {
     if (userLocation) {
       setMapCenter(userLocation);
-      setMapZoom(14); 
-      // Simulate finding plumbers if user location is available
-      setProvidersToDisplay(mockPlumbers.filter(p => p.location)); // Ensure providers have locations
+      setMapZoom(14); // Zoom más cercano cuando se tiene la ubicación del usuario
+      // Simular búsqueda de plomeros si la ubicación del usuario está disponible
+      setProvidersToDisplay(mockPlumbers.filter(p => p.location)); // Asegurarse que los proveedores tengan ubicación
     } else {
-      // If no user location, reset map and providers (or keep default providers if desired)
+      // Si no hay ubicación del usuario, resetear mapa y proveedores (o mantener proveedores por defecto si se desea)
       setMapCenter(defaultCenter);
       setMapZoom(10);
-      setProvidersToDisplay([]); 
+      setProvidersToDisplay([]); // O `mockPlumbers` si quieres mostrar algo por defecto
     }
   }, [userLocation]);
 
   const handleSearchAtMyLocation = () => {
     if (userLocation) {
+      // Aquí iría la lógica real para buscar proveedores basada en userLocation
+      // Por ahora, solo mostramos los mocks y centramos el mapa.
       setProvidersToDisplay(mockPlumbers.filter(p => p.location));
       setMapCenter(userLocation);
       setMapZoom(14);
     } else {
         alert("No podemos buscar en tu ubicación porque no se ha podido obtener. Intenta permitir el acceso a tu ubicación.");
-        handleRequestUserLocation();
+        handleRequestUserLocation(); // Intentar obtener ubicación de nuevo
     }
   };
 
   const onMapLoadCallback = useCallback((mapInstance: google.maps.Map) => {
-    console.log("Google Map component successfully loaded. Map Instance:", mapInstance);
+    console.log("Componente Google Map cargado exitosamente. Instancia del mapa:", mapInstance);
     setIsMapComponentLoaded(true);
-  }, []); // Removed setIsMapComponentLoaded from dependencies as it's a setter
+  }, []); // Eliminado setIsMapComponentLoaded de dependencias ya que es un setter
 
   const onMapUnmountCallback = useCallback(() => {
-    console.log("Google Map component unmounted.");
+    console.log("Componente Google Map desmontado.");
     setIsMapComponentLoaded(false);
-  }, []); // Removed setIsMapComponentLoaded from dependencies as it's a setter
+  }, []); // Eliminado setIsMapComponentLoaded de dependencias ya que es un setter
 
   const onLoadScriptError = useCallback((error: Error) => {
-    console.error("LoadScript error:", error);
+    console.error("Error al cargar LoadScript:", error);
     setIsMapApiLoadingError(`Error al cargar la API de Google Maps: ${error.message}. Revisa la consola y la configuración de tu API Key.`);
   }, []);
 
@@ -222,7 +226,7 @@ export function MapDisplay() {
         <div className="flex flex-col items-center justify-center h-full text-destructive p-4 bg-destructive/10 rounded-md">
           <AlertTriangle className="h-12 w-12 mb-4" />
           <p className="text-lg font-semibold mb-2">Configuración Requerida</p>
-          <p className="text-sm text-center">La API Key de Google Maps no está configurada. Por favor, añádela a tu archivo .env como NEXT_PUBLIC_GOOGLE_MAPS_API_KEY o verifica el hardcodeo temporal.</p>
+          <p className="text-sm text-center">La API Key de Google Maps no está configurada. Por favor, añádela a tu archivo .env como NEXT_PUBLIC_GOOGLE_MAPS_API_KEY o verifica el código temporal.</p>
         </div>
       );
     }
@@ -251,12 +255,14 @@ export function MapDisplay() {
         onError={onLoadScriptError}
       >
         <>
+          {/* Indicador de carga de ubicación */}
           {isLoadingLocation && !userLocation && !locationError && (
             <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-background/80 z-10">
               <Loader2 className="h-8 w-8 text-primary animate-spin mb-2" />
               <p className="text-lg font-semibold text-foreground">Obteniendo tu ubicación...</p>
             </div>
           )}
+          {/* Mensaje de error de ubicación */}
           {locationError && !userLocation && (
              <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-destructive/20 z-10 text-center">
                 <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
@@ -313,6 +319,7 @@ export function MapDisplay() {
             Buscar servicios en mi ubicación
           </Button>
 
+          {/* Mensajes informativos en el panel derecho */}
           {(!googleMapsApiKey || isMapApiLoadingError || (locationError && !userLocation)) && (
             <div className="flex flex-col items-center justify-center text-muted-foreground p-4 text-center">
               {!googleMapsApiKey && (
@@ -345,16 +352,18 @@ export function MapDisplay() {
               <ProviderPreviewCard
                 key={provider.id}
                 provider={provider}
-                onSelectProvider={(providerId) => alert(`Ver perfil de ${provider.name} (ID: ${providerId})`)}
+                onSelectProvider={(providerId) => alert(`Ver perfil de ${provider.name} (ID: ${providerId}) (funcionalidad pendiente)`)}
               />
             ))
           ) : (
+            // Mensaje si no hay proveedores Y NO hay errores Y se tiene ubicación
             !isLoadingLocation && userLocation && googleMapsApiKey && !isMapApiLoadingError && providersToDisplay.length === 0 && (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
                 <p>No se encontraron proveedores para esta simulación en tu ubicación actual.</p>
               </div>
             )
           )}
+           {/* Mensaje si no hay ubicación (y no hay errores de carga de mapa o API key) */}
            {!isLoadingLocation && !userLocation && !locationError && googleMapsApiKey && !isMapApiLoadingError && providersToDisplay.length === 0 && (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
                 <p>Obtén tu ubicación para ver proveedores cercanos o intenta una búsqueda manual.</p>

@@ -44,13 +44,13 @@ export function ChatMessage({ message }: ChatMessageProps) {
       {message.isSafe === false && (
         <div className={cn("flex items-center gap-1 text-xs mt-1", isUser ? "justify-end mr-10" : "ml-10")}>
             <ShieldAlert className="h-3 w-3 text-destructive" />
-            <span className="text-destructive">{message.safetyReason || "Potentially inappropriate content"}</span>
+            <span className="text-destructive">{message.safetyReason || "Contenido potencialmente inapropiado"}</span>
         </div>
       )}
-       {message.isSafe === true && message.sender !== 'system' && ( // Optional: show "safe" indicator
+       {message.isSafe === true && message.sender !== 'system' && ( // Opcional: mostrar indicador "seguro"
         <div className={cn("flex items-center gap-1 text-xs mt-1", isUser ? "justify-end mr-10" : "ml-10")}>
             <ShieldCheck className="h-3 w-3 text-green-500" />
-            <span className="text-green-500">Message checked</span>
+            <span className="text-green-500">Mensaje verificado</span>
         </div>
       )}
       {!isSystem && (

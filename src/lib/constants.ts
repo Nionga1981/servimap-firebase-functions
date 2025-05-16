@@ -8,15 +8,15 @@ export interface ServiceCategory {
 }
 
 export const SERVICE_CATEGORIES: ServiceCategory[] = [
-  { id: 'plumbing', name: 'Plumbing', icon: Wrench },
-  { id: 'electrical', name: 'Electrical', icon: Zap },
-  { id: 'cleaning', name: 'Cleaning', icon: Sparkles },
-  { id: 'tutoring', name: 'Tutoring', icon: BookOpen },
-  { id: 'gardening', name: 'Gardening', icon: Flower2 },
-  { id: 'design', name: 'Graphic Design', icon: Palette },
-  { id: 'handyman', name: 'Handyman', icon: Hammer },
-  { id: 'consulting', name: 'Consulting', icon: Briefcase },
-  { id: 'it_support', name: 'IT Support', icon: Cog },
+  { id: 'plumbing', name: 'Plomería', icon: Wrench },
+  { id: 'electrical', name: 'Electricidad', icon: Zap },
+  { id: 'cleaning', name: 'Limpieza', icon: Sparkles },
+  { id: 'tutoring', name: 'Tutoría', icon: BookOpen },
+  { id: 'gardening', name: 'Jardinería', icon: Flower2 },
+  { id: 'design', name: 'Diseño Gráfico', icon: Palette },
+  { id: 'handyman', name: 'Manitas', icon: Hammer },
+  { id: 'consulting', name: 'Consultoría', icon: Briefcase },
+  { id: 'it_support', name: 'Soporte TI', icon: Cog },
 ];
 
 export const DEFAULT_USER_AVATAR = "https://placehold.co/100x100.png";

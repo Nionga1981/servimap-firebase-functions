@@ -19,8 +19,8 @@ export function ChatGuardDemo() {
     e.preventDefault();
     if (!message.trim()) {
       toast({
-        title: "Input Required",
-        description: "Please enter a message to check.",
+        title: "Entrada Requerida",
+        description: "Por favor, ingresa un mensaje para verificar.",
         variant: "destructive",
       });
       return;
@@ -32,14 +32,14 @@ export function ChatGuardDemo() {
       const guardResult = await chatGuard({ message });
       setResult(guardResult);
       toast({
-        title: "Check Complete",
-        description: `Message safety: ${guardResult.isSafe ? 'Safe' : 'Not Safe'}.`,
+        title: "Verificación Completa",
+        description: `Seguridad del mensaje: ${guardResult.isSafe ? 'Seguro' : 'No Seguro'}.`,
       });
     } catch (error) {
-      console.error("ChatGuard Error:", error);
+      console.error("Error en ChatGuard:", error);
       toast({
         title: "Error",
-        description: "Failed to check message. Please try again.",
+        description: "Falló la verificación del mensaje. Por favor, intenta de nuevo.",
         variant: "destructive",
       });
     } finally {
@@ -51,21 +51,21 @@ export function ChatGuardDemo() {
     <Card className="w-full max-w-2xl mx-auto shadow-xl">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-xl">
-          <MessageSquareWarning className="text-accent" /> AI Chat Guard Demo
+          <MessageSquareWarning className="text-accent" /> Demo del Guardián de Chat IA
         </CardTitle>
         <CardDescription>
-          Test our AI-powered chat moderation. Enter any message to see if it's flagged as potentially inappropriate.
+          Prueba nuestra moderación de chat impulsada por IA. Ingresa cualquier mensaje para ver si es marcado como potencialmente inapropiado.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="chat-message-input" className="block text-sm font-medium mb-1">
-              Enter Message to Check:
+              Ingresa Mensaje a Verificar:
             </label>
             <Textarea
               id="chat-message-input"
-              placeholder="Type your message here..."
+              placeholder="Escribe tu mensaje aquí..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               rows={3}
@@ -79,11 +79,11 @@ export function ChatGuardDemo() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                Checking...
+                Verificando...
               </>
             ) : (
               <>
-                <Shield className="mr-2 h-4 w-4" /> Check Message Safety
+                <Shield className="mr-2 h-4 w-4" /> Verificar Seguridad del Mensaje
               </>
             )}
           </Button>
@@ -91,19 +91,19 @@ export function ChatGuardDemo() {
 
         {result && (
           <div className="mt-6 p-4 rounded-md border">
-            <h3 className="text-lg font-semibold mb-2">Moderation Result:</h3>
+            <h3 className="text-lg font-semibold mb-2">Resultado de Moderación:</h3>
             {result.isSafe ? (
               <div className="flex items-center gap-2 text-green-600">
                 <ShieldCheck className="h-5 w-5" />
-                <p>Message is considered SAFE.</p>
+                <p>El mensaje se considera SEGURO.</p>
               </div>
             ) : (
               <div className="text-red-600">
                 <div className="flex items-center gap-2 mb-1">
                   <ShieldAlert className="h-5 w-5" />
-                  <p>Message is considered NOT SAFE.</p>
+                  <p>El mensaje se considera NO SEGURO.</p>
                 </div>
-                <p className="text-sm"><span className="font-medium">Reason:</span> {result.reason || "No specific reason provided."}</p>
+                <p className="text-sm"><span className="font-medium">Razón:</span> {result.reason || "No se proporcionó una razón específica."}</p>
               </div>
             )}
           </div>

@@ -43,12 +43,12 @@ export function ServiceCard({ service, onEdit, onDelete }: ServiceCardProps) {
         <CardFooter className="flex justify-end gap-2 pt-4 border-t">
           {onEdit && (
             <Button variant="outline" size="sm" onClick={() => onEdit(service.id)}>
-              <Edit3 className="mr-2 h-4 w-4" /> Edit
+              <Edit3 className="mr-2 h-4 w-4" /> Editar
             </Button>
           )}
           {onDelete && (
             <Button variant="destructive" size="sm" onClick={() => onDelete(service.id)}>
-              <Trash2 className="mr-2 h-4 w-4" /> Delete
+              <Trash2 className="mr-2 h-4 w-4" /> Eliminar
             </Button>
           )}
         </CardFooter>

@@ -11,7 +11,7 @@ const inter = Inter({ // Initialize Inter font
 
 export const metadata: Metadata = {
   title: 'ServiMap',
-  description: 'Connect with skilled professionals in real-time.',
+  description: 'Conecta con profesionales calificados en tiempo real.',
 };
 
 export default function RootLayout({
@@ -20,7 +20,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="es" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased`}>
         <AppLayout>
           {children}

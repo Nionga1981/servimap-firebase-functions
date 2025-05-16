@@ -35,11 +35,11 @@ export function ProviderPreviewCard({ provider, onSelectProvider }: ProviderPrev
             alt={provider.name}
             layout="fill"
             objectFit="cover"
-            data-ai-hint="provider avatar"
+            data-ai-hint={provider.dataAiHint || "provider avatar"}
           />
            {provider.isAvailable && (
             <div className="absolute top-2 right-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full font-semibold">
-              Available
+              Disponible
             </div>
           )}
         </div>
@@ -48,38 +48,37 @@ export function ProviderPreviewCard({ provider, onSelectProvider }: ProviderPrev
         <CardTitle className="text-lg mb-1">{provider.name}</CardTitle>
         {mainService && (
           <CardDescription className="text-sm text-muted-foreground mb-2 line-clamp-1">
-            Offers: {mainService.title}
+            Ofrece: {mainService.title}
           </CardDescription>
         )}
          <div className="flex items-center gap-2 text-sm mb-2">
           <Star className="h-4 w-4 text-yellow-400 fill-yellow-400" />
           <span>{provider.rating.toFixed(1)}</span>
           {reviewCount !== null ? (
-            <span className="text-muted-foreground">({reviewCount} reviews)</span>
+            <span className="text-muted-foreground">({reviewCount} reseñas)</span>
           ) : (
-            <span className="text-muted-foreground">(Loading reviews...)</span>
+            <span className="text-muted-foreground">(Cargando reseñas...)</span>
           )}
         </div>
         {mainService && (
           <div className="flex items-center gap-1 text-sm text-primary font-semibold mb-2">
             <DollarSign className="h-4 w-4" />
-            <span>Starts from ${mainService.price.toFixed(2)}</span>
+            <span>Desde ${mainService.price.toFixed(2)}</span>
           </div>
         )}
         {provider.location && distance !== null && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <MapPin className="h-3 w-3" />
-            <span>Approx. {distance} km away</span>
+            <span>Aprox. {distance} km</span>
           </div>
         )}
       </CardContent>
       <CardFooter className="p-4 border-t">
         <Button className="w-full" onClick={() => onSelectProvider(provider.id)}>
-          View Profile & Request
+          Ver Perfil y Solicitar
         </Button>
       </CardFooter>
     </Card>
   );
 }
-
     
