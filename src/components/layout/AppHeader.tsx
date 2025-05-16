@@ -30,8 +30,8 @@ export function AppHeader() {
           className="flex items-center gap-2 text-lg font-semibold md:text-base text-primary"
         >
           <Package2 className="h-6 w-6" />
-          <span className="sr-only">ConectaPro</span>
-          ConectaPro
+          <span className="sr-only">ServiMap Prototype A</span>
+          ServiMap Prototype A
         </Link>
         {navLinks.map((link) => (
           <Link
@@ -61,8 +61,8 @@ export function AppHeader() {
               className="flex items-center gap-2 text-lg font-semibold text-primary"
             >
               <Package2 className="h-6 w-6" />
-              <span className="sr-only">ConectaPro</span>
-              ConectaPro
+              <span className="sr-only">ServiMap Prototype A</span>
+              ServiMap Prototype A
             </Link>
             {navLinks.map((link) => (
               <Link
