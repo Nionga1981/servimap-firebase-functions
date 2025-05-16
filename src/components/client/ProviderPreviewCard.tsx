@@ -1,9 +1,13 @@
+
+"use client";
+
 import Image from 'next/image';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Star, DollarSign, MapPin } from 'lucide-react';
 import type { Provider } from '@/types';
 import { DEFAULT_USER_AVATAR } from '@/lib/constants';
+import { useState, useEffect } from 'react';
 
 interface ProviderPreviewCardProps {
   provider: Provider;
@@ -12,6 +16,15 @@ interface ProviderPreviewCardProps {
 
 export function ProviderPreviewCard({ provider, onSelectProvider }: ProviderPreviewCardProps) {
   const mainService = provider.services[0]; // Display first service as example
+  const [distance, setDistance] = useState<string | null>(null);
+  const [reviewCount, setReviewCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Generate random values on client-side after mount to avoid hydration mismatch
+    setDistance((Math.random() * 5 + 1).toFixed(1));
+    setReviewCount(Math.floor(Math.random() * 100) + 5);
+  }, []);
+
 
   return (
     <Card className="w-full max-w-sm overflow-hidden shadow-lg">
@@ -41,7 +54,11 @@ export function ProviderPreviewCard({ provider, onSelectProvider }: ProviderPrev
          <div className="flex items-center gap-2 text-sm mb-2">
           <Star className="h-4 w-4 text-yellow-400 fill-yellow-400" />
           <span>{provider.rating.toFixed(1)}</span>
-          <span className="text-muted-foreground">({Math.floor(Math.random() * 100) + 5} reviews)</span>
+          {reviewCount !== null ? (
+            <span className="text-muted-foreground">({reviewCount} reviews)</span>
+          ) : (
+            <span className="text-muted-foreground">(Loading reviews...)</span>
+          )}
         </div>
         {mainService && (
           <div className="flex items-center gap-1 text-sm text-primary font-semibold mb-2">
@@ -49,10 +66,10 @@ export function ProviderPreviewCard({ provider, onSelectProvider }: ProviderPrev
             <span>Starts from ${mainService.price.toFixed(2)}</span>
           </div>
         )}
-        {provider.location && (
+        {provider.location && distance !== null && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <MapPin className="h-3 w-3" />
-            <span>Approx. {Math.random() * 5 + 1toFixed(1)} km away</span>
+            <span>Approx. {distance} km away</span>
           </div>
         )}
       </CardContent>
@@ -64,3 +81,5 @@ export function ProviderPreviewCard({ provider, onSelectProvider }: ProviderPrev
     </Card>
   );
 }
+
+    
