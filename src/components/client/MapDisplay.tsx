@@ -1,6 +1,7 @@
 
 "use client";
 
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleMap, LoadScript, MarkerF } from '@react-google-maps/api';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -8,12 +9,10 @@ import { Button } from '@/components/ui/button';
 import { MapPinned, Search, LocateFixed, AlertTriangle, WifiOff, Loader2 } from 'lucide-react';
 import type { Provider } from '@/types';
 import { ProviderPreviewCard } from './ProviderPreviewCard';
-import { useState, useEffect, useMemo } from 'react';
 
-// Log environment variable at module level
+// Log environment variable at module level - for debugging .env issues
 const apiKeyFromEnv = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 console.log('[MapDisplay Module] process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:', apiKeyFromEnv);
-
 
 // Mock plumbers for demoing the "3 plumbers nearby" scenario
 const mockPlumbers: Provider[] = [
@@ -21,38 +20,41 @@ const mockPlumbers: Provider[] = [
     id: 'plumber1',
     name: 'Mario Fontanería Express',
     avatarUrl: 'https://placehold.co/100x100.png?text=MF',
+    dataAiHint: 'plumber portrait',
     rating: 4.9,
     isAvailable: true,
     services: [{
-      id: 's_p1', title: 'Reparaciones Urgentes 24/7', description: 'Solución rápida a fugas y atascos.', price: 90, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200.png?text=Fugas+24/7'
+      id: 's_p1', title: 'Reparaciones Urgentes 24/7', description: 'Solución rápida a fugas y atascos.', price: 90, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200.png?text=Fugas+24/7', dataAiHint: 'water pipes'
     }],
-    location: { lat: 34.0540, lng: -118.2450 } // Example location
+    location: { lat: 34.0540, lng: -118.2450 }
   },
   {
     id: 'plumber2',
     name: 'Luigi Soluciones Hidráulicas',
     avatarUrl: 'https://placehold.co/100x100.png?text=LS',
+    dataAiHint: 'worker profile',
     rating: 4.7,
     isAvailable: true,
     services: [{
-      id: 's_p2', title: 'Instalación Grifería', description: 'Moderniza tu cocina y baño.', price: 70, category: 'plumbing', providerId: 'plumber2', imageUrl: 'https://placehold.co/300x200.png?text=Grifos'
+      id: 's_p2', title: 'Instalación Grifería', description: 'Moderniza tu cocina y baño.', price: 70, category: 'plumbing', providerId: 'plumber2', imageUrl: 'https://placehold.co/300x200.png?text=Grifos', dataAiHint: 'shiny faucet'
     }],
-    location: { lat: 34.0500, lng: -118.2420 } // Example location
+    location: { lat: 34.0500, lng: -118.2420 }
   },
   {
     id: 'plumber3',
     name: 'Fontanería Princesa Peach',
     avatarUrl: 'https://placehold.co/100x100.png?text=PP',
+    dataAiHint: 'friendly professional',
     rating: 4.8,
-    isAvailable: false, // Example of one unavailable
+    isAvailable: false, 
     services: [{
-      id: 's_p3', title: 'Desatascos Profesionales', description: 'Tuberías como nuevas.', price: 120, category: 'plumbing', providerId: 'plumber3', imageUrl: 'https://placehold.co/300x200.png?text=Desatascos'
+      id: 's_p3', title: 'Desatascos Profesionales', description: 'Tuberías como nuevas.', price: 120, category: 'plumbing', providerId: 'plumber3', imageUrl: 'https://placehold.co/300x200.png?text=Desatascos', dataAiHint: 'clear drains'
     }],
-    location: { lat: 34.0560, lng: -118.2480 } // Example location
+    location: { lat: 34.0560, lng: -118.2480 }
   },
 ];
 
-const mapContainerStyle = {
+const mapContainerStyle: React.CSSProperties = {
   width: '100%',
   height: '100%',
 };
@@ -62,7 +64,67 @@ const defaultCenter = {
   lng: -118.2437
 };
 
-const libraries: ("places" | "drawing" | "geometry" | "localContext" | "visualization")[] = ['places'];
+const libraries: ("places" | "drawing" | "geometry" | "localContext" | "visualization")[] = useMemo(() => ['places'], []);
+
+// Define MapContentComponent outside MapDisplay
+const MapContentComponent = React.memo(({
+  center,
+  zoom,
+  onLoad,
+  onUnmount,
+  userLocation,
+  providersToDisplay
+}: {
+  center: { lat: number; lng: number };
+  zoom: number;
+  onLoad: (map: google.maps.Map) => void;
+  onUnmount: () => void;
+  userLocation: { lat: number; lng: number } | null;
+  providersToDisplay: Provider[];
+}) => {
+  return (
+    <GoogleMap
+      mapContainerStyle={mapContainerStyle}
+      center={center}
+      zoom={zoom}
+      options={{
+        streetViewControl: false,
+        mapTypeControl: false,
+        fullscreenControl: false,
+      }}
+      onLoad={onLoad}
+      onUnmount={onUnmount}
+    >
+      {userLocation && (
+        <MarkerF
+          position={userLocation}
+          title="Tu ubicación"
+          icon={{
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: "#4285F4", // Google Blue
+            fillOpacity: 1,
+            strokeWeight: 2,
+            strokeColor: "white",
+          }}
+        />
+      )}
+      {providersToDisplay.map(provider =>
+        provider.location && provider.isAvailable && (
+          <MarkerF
+            key={provider.id}
+            position={provider.location}
+            title={provider.name}
+            // onClick={() => alert(`Abrir perfil de ${provider.name}`)} // Consider opening a modal or sidebar instead of alert
+            // Add custom icons per category later if needed
+          />
+        )
+      )}
+    </GoogleMap>
+  );
+});
+MapContentComponent.displayName = 'MapContentComponent';
+
 
 export function MapDisplay() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -71,37 +133,18 @@ export function MapDisplay() {
   const [providersToDisplay, setProvidersToDisplay] = useState<Provider[]>([]);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [mapZoom, setMapZoom] = useState(10);
-  const [isMapComponentLoaded, setIsMapComponentLoaded] = useState(false);
+  const [, setIsMapComponentLoaded] = useState(false); // Renamed to avoid confusion, but still used by callbacks
   const [isMapApiLoadingError, setIsMapApiLoadingError] = useState<string | null>(null);
 
-  // ========================================================================
-  // TEMPORARY DEBUGGING: Hardcoding API Key
-  // This is ONLY for testing if the environment variable loading is the issue.
-  // REMOVE THIS AND USE process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY for actual use.
-  const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU";
+  // TEMPORARY HARDCODED API KEY - REMOVE FOR PRODUCTION AND USE .env
+  const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU"; 
   // const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  
   console.log('[MapDisplay Component] Using hardcoded googleMapsApiKey value:', googleMapsApiKey);
   console.log('[MapDisplay Component] Value from process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY (for comparison):', process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
-  // ========================================================================
 
 
-  useEffect(() => {
-    handleRequestUserLocation();
-  }, []);
-
-  useEffect(() => {
-    if (userLocation) {
-      setMapCenter(userLocation);
-      setMapZoom(14); 
-      setProvidersToDisplay(mockPlumbers);
-    } else {
-      setMapCenter(defaultCenter);
-      setMapZoom(10);
-      setProvidersToDisplay([]); 
-    }
-  }, [userLocation]);
-
-  const handleRequestUserLocation = () => {
+  const handleRequestUserLocation = useCallback(() => {
     setIsLoadingLocation(true);
     setLocationError(null);
     if (navigator.geolocation) {
@@ -125,11 +168,29 @@ export function MapDisplay() {
       setLocationError("La geolocalización no es compatible con este navegador.");
       setIsLoadingLocation(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    handleRequestUserLocation();
+  }, [handleRequestUserLocation]);
+
+  useEffect(() => {
+    if (userLocation) {
+      setMapCenter(userLocation);
+      setMapZoom(14); 
+      // Simulate finding plumbers if user location is available
+      setProvidersToDisplay(mockPlumbers.filter(p => p.location)); // Ensure providers have locations
+    } else {
+      // If no user location, reset map and providers (or keep default providers if desired)
+      setMapCenter(defaultCenter);
+      setMapZoom(10);
+      setProvidersToDisplay([]); 
+    }
+  }, [userLocation]);
 
   const handleSearchAtMyLocation = () => {
     if (userLocation) {
-      setProvidersToDisplay(mockPlumbers);
+      setProvidersToDisplay(mockPlumbers.filter(p => p.location));
       setMapCenter(userLocation);
       setMapZoom(14);
     } else {
@@ -138,62 +199,29 @@ export function MapDisplay() {
     }
   };
 
-  const onMapLoad = (mapInstance: google.maps.Map) => {
+  const onMapLoadCallback = useCallback((mapInstance: google.maps.Map) => {
     console.log("Google Map component successfully loaded. Map Instance:", mapInstance);
     setIsMapComponentLoaded(true);
-  }
+  }, [setIsMapComponentLoaded]);
 
-  const onMapUnmount = () => {
-    setIsMapComponentLoaded(false); 
-  }
+  const onMapUnmountCallback = useCallback(() => {
+    console.log("Google Map component unmounted.");
+    setIsMapComponentLoaded(false);
+  }, [setIsMapComponentLoaded]);
 
-  const onLoadScriptError = (error: Error) => {
+  const onLoadScriptError = useCallback((error: Error) => {
     console.error("LoadScript error:", error);
     setIsMapApiLoadingError(`Error al cargar la API de Google Maps: ${error.message}. Revisa la consola y la configuración de tu API Key.`);
-  }
+  }, []);
 
-
-  const MapContent = () => (
-    <GoogleMap
-      mapContainerStyle={mapContainerStyle}
-      center={mapCenter}
-      zoom={mapZoom}
-      options={{
-        streetViewControl: false,
-        mapTypeControl: false,
-        fullscreenControl: false,
-      }}
-      onLoad={onMapLoad}
-      onUnmount={onMapUnmount}
-    >
-      {userLocation && (
-        <MarkerF
-          position={userLocation}
-          title="Tu ubicación"
-        />
-      )}
-      {providersToDisplay.map(provider =>
-        provider.location && provider.isAvailable && (
-          <MarkerF
-            key={provider.id}
-            position={provider.location}
-            title={provider.name}
-            onClick={() => alert(`Abrir perfil de ${provider.name}`)}
-          />
-        )
-      )}
-    </GoogleMap>
-  );
 
   const renderMapArea = () => {
     if (!googleMapsApiKey) {
-      // This message should NOT appear if the key is hardcoded above.
-      // If it does, there's a very fundamental issue.
       return (
         <div className="flex flex-col items-center justify-center h-full text-destructive p-4 bg-destructive/10 rounded-md">
           <AlertTriangle className="h-12 w-12 mb-4" />
-          <p className="text-lg font-semibold mb-2">Configuración Requerida (Hardcoded Check)</p>
-          <p className="text-sm text-center">La API Key de Google Maps NO está llegando al componente, incluso hardcodeada. Verifica el código.</p>
+          <p className="text-lg font-semibold mb-2">Configuración Requerida</p>
+          <p className="text-sm text-center">La API Key de Google Maps no está configurada. Por favor, añádela a tu archivo .env como NEXT_PUBLIC_GOOGLE_MAPS_API_KEY o verifica el hardcodeo temporal.</p>
         </div>
       );
     }
@@ -236,7 +264,14 @@ export function MapDisplay() {
                 <Button onClick={handleRequestUserLocation} variant="secondary" size="sm" className="mt-3">Reintentar Obtener Ubicación</Button>
              </div>
           )}
-           <MapContent />
+           <MapContentComponent
+             center={mapCenter}
+             zoom={mapZoom}
+             onLoad={onMapLoadCallback}
+             onUnmount={onMapUnmountCallback}
+             userLocation={userLocation}
+             providersToDisplay={providersToDisplay}
+           />
         </>
       </LoadScript>
     );
@@ -257,7 +292,7 @@ export function MapDisplay() {
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input type="search" placeholder="Buscar servicio, nombre, categoría..." className="pl-8 w-full" />
           </div>
-          <Button variant="outline" onClick={handleRequestUserLocation} disabled={isLoadingLocation || !googleMapsApiKey}>
+          <Button variant="outline" onClick={handleRequestUserLocation} disabled={isLoadingLocation}>
             <LocateFixed className={`h-4 w-4 ${isLoadingLocation ? 'animate-spin' : ''}`} />
             {isLoadingLocation ? "Localizando..." : userLocation ? "Actualizar Ubicación" : "Obtener Mi Ubicación"}
           </Button>
@@ -271,7 +306,7 @@ export function MapDisplay() {
           <Button
             className="w-full"
             onClick={handleSearchAtMyLocation}
-            disabled={!userLocation || isLoadingLocation || !googleMapsApiKey || isMapApiLoadingError}
+            disabled={!userLocation || isLoadingLocation || !googleMapsApiKey || !!isMapApiLoadingError}
           >
             <Search className="mr-2 h-4 w-4" />
             Buscar servicios en mi ubicación
@@ -279,11 +314,11 @@ export function MapDisplay() {
 
           {(!googleMapsApiKey || isMapApiLoadingError || (locationError && !userLocation)) && (
             <div className="flex flex-col items-center justify-center text-muted-foreground p-4 text-center">
-              {!googleMapsApiKey && ( // This should not be hit if hardcoded correctly
+              {!googleMapsApiKey && (
                 <>
                   <WifiOff className="h-8 w-8 mx-auto mb-2 text-destructive" />
-                  <p className="font-semibold">Mapa no disponible (hardcoded fail).</p>
-                  <p className="text-sm">Verifica el código fuente, la key debería estar hardcodeada.</p>
+                  <p className="font-semibold">Mapa no disponible.</p>
+                  <p className="text-sm">API Key no configurada.</p>
                 </>
               )}
               {isMapApiLoadingError && googleMapsApiKey && (
