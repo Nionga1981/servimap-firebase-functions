@@ -12,7 +12,7 @@ import { useState, useEffect, useMemo } from 'react';
 
 // Log environment variable at module level
 const apiKeyFromEnv = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-console.log('[MapDisplay Module] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:', apiKeyFromEnv);
+console.log('[MapDisplay Module] process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:', apiKeyFromEnv);
 
 
 // Mock plumbers for demoing the "3 plumbers nearby" scenario
@@ -74,8 +74,15 @@ export function MapDisplay() {
   const [isMapComponentLoaded, setIsMapComponentLoaded] = useState(false);
   const [isMapApiLoadingError, setIsMapApiLoadingError] = useState<string | null>(null);
 
-  const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-  console.log('[MapDisplay Component] googleMapsApiKey value:', googleMapsApiKey);
+  // ========================================================================
+  // TEMPORARY DEBUGGING: Hardcoding API Key
+  // This is ONLY for testing if the environment variable loading is the issue.
+  // REMOVE THIS AND USE process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY for actual use.
+  const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU";
+  // const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  console.log('[MapDisplay Component] Using hardcoded googleMapsApiKey value:', googleMapsApiKey);
+  console.log('[MapDisplay Component] Value from process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY (for comparison):', process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
+  // ========================================================================
 
 
   useEffect(() => {
@@ -85,21 +92,18 @@ export function MapDisplay() {
   useEffect(() => {
     if (userLocation) {
       setMapCenter(userLocation);
-      setMapZoom(14); // Zoom in when user location is available
-      // Simulate finding plumbers when location is available
+      setMapZoom(14); 
       setProvidersToDisplay(mockPlumbers);
     } else {
-      // Mantener el centro por defecto si no hay ubicación del usuario
       setMapCenter(defaultCenter);
       setMapZoom(10);
-      setProvidersToDisplay([]); // No mostrar proveedores si no hay ubicación
+      setProvidersToDisplay([]); 
     }
   }, [userLocation]);
 
   const handleRequestUserLocation = () => {
     setIsLoadingLocation(true);
     setLocationError(null);
-    // No es necesario setIsMapComponentLoaded(false) aquí, ya que la carga del script es independiente de la geoloc.
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -109,10 +113,11 @@ export function MapDisplay() {
           };
           setUserLocation(coords);
           setIsLoadingLocation(false);
+          console.log("User location obtained:", coords);
         },
         (error) => {
           console.error("Geolocation error:", error);
-          setLocationError(`Error obteniendo ubicación: ${error.message}. Por favor, habilita los permisos de ubicación en tu navegador e inténtalo de nuevo.`);
+          setLocationError(`Error obteniendo ubicación: ${error.message}. Por favor, habilita los permisos de ubicación.`);
           setIsLoadingLocation(false);
         }
       );
@@ -133,14 +138,13 @@ export function MapDisplay() {
     }
   };
 
-  const onMapLoad = () => {
-    console.log("Google Map component successfully loaded.");
+  const onMapLoad = (mapInstance: google.maps.Map) => {
+    console.log("Google Map component successfully loaded. Map Instance:", mapInstance);
     setIsMapComponentLoaded(true);
   }
 
   const onMapUnmount = () => {
-    // console.log("Google Map component unmounted.");
-    setIsMapComponentLoaded(false); // Reset state on unmount if needed
+    setIsMapComponentLoaded(false); 
   }
 
   const onLoadScriptError = (error: Error) => {
@@ -166,16 +170,14 @@ export function MapDisplay() {
         <MarkerF
           position={userLocation}
           title="Tu ubicación"
-          // icon={{ url: '/user-marker.png', scaledSize: new window.google.maps.Size(30,30) }} // Example custom icon
         />
       )}
       {providersToDisplay.map(provider =>
-        provider.location && provider.isAvailable && ( // Only show available providers
+        provider.location && provider.isAvailable && (
           <MarkerF
             key={provider.id}
             position={provider.location}
             title={provider.name}
-            // icon={{ url: '/available-marker.png' }}
             onClick={() => alert(`Abrir perfil de ${provider.name}`)}
           />
         )
@@ -185,11 +187,13 @@ export function MapDisplay() {
 
   const renderMapArea = () => {
     if (!googleMapsApiKey) {
+      // This message should NOT appear if the key is hardcoded above.
+      // If it does, there's a very fundamental issue.
       return (
         <div className="flex flex-col items-center justify-center h-full text-destructive p-4 bg-destructive/10 rounded-md">
           <AlertTriangle className="h-12 w-12 mb-4" />
-          <p className="text-lg font-semibold mb-2">Configuración Requerida</p>
-          <p className="text-sm text-center">La API Key de Google Maps no está configurada. Por favor, añádela a tu archivo .env como NEXT_PUBLIC_GOOGLE_MAPS_API_KEY.</p>
+          <p className="text-lg font-semibold mb-2">Configuración Requerida (Hardcoded Check)</p>
+          <p className="text-sm text-center">La API Key de Google Maps NO está llegando al componente, incluso hardcodeada. Verifica el código.</p>
         </div>
       );
     }
@@ -224,7 +228,7 @@ export function MapDisplay() {
               <p className="text-lg font-semibold text-foreground">Obteniendo tu ubicación...</p>
             </div>
           )}
-          {locationError && !userLocation && ( // Mostrar solo si no se ha obtenido la ubicación del usuario
+          {locationError && !userLocation && (
              <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-destructive/20 z-10 text-center">
                 <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
                 <p className="text-lg font-semibold text-destructive-foreground">Error de Ubicación</p>
@@ -275,11 +279,11 @@ export function MapDisplay() {
 
           {(!googleMapsApiKey || isMapApiLoadingError || (locationError && !userLocation)) && (
             <div className="flex flex-col items-center justify-center text-muted-foreground p-4 text-center">
-              {!googleMapsApiKey && (
+              {!googleMapsApiKey && ( // This should not be hit if hardcoded correctly
                 <>
                   <WifiOff className="h-8 w-8 mx-auto mb-2 text-destructive" />
-                  <p className="font-semibold">Mapa no disponible.</p>
-                  <p className="text-sm">Por favor, configura la API key de Google Maps.</p>
+                  <p className="font-semibold">Mapa no disponible (hardcoded fail).</p>
+                  <p className="text-sm">Verifica el código fuente, la key debería estar hardcodeada.</p>
                 </>
               )}
               {isMapApiLoadingError && googleMapsApiKey && (
@@ -311,7 +315,7 @@ export function MapDisplay() {
           ) : (
             !isLoadingLocation && userLocation && googleMapsApiKey && !isMapApiLoadingError && providersToDisplay.length === 0 && (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
-                <p>No se encontraron proveedores para esta simulación en tu ubicación actual. En una app real, aquí verías resultados o un mensaje de "no encontrado".</p>
+                <p>No se encontraron proveedores para esta simulación en tu ubicación actual.</p>
               </div>
             )
           )}
@@ -327,5 +331,4 @@ export function MapDisplay() {
   );
 }
     
-
     
