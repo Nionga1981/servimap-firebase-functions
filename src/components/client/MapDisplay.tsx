@@ -45,7 +45,7 @@ const mockPlumbers: Provider[] = [
     name: 'Fontanería Princesa Peach',
     avatarUrl: 'https://placehold.co/100x100.png?text=PP',
     dataAiHint: 'friendly professional',
-    rating: 4.8,
+    rating: 4.8, // Cambiado para que no sea el más alto y probar el ordenamiento
     isAvailable: false, 
     services: [{
       id: 's_p3', title: 'Desatascos Profesionales', description: 'Tuberías como nuevas.', price: 120, category: 'plumbing', providerId: 'plumber3', imageUrl: 'https://placehold.co/300x200.png?text=Desatascos', dataAiHint: 'clear drains'
@@ -115,7 +115,7 @@ const MapContentComponent = React.memo(({
           <MarkerF
             key={provider.id}
             position={provider.location}
-            title={provider.name}
+            title={`${provider.name} (Calificación: ${provider.rating})`}
             // onClick={() => setSelectedProvider(provider)} // Implementar lógica para seleccionar proveedor
           />
         )
@@ -136,7 +136,6 @@ export function MapDisplay() {
   const [, setIsMapComponentLoaded] = useState(false); // Para seguir si el componente mapa se cargó
   const [isMapApiLoadingError, setIsMapApiLoadingError] = useState<string | null>(null);
 
-  // Moved libraries declaration inside the component
   const libraries: ("places" | "drawing" | "geometry" | "localContext" | "visualization")[] = useMemo(() => ['places'], []);
 
   // TEMPORARY HARDCODED API KEY - REMOVE FOR PRODUCTION AND USE .env
@@ -180,14 +179,17 @@ export function MapDisplay() {
   useEffect(() => {
     if (userLocation) {
       setMapCenter(userLocation);
-      setMapZoom(14); // Zoom más cercano cuando se tiene la ubicación del usuario
+      setMapZoom(14); 
       // Simular búsqueda de plomeros si la ubicación del usuario está disponible
-      setProvidersToDisplay(mockPlumbers.filter(p => p.location)); // Asegurarse que los proveedores tengan ubicación
+      // Ordenar proveedores por calificación (descendente)
+      const sortedPlumbers = [...mockPlumbers]
+        .filter(p => p.location) // Asegurarse que los proveedores tengan ubicación
+        .sort((a, b) => b.rating - a.rating);
+      setProvidersToDisplay(sortedPlumbers);
     } else {
-      // Si no hay ubicación del usuario, resetear mapa y proveedores (o mantener proveedores por defecto si se desea)
       setMapCenter(defaultCenter);
       setMapZoom(10);
-      setProvidersToDisplay([]); // O `mockPlumbers` si quieres mostrar algo por defecto
+      setProvidersToDisplay([]); 
     }
   }, [userLocation]);
 

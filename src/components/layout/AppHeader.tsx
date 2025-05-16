@@ -2,7 +2,7 @@
 "use client";
 
 import Link from 'next/link';
-import { Menu, Package2, UserCircle, Globe } from 'lucide-react';
+import { Menu, Package2, UserCircle, Globe, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import {
@@ -12,13 +12,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuGroup,
 } from '@/components/ui/dropdown-menu';
 import Image from 'next/image';
-import { DEFAULT_USER_AVATAR } from '@/lib/constants';
+import { DEFAULT_USER_AVATAR, SERVICE_CATEGORIES } from '@/lib/constants';
 import React, { useState } from 'react';
 
 const navLinks = [
-  // { href: "/client", label: "Buscar Servicios" }, // Eliminado
   { href: "/provider", label: "Ofrecer Servicios" },
   { href: "/chat", label: "Demo de Chat" },
 ];
@@ -33,6 +33,11 @@ export function AppHeader() {
     alert(`Simulación: Idioma cambiado a ${currentLanguage === 'ES' ? 'Inglés' : 'Español'}.\nLa traducción completa de la interfaz requiere un sistema i18n.`);
   };
 
+  const handleCategorySelect = (categoryName: string) => {
+    alert(`Categoría seleccionada: ${categoryName}. (Funcionalidad de filtrado pendiente)`);
+    // Aquí se podría implementar la lógica para filtrar servicios por categoría
+  };
+
   return (
     <header className="sticky top-0 z-50 flex h-16 items-center gap-4 border-b bg-background px-4 md:px-6 shadow-sm">
       <nav className="hidden flex-col gap-6 text-lg font-medium md:flex md:flex-row md:items-center md:gap-5 md:text-sm lg:gap-6">
@@ -44,6 +49,31 @@ export function AppHeader() {
           <span className="sr-only">ServiMap</span>
           ServiMap
         </Link>
+
+        {/* Dropdown de Categorías */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" className="text-foreground/80 transition-colors hover:text-foreground hover:bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0">
+              Categorías <ChevronDown className="ml-1 h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuLabel>Explorar por Categoría</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+            {SERVICE_CATEGORIES.map((category) => {
+              const IconComponent = category.icon;
+              return (
+                <DropdownMenuItem key={category.id} onClick={() => handleCategorySelect(category.name)}>
+                  <IconComponent className="mr-2 h-4 w-4 text-muted-foreground" />
+                  <span>{category.name}</span>
+                </DropdownMenuItem>
+              );
+            })}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         {navLinks.map((link) => (
           <Link
             key={link.href}
@@ -75,6 +105,31 @@ export function AppHeader() {
               <span className="sr-only">ServiMap</span>
               ServiMap
             </Link>
+            
+            {/* Dropdown de Categorías para móvil */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="flex items-center justify-start text-muted-foreground hover:text-foreground w-full text-left">
+                  Categorías <ChevronDown className="ml-auto h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-full">
+                 <DropdownMenuLabel>Explorar por Categoría</DropdownMenuLabel>
+                 <DropdownMenuSeparator />
+                 <DropdownMenuGroup>
+                {SERVICE_CATEGORIES.map((category) => {
+                  const IconComponent = category.icon;
+                  return (
+                    <DropdownMenuItem key={category.id} onClick={() => handleCategorySelect(category.name)}>
+                       <IconComponent className="mr-2 h-4 w-4 text-muted-foreground" />
+                      <span>{category.name}</span>
+                    </DropdownMenuItem>
+                  );
+                })}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             {navLinks.map((link) => (
               <Link
                 key={link.href}
