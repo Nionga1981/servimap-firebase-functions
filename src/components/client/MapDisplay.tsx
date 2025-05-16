@@ -1,14 +1,14 @@
 
 "use client";
 
-import Image from 'next/image';
+import { GoogleMap, LoadScript, MarkerF } from '@react-google-maps/api';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { MapPinned, Search, LocateFixed, AlertTriangle } from 'lucide-react';
+import { MapPinned, Search, LocateFixed, AlertTriangle, WifiOff } from 'lucide-react';
 import type { Provider } from '@/types';
 import { ProviderPreviewCard } from './ProviderPreviewCard';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 
 // Mock plumbers for demoing the "3 plumbers nearby" scenario
 const mockPlumbers: Provider[] = [
@@ -47,22 +47,37 @@ const mockPlumbers: Provider[] = [
   },
 ];
 
+const mapContainerStyle = {
+  width: '100%',
+  height: '100%',
+};
+
+const defaultCenter = {
+  lat: 34.0522, // Los Angeles
+  lng: -118.2437
+};
+
+const libraries: ("places" | "drawing" | "geometry" | "localContext" | "visualization")[] = ['places'];
+
 export function MapDisplay() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isLoadingLocation, setIsLoadingLocation] = useState(true);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [providersToDisplay, setProvidersToDisplay] = useState<Provider[]>([]);
-  // const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number }>({ lat: 34.0522, lng: -118.2437 }); // Default center
+  const [mapCenter, setMapCenter] = useState(defaultCenter);
+  const [mapZoom, setMapZoom] = useState(10);
+
+  const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
   useEffect(() => {
     handleRequestUserLocation();
   }, []);
 
   useEffect(() => {
-    // Simulate finding plumbers when location is available FOR THIS PREVIEW
     if (userLocation) {
-      // In a real app, this would be the result of an API call filtering by "plumbing" and location.
-      // For this demo, we directly use the mockPlumbers.
+      setMapCenter(userLocation);
+      setMapZoom(14); // Zoom in when user location is available
+      // Simulate finding plumbers when location is available
       setProvidersToDisplay(mockPlumbers);
     } else {
       setProvidersToDisplay([]);
@@ -80,16 +95,15 @@ export function MapDisplay() {
             lng: position.coords.longitude,
           };
           setUserLocation(coords);
-          // setMapCenter(coords); // Not strictly needed for placeholder updates
           setIsLoadingLocation(false);
         },
         (error) => {
-          setLocationError(`Error getting location: ${error.message}`);
+          setLocationError(`Error obteniendo ubicación: ${error.message}`);
           setIsLoadingLocation(false);
         }
       );
     } else {
-      setLocationError("Geolocation is not supported by this browser.");
+      setLocationError("La geolocalización no es compatible con este navegador.");
       setIsLoadingLocation(false);
     }
   };
@@ -97,41 +111,43 @@ export function MapDisplay() {
   const handleSearchAtMyLocation = () => {
     if (userLocation) {
       alert(`Buscando servicios cerca de tu ubicación: ${userLocation.lat.toFixed(4)}, ${userLocation.lng.toFixed(4)}. (Simulación: mostrando plomeros de ejemplo)`);
-      // For demo, we've already set mockPlumbers if userLocation is available.
-      // In a real app, this would trigger a new search or filter.
-      setProvidersToDisplay(mockPlumbers);
+      setProvidersToDisplay(mockPlumbers); // For demo, re-set mockPlumbers
+      setMapCenter(userLocation);
+      setMapZoom(14);
     }
   };
 
-  let mapPlaceholderText = "Map Area. Interactive map coming soon!";
-  let mapDataAiHint = "map city providers";
-
-  if (isLoadingLocation) {
-    mapPlaceholderText = "Getting your location...";
-    mapDataAiHint = "loading map";
-  } else if (locationError) {
-    mapPlaceholderText = `Error de Ubicación: ${locationError.substring(0,50)}`;
-    mapDataAiHint = "map error";
-  } else if (userLocation) {
-    // Check if the providersToDisplay are plumbers (for this specific simulation)
-    const activePlumbers = providersToDisplay.filter(p => p.services.some(s => s.category === 'plumbing'));
-    if (activePlumbers.length > 0) {
-      mapPlaceholderText = `Tu Ubicación (${activePlumbers.length} Plomero${activePlumbers.length === 1 ? '' : 's'} Cerca)`;
-      mapDataAiHint = "map user location plumbers";
-    } else if (providersToDisplay.length > 0) { // Some other providers might be shown if search changes
-        mapPlaceholderText = `Tu Ubicación (${providersToDisplay.length} Proveedores Cerca)`;
-        mapDataAiHint = "map user location providers";
-    }
-    else {
-      mapPlaceholderText = `Tu Ubicación: ${userLocation.lat.toFixed(2)}, ${userLocation.lng.toFixed(2)} (No se encontraron plomeros en esta demo)`;
-      mapDataAiHint = "map user location";
-    }
-  } else {
-    mapPlaceholderText = "Área del Mapa. Permite tu ubicación o busca.";
-    mapDataAiHint = "map city default";
-  }
-  
-  const mapImageUrl = `https://placehold.co/800x500.png?text=${encodeURIComponent(mapPlaceholderText)}`;
+  const MapContent = () => (
+    <GoogleMap
+      mapContainerStyle={mapContainerStyle}
+      center={mapCenter}
+      zoom={mapZoom}
+      options={{
+        streetViewControl: false,
+        mapTypeControl: false,
+        fullscreenControl: false,
+      }}
+    >
+      {userLocation && (
+        <MarkerF
+          position={userLocation}
+          title="Tu ubicación"
+          // icon={{ url: '/user-marker.png', scaledSize: new window.google.maps.Size(30,30) }} // Example custom icon
+        />
+      )}
+      {providersToDisplay.map(provider => 
+        provider.location && (
+          <MarkerF
+            key={provider.id}
+            position={provider.location}
+            title={provider.name}
+            // icon={{ url: provider.isAvailable ? '/available-marker.png' : '/unavailable-marker.png' }} // Example conditional icon
+            onClick={() => alert(`Abrir perfil de ${provider.name}`)}
+          />
+        )
+      )}
+    </GoogleMap>
+  );
 
   return (
     <Card className="shadow-xl overflow-hidden">
@@ -155,42 +171,51 @@ export function MapDisplay() {
         </div>
       </CardHeader>
       <CardContent className="p-0 md:flex">
-        <div className="md:w-2/3 h-[400px] md:h-[500px] relative bg-muted flex items-center justify-center">
-          <Image
-            src={mapImageUrl}
-            alt={mapPlaceholderText}
-            layout="fill"
-            objectFit="cover"
-            data-ai-hint={mapDataAiHint}
-            className={isLoadingLocation || locationError ? "opacity-70" : "opacity-50"}
-          />
-           <div className="absolute inset-0 flex items-center justify-center p-4">
-             {isLoadingLocation && (
-                <div className="text-center p-4 bg-background/80 rounded-md shadow-lg">
+        <div className="md:w-2/3 h-[400px] md:h-[500px] relative bg-muted flex items-center justify-center text-foreground">
+          {!googleMapsApiKey ? (
+            <div className="text-center p-4 bg-destructive/20 text-destructive-foreground rounded-md shadow-lg max-w-md">
+              <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
+              <p className="text-lg font-semibold">Configuración Requerida</p>
+              <p className="text-sm">Por favor, configura la variable de entorno `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` para mostrar el mapa.</p>
+            </div>
+          ) : (
+            <LoadScript
+              googleMapsApiKey={googleMapsApiKey}
+              libraries={libraries}
+              loadingElement={
+                <div className="text-center p-4">
                   <LocateFixed className="h-8 w-8 text-primary animate-ping mx-auto mb-2" />
-                  <p className="text-lg font-semibold text-foreground">Obteniendo tu ubicación...</p>
+                  <p className="text-lg font-semibold">Cargando Mapa...</p>
                 </div>
-             )}
-             {locationError && !isLoadingLocation && (
-                <div className="text-center p-4 bg-destructive/20 text-destructive-foreground rounded-md shadow-lg max-w-md">
-                  <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
-                  <p className="text-lg font-semibold">Error de Ubicación</p>
-                  <p className="text-sm">{locationError}</p>
-                  <Button onClick={handleRequestUserLocation} variant="secondary" size="sm" className="mt-2">Reintentar</Button>
+              }
+            >
+              {isLoadingLocation && !userLocation && (
+                <div className="absolute inset-0 flex items-center justify-center p-4 bg-background/80 z-10">
+                  <div className="text-center p-4 rounded-md shadow-lg">
+                    <LocateFixed className="h-8 w-8 text-primary animate-ping mx-auto mb-2" />
+                    <p className="text-lg font-semibold text-foreground">Obteniendo tu ubicación...</p>
+                  </div>
                 </div>
-             )}
-             {!isLoadingLocation && !locationError && !userLocation && (
-                <div className="text-center p-4 bg-background/80 rounded-md shadow-lg">
-                    <p className="text-xl font-semibold text-foreground/70">Permite el acceso a tu ubicación o usa el botón "Obtener mi ubicación".</p>
-                </div>
-             )}
-           </div>
+              )}
+              {locationError && !isLoadingLocation && (
+                 <div className="absolute inset-0 flex items-center justify-center p-4 bg-destructive/20 z-10">
+                    <div className="text-center p-4 text-destructive-foreground rounded-md shadow-lg max-w-md">
+                    <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
+                    <p className="text-lg font-semibold">Error de Ubicación</p>
+                    <p className="text-sm">{locationError}</p>
+                    <Button onClick={handleRequestUserLocation} variant="secondary" size="sm" className="mt-2">Reintentar</Button>
+                    </div>
+                 </div>
+              )}
+              <MapContent />
+            </LoadScript>
+          )}
         </div>
         <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-[500px] md:overflow-y-auto space-y-4">
           <Button 
             className="w-full" 
             onClick={handleSearchAtMyLocation} 
-            disabled={!userLocation || isLoadingLocation}
+            disabled={!userLocation || isLoadingLocation || !googleMapsApiKey}
           >
             <Search className="mr-2 h-4 w-4" />
             Buscar servicios en mi ubicación
@@ -205,22 +230,29 @@ export function MapDisplay() {
               <ProviderPreviewCard 
                 key={provider.id} 
                 provider={provider} 
-                onSelectProvider={() => alert(`Ver perfil de ${provider.name} (simulación)`)}
+                onSelectProvider={(providerId) => alert(`Ver perfil de ${provider.name} (ID: ${providerId})`)}
               />
             ))
           ) : (
-            !isLoadingLocation && !locationError && userLocation && ( // Only show if location is available but no providers
+            !isLoadingLocation && !locationError && userLocation && googleMapsApiKey && (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
                 <p>No se encontraron plomeros para esta simulación. En una app real, aquí verías resultados o un mensaje de "no encontrado".</p>
               </div>
             )
           )}
-           {!isLoadingLocation && !locationError && !userLocation && ( // Message when location is not yet available
+           {!isLoadingLocation && !locationError && !userLocation && googleMapsApiKey && (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
                 <p>Obtén tu ubicación para ver proveedores cercanos.</p>
               </div>
             )
           }
+           {!googleMapsApiKey && (
+              <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
+                <WifiOff className="h-8 w-8 mx-auto mb-2 text-destructive" />
+                <p className="font-semibold">Mapa no disponible.</p>
+                <p className="text-sm">Por favor, configura la API key de Google Maps.</p>
+              </div>
+           )}
         </div>
       </CardContent>
     </Card>
