@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { GoogleMap, LoadScript, MarkerF } from '@react-google-maps/api';
+import { GoogleMap, MarkerF, useJsApiLoader } from '@react-google-maps/api';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -45,7 +45,7 @@ const mockPlumbers: Provider[] = [
     name: 'Fontanería Princesa Peach',
     avatarUrl: 'https://placehold.co/100x100.png?text=PP',
     dataAiHint: 'friendly professional',
-    rating: 4.8, // Cambiado para que no sea el más alto y probar el ordenamiento
+    rating: 4.8,
     isAvailable: false, 
     services: [{
       id: 's_p3', title: 'Desatascos Profesionales', description: 'Tuberías como nuevas.', price: 120, category: 'plumbing', providerId: 'plumber3', imageUrl: 'https://placehold.co/300x200.png?text=Desatascos', dataAiHint: 'clear drains'
@@ -60,11 +60,10 @@ const mapContainerStyle: React.CSSProperties = {
 };
 
 const defaultCenter = {
-  lat: 34.0522, // Los Angeles (Ejemplo, idealmente centrado en la región del usuario)
+  lat: 34.0522, 
   lng: -118.2437
 };
 
-// Define MapContentComponent outside MapDisplay
 const MapContentComponent = React.memo(({
   center,
   zoom,
@@ -89,9 +88,6 @@ const MapContentComponent = React.memo(({
         streetViewControl: false,
         mapTypeControl: false,
         fullscreenControl: false,
-        // Considerar deshabilitar zoom y scroll si es solo visualización
-        // gestureHandling: 'none', 
-        // zoomControl: false,
       }}
       onLoad={onLoad}
       onUnmount={onUnmount}
@@ -103,7 +99,7 @@ const MapContentComponent = React.memo(({
           icon={{
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
-            fillColor: "#4285F4", // Google Blue
+            fillColor: "#4285F4", 
             fillOpacity: 1,
             strokeWeight: 2,
             strokeColor: "white",
@@ -111,12 +107,11 @@ const MapContentComponent = React.memo(({
         />
       )}
       {providersToDisplay.map(provider =>
-        provider.location && provider.isAvailable && ( // Solo mostrar proveedores disponibles con ubicación
+        provider.location && provider.isAvailable && ( 
           <MarkerF
             key={provider.id}
             position={provider.location}
             title={`${provider.name} (Calificación: ${provider.rating})`}
-            // onClick={() => setSelectedProvider(provider)} // Implementar lógica para seleccionar proveedor
           />
         )
       )}
@@ -132,18 +127,26 @@ export function MapDisplay() {
   const [locationError, setLocationError] = useState<string | null>(null);
   const [providersToDisplay, setProvidersToDisplay] = useState<Provider[]>([]);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
-  const [mapZoom, setMapZoom] = useState(10); // Zoom inicial más alejado
-  const [, setIsMapComponentLoaded] = useState(false); // Para seguir si el componente mapa se cargó
-  const [isMapApiLoadingError, setIsMapApiLoadingError] = useState<string | null>(null);
+  const [mapZoom, setMapZoom] = useState(10);
+  const [, setIsMapComponentLoaded] = useState(false); 
 
-  const libraries: ("places" | "drawing" | "geometry" | "localContext" | "visualization")[] = useMemo(() => ['places'], []);
+  const libraries = useMemo(() => ['places'] as const, []);
 
   // TEMPORARY HARDCODED API KEY - REMOVE FOR PRODUCTION AND USE .env
   const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU"; 
-  // const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   
   console.log('[MapDisplay Component] Using hardcoded googleMapsApiKey value:', googleMapsApiKey);
   console.log('[MapDisplay Component] Value from process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY (for comparison):', process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
+
+  const { isLoaded: isMapApiLoaded, loadError: mapApiLoadError } = useJsApiLoader(
+    googleMapsApiKey
+      ? {
+          googleMapsApiKey: googleMapsApiKey,
+          libraries: libraries,
+          id: 'google-map-script' // Prevent multiple script loads
+        }
+      : { skip: true } // Skip loading if API key is not present
+  );
 
 
   const handleRequestUserLocation = useCallback(() => {
@@ -180,10 +183,8 @@ export function MapDisplay() {
     if (userLocation) {
       setMapCenter(userLocation);
       setMapZoom(14); 
-      // Simular búsqueda de plomeros si la ubicación del usuario está disponible
-      // Ordenar proveedores por calificación (descendente)
       const sortedPlumbers = [...mockPlumbers]
-        .filter(p => p.location) // Asegurarse que los proveedores tengan ubicación
+        .filter(p => p.location) 
         .sort((a, b) => b.rating - a.rating);
       setProvidersToDisplay(sortedPlumbers);
     } else {
@@ -204,12 +205,6 @@ export function MapDisplay() {
     setIsMapComponentLoaded(false);
   }, []);
 
-  const onLoadScriptError = useCallback((error: Error) => {
-    console.error("Error al cargar LoadScript:", error);
-    setIsMapApiLoadingError(`Error al cargar la API de Google Maps: ${error.message}. Revisa la consola y la configuración de tu API Key.`);
-  }, []);
-
-
   const renderMapArea = () => {
     if (!googleMapsApiKey) {
       return (
@@ -221,56 +216,52 @@ export function MapDisplay() {
       );
     }
     
-    if (isMapApiLoadingError) {
+    if (mapApiLoadError) {
        return (
         <div className="flex flex-col items-center justify-center h-full text-destructive p-4 bg-destructive/10 rounded-md">
           <WifiOff className="h-12 w-12 mb-4" />
           <p className="text-lg font-semibold mb-2">Error Cargando Google Maps</p>
-          <p className="text-sm text-center">{isMapApiLoadingError}</p>
+          <p className="text-sm text-center">Error al cargar la API de Google Maps: {mapApiLoadError.message}. Revisa la consola y la configuración de tu API Key.</p>
         </div>
       );
     }
 
+    if (!isMapApiLoaded) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-primary p-4">
+          <Loader2 className="h-12 w-12 animate-spin mb-4" />
+          <p className="text-lg font-semibold">Cargando Mapa...</p>
+          <p className="text-sm text-muted-foreground">Esto puede tardar unos segundos.</p>
+        </div>
+      );
+    }
+
+    // API is loaded, render the map and overlays
     return (
-      <LoadScript
-        googleMapsApiKey={googleMapsApiKey}
-        libraries={libraries}
-        loadingElement={
-          <div className="flex flex-col items-center justify-center h-full text-primary p-4">
-            <Loader2 className="h-12 w-12 animate-spin mb-4" />
-            <p className="text-lg font-semibold">Cargando Mapa...</p>
-            <p className="text-sm text-muted-foreground">Esto puede tardar unos segundos.</p>
+      <>
+        {isLoadingLocation && !userLocation && !locationError && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-background/80 z-10">
+            <Loader2 className="h-8 w-8 text-primary animate-spin mb-2" />
+            <p className="text-lg font-semibold text-foreground">Obteniendo tu ubicación...</p>
           </div>
-        }
-        onError={onLoadScriptError}
-      >
-        <>
-          {/* Indicador de carga de ubicación */}
-          {isLoadingLocation && !userLocation && !locationError && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-background/80 z-10">
-              <Loader2 className="h-8 w-8 text-primary animate-spin mb-2" />
-              <p className="text-lg font-semibold text-foreground">Obteniendo tu ubicación...</p>
-            </div>
-          )}
-          {/* Mensaje de error de ubicación */}
-          {locationError && !userLocation && (
-             <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-destructive/20 z-10 text-center">
-                <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
-                <p className="text-lg font-semibold text-destructive-foreground">Error de Ubicación</p>
-                <p className="text-sm text-destructive-foreground px-4">{locationError}</p>
-                <Button onClick={handleRequestUserLocation} variant="secondary" size="sm" className="mt-3">Reintentar Obtener Ubicación</Button>
-             </div>
-          )}
-           <MapContentComponent
-             center={mapCenter}
-             zoom={mapZoom}
-             onLoad={onMapLoadCallback}
-             onUnmount={onMapUnmountCallback}
-             userLocation={userLocation}
-             providersToDisplay={providersToDisplay}
-           />
-        </>
-      </LoadScript>
+        )}
+        {locationError && !userLocation && (
+           <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-destructive/20 z-10 text-center">
+              <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
+              <p className="text-lg font-semibold text-destructive-foreground">Error de Ubicación</p>
+              <p className="text-sm text-destructive-foreground px-4">{locationError}</p>
+              <Button onClick={handleRequestUserLocation} variant="secondary" size="sm" className="mt-3">Reintentar Obtener Ubicación</Button>
+           </div>
+        )}
+         <MapContentComponent
+           center={mapCenter}
+           zoom={mapZoom}
+           onLoad={onMapLoadCallback}
+           onUnmount={onMapUnmountCallback}
+           userLocation={userLocation}
+           providersToDisplay={providersToDisplay}
+         />
+      </>
     );
   };
 
@@ -300,8 +291,7 @@ export function MapDisplay() {
           {renderMapArea()}
         </div>
         <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-[500px] md:overflow-y-auto space-y-4">
-          {/* Mensajes informativos en el panel derecho */}
-          {(!googleMapsApiKey || isMapApiLoadingError || (locationError && !userLocation)) && (
+          {(!googleMapsApiKey || mapApiLoadError || (locationError && !userLocation)) && (
             <div className="flex flex-col items-center justify-center text-muted-foreground p-4 text-center">
               {!googleMapsApiKey && (
                 <>
@@ -310,14 +300,14 @@ export function MapDisplay() {
                   <p className="text-sm">API Key no configurada.</p>
                 </>
               )}
-              {isMapApiLoadingError && googleMapsApiKey && (
+              {mapApiLoadError && googleMapsApiKey && (
                  <>
                   <WifiOff className="h-8 w-8 mx-auto mb-2 text-destructive" />
                   <p className="font-semibold">Error al cargar el mapa.</p>
-                  <p className="text-sm">{isMapApiLoadingError.split('.')[0]}.</p>
+                  <p className="text-sm">{mapApiLoadError.message.split('.')[0]}.</p>
                 </>
               )}
-              {(locationError && !userLocation && googleMapsApiKey && !isMapApiLoadingError) && (
+              {(locationError && !userLocation && googleMapsApiKey && !mapApiLoadError) && (
                 <>
                   <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-destructive" />
                   <p className="font-semibold">Problema con la ubicación</p>
@@ -328,7 +318,7 @@ export function MapDisplay() {
             </div>
           )}
 
-          {providersToDisplay.length > 0 && googleMapsApiKey && !isMapApiLoadingError ? (
+          {providersToDisplay.length > 0 && googleMapsApiKey && isMapApiLoaded && !mapApiLoadError ? (
             providersToDisplay.map(provider => (
               <ProviderPreviewCard
                 key={provider.id}
@@ -337,15 +327,13 @@ export function MapDisplay() {
               />
             ))
           ) : (
-            // Mensaje si no hay proveedores Y NO hay errores Y se tiene ubicación
-            !isLoadingLocation && userLocation && googleMapsApiKey && !isMapApiLoadingError && providersToDisplay.length === 0 && (
+            !isLoadingLocation && userLocation && googleMapsApiKey && isMapApiLoaded && !mapApiLoadError && providersToDisplay.length === 0 && (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
                 <p>No se encontraron proveedores para esta simulación en tu ubicación actual.</p>
               </div>
             )
           )}
-           {/* Mensaje si no hay ubicación (y no hay errores de carga de mapa o API key) */}
-           {!isLoadingLocation && !userLocation && !locationError && googleMapsApiKey && !isMapApiLoadingError && providersToDisplay.length === 0 && (
+           {!isLoadingLocation && !userLocation && !locationError && googleMapsApiKey && isMapApiLoaded && !mapApiLoadError && providersToDisplay.length === 0 && (
               <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
                 <p>Obtén tu ubicación para ver proveedores cercanos o intenta una búsqueda manual.</p>
               </div>
