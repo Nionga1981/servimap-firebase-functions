@@ -138,7 +138,7 @@ const MapContentComponent = React.memo(({
           icon={{
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
-            fillColor: "#4285F4", // Primary blue
+            fillColor: "hsl(var(--primary))",
             fillOpacity: 1,
             strokeWeight: 2,
             strokeColor: "white",
@@ -168,12 +168,13 @@ export function MapDisplay() {
   const [displayedProviders, setDisplayedProviders] = useState<Provider[]>([]);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [mapZoom, setMapZoom] = useState(10);
-  const [, setIsMapComponentLoaded] = useState(false);
+  const [, setIsMapComponentLoaded] = useState(false); // Keep for map load/unmount logging
+  const [providersVisible, setProvidersVisible] = useState(false); // New state
 
   const libraries = useMemo(() => ['places'] as const, []);
 
   // TEMPORARY HARDCODED API KEY - REMOVE FOR PRODUCTION AND USE .env
-  const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU";
+  const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU"; 
   // const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
 
@@ -192,9 +193,14 @@ export function MapDisplay() {
   );
 
 
-  const handleRequestUserLocation = useCallback(() => {
+  const handleRequestUserLocation = useCallback((isUserInitiated: boolean = false) => {
     setIsLoadingLocation(true);
     setLocationError(null);
+    if (isUserInitiated) { // Only clear providers if user explicitly requests location
+        setProvidersVisible(false); 
+        // setDisplayedProviders([]); // Optionally clear providers immediately
+    }
+
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -205,28 +211,35 @@ export function MapDisplay() {
           setUserLocation(coords);
           setIsLoadingLocation(false);
           console.log("Ubicación del usuario obtenida:", coords);
+          
           // Simulate finding providers after location is obtained
           // Sort all mock providers by rating
           const sortedProviders = [...mockProviders]
             .sort((a, b) => b.rating - a.rating);
           setDisplayedProviders(sortedProviders);
+          if (isUserInitiated) {
+            setProvidersVisible(true);
+          }
         },
         (error) => {
           console.error("Error de geolocalización:", error);
           setLocationError(`Error obteniendo ubicación: ${error.message}. Por favor, habilita los permisos de ubicación.`);
           setIsLoadingLocation(false);
-          setDisplayedProviders([]); // Clear providers on error
+          setDisplayedProviders([]); 
+          setProvidersVisible(false);
         }
       );
     } else {
       setLocationError("La geolocalización no es compatible con este navegador.");
       setIsLoadingLocation(false);
-      setDisplayedProviders([]); // Clear providers if not supported
+      setDisplayedProviders([]); 
+      setProvidersVisible(false);
     }
-  }, []);
+  }, []); // Empty dependency array, as it doesn't depend on component state/props that change
 
   useEffect(() => {
-    handleRequestUserLocation();
+    // Request location on initial load, but don't make providers visible yet
+    handleRequestUserLocation(false); 
   }, [handleRequestUserLocation]);
 
   useEffect(() => {
@@ -294,7 +307,7 @@ export function MapDisplay() {
               <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
               <p className="text-lg font-semibold text-destructive-foreground">Error de Ubicación</p>
               <p className="text-sm text-destructive-foreground px-4">{locationError}</p>
-              <Button onClick={handleRequestUserLocation} variant="secondary" size="sm" className="mt-3">Reintentar Obtener Ubicación</Button>
+              <Button onClick={() => handleRequestUserLocation(true)} variant="secondary" size="sm" className="mt-3">Reintentar Obtener Ubicación</Button>
            </div>
         )}
          <MapContentComponent
@@ -303,13 +316,13 @@ export function MapDisplay() {
            onLoad={onMapLoadCallback}
            onUnmount={onMapUnmountCallback}
            userLocation={userLocation}
-           providersToDisplay={displayedProviders} // Pass all sorted providers to map component
+           providersToDisplay={displayedProviders} 
          />
       </>
     );
   };
 
-  const showProviderList = displayedProviders.length > 0 && isMapApiLoaded && !mapApiLoadError && !isLoadingLocation;
+  const showProviderList = providersVisible && displayedProviders.length > 0 && isMapApiLoaded && !mapApiLoadError && !isLoadingLocation;
 
   return (
     <Card className="shadow-xl overflow-hidden h-full flex flex-col">
@@ -319,7 +332,7 @@ export function MapDisplay() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input type="search" placeholder="Buscar servicio, nombre, categoría..." className="pl-8 w-full" />
           </div>
-          <Button variant="outline" onClick={handleRequestUserLocation} disabled={isLoadingLocation} className="w-full sm:w-auto flex-shrink-0">
+          <Button variant="outline" onClick={() => handleRequestUserLocation(true)} disabled={isLoadingLocation} className="w-full sm:w-auto flex-shrink-0">
             <LocateFixed className={`mr-2 h-4 w-4 ${isLoadingLocation ? 'animate-spin' : ''}`} />
             {isLoadingLocation ? "Localizando..." : userLocation ? "Actualizar Ubicación" : "Obtener Mi Ubicación"}
           </Button>
@@ -335,7 +348,7 @@ export function MapDisplay() {
         {showProviderList && (
           <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-full md:overflow-y-auto space-y-4">
             <h3 className="text-lg font-semibold text-primary mb-2">Proveedores Cercanos:</h3>
-            {displayedProviders.map(provider => ( // Display all sorted providers
+            {displayedProviders.map(provider => ( 
                 <ProviderPreviewCard
                   key={provider.id}
                   provider={provider}
@@ -366,11 +379,14 @@ export function MapDisplay() {
                   <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-destructive" />
                   <p className="font-semibold">Problema con la ubicación</p>
                   <p className="text-sm">{locationError.split('.')[0]}.</p>
-                  <Button onClick={handleRequestUserLocation} variant="link" size="sm">Reintentar</Button>
+                  <Button onClick={() => handleRequestUserLocation(true)} variant="link" size="sm">Reintentar</Button>
                 </>
               )}
-               {!isLoadingLocation && !locationError && !mapApiLoadError && displayedProviders.length === 0 && (
-                 <p className="text-center">No se encontraron proveedores o no hay ubicación.</p>
+               {!isLoadingLocation && !locationError && !mapApiLoadError && displayedProviders.length === 0 && !providersVisible && (
+                 <p className="text-center text-muted-foreground">Haz clic en "Obtener Mi Ubicación" o realiza una búsqueda para ver proveedores.</p>
+               )}
+                {!isLoadingLocation && !locationError && !mapApiLoadError && displayedProviders.length === 0 && providersVisible && (
+                 <p className="text-center text-muted-foreground">No se encontraron proveedores para tu búsqueda actual.</p>
                )}
             </div>
          )}
@@ -378,6 +394,4 @@ export function MapDisplay() {
     </Card>
   );
 }
-
-
     
