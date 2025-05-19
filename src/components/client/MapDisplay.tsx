@@ -4,12 +4,12 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleMap, MarkerF, useJsApiLoader } from '@react-google-maps/api';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { MapPinned, Search, AlertTriangle, WifiOff, Loader2, Baby, Wrench, Zap } from 'lucide-react';
+import { MapPinned, Search, AlertTriangle, WifiOff, Loader2, Baby, Wrench, Zap, Sparkles, Flower2, Palette, Hammer, Briefcase, Cog } from 'lucide-react';
 import type { Provider } from '@/types';
 import { ProviderPreviewCard } from './ProviderPreviewCard';
 import { cn } from "@/lib/utils";
 import { SERVICE_CATEGORIES } from '@/lib/constants';
-import { USER_FIXED_LOCATION, mockProviders } from '@/lib/mockData'; // Importar desde mockData
+import { USER_FIXED_LOCATION, mockProviders } from '@/lib/mockData';
 
 const apiKeyFromEnv = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 console.log('[MapDisplay Module] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:', apiKeyFromEnv);
@@ -20,50 +20,14 @@ const mapContainerStyle: React.CSSProperties = {
   height: '100%',
 };
 
-// Estilo para ocultar POIs
+// Estilo para ocultar POIs y controles
 const mapStyles: google.maps.MapTypeStyle[] = [
-  { featureType: "poi", stylers: [{ visibility: "off" }] }, // Oculta todos los POI
-  { featureType: "transit", stylers: [{ visibility: "off" }] }, // Oculta estaciones de tránsito
-  // Puedes ser más específico si quieres ocultar solo algunos tipos de POI
-  // { featureType: "poi.business", stylers: [{ visibility: "off" }] },
-  // { featureType: "poi.attraction", stylers: [{ visibility: "off" }] },
-  // { featureType: "poi.government", stylers: [{ visibility: "off" }] },
-  // { featureType: "poi.medical", stylers: [{ visibility: "off" }] },
-  // { featureType: "poi.park", elementType: "labels.icon", stylers: [{ visibility: "off" }] },
-  // { featureType: "poi.place_of_worship", stylers: [{ visibility: "off" }] },
-  // { featureType: "poi.school", stylers: [{ visibility: "off" }] },
-  // { featureType: "poi.sports_complex", stylers: [{ visibility: "off" }] },
-  { // Reduce la prominencia de algunas carreteras
-    featureType: "road.arterial",
-    elementType: "labels",
-    stylers: [{ visibility: "on" }], // Mantén las etiquetas de las carreteras principales
-  },
-  {
-    featureType: "road.highway",
-    elementType: "labels",
-    stylers: [{ visibility: "on" }], // Mantén las etiquetas de las autopistas
-  },
-  {
-    featureType: "road.local",
-    elementType: "labels",
-    stylers: [{ visibility: "off" }], // Oculta etiquetas de calles locales si deseas máxima limpieza
-  },
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+  { featureType: "road.arterial", elementType: "labels", stylers: [{ visibility: "on" }] },
+  { featureType: "road.highway", elementType: "labels", stylers: [{ visibility: "on" }] },
+  { featureType: "road.local", elementType: "labels", stylers: [{ visibility: "off" }] },
 ];
-
-
-// Función para calcular la distancia (Haversine)
-const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-  const R = 6371; // Radio de la Tierra en km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c; // Distancia en km
-};
-
 
 // Define MapContentComponent outside MapDisplay
 const MapContentComponent = React.memo(({
@@ -91,11 +55,11 @@ const MapContentComponent = React.memo(({
         streetViewControl: false,
         mapTypeControl: false,
         fullscreenControl: false,
-        zoomControl: false, // Oculto para limpieza máxima
-        rotateControl: false, // Oculto
-        scaleControl: false, // Oculto
-        clickableIcons: false, // Oculto
-        styles: mapStyles, // Aplicar estilos personalizados aquí
+        zoomControl: false,
+        rotateControl: false,
+        scaleControl: false,
+        clickableIcons: false,
+        styles: mapStyles,
       }}
       onLoad={onLoad}
       onUnmount={onUnmount}
@@ -107,7 +71,7 @@ const MapContentComponent = React.memo(({
           icon={{
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
-            fillColor: "hsl(var(--primary))", // Azul primario del tema
+            fillColor: "hsl(var(--primary))",
             fillOpacity: 1,
             strokeWeight: 2,
             strokeColor: "white",
@@ -119,9 +83,8 @@ const MapContentComponent = React.memo(({
           <MarkerF
             key={provider.id}
             position={provider.location}
-            title={`${provider.name} (Calificación: ${provider.rating})`}
+            title={`${provider.name} (Calificación: ${provider.rating.toFixed(1)})`}
             // Iconos personalizados por categoría se implementarían aquí en el futuro
-            // Ejemplo: icon={getCategoryIconUrl(provider.services[0].category)}
           />
         )
       })}
@@ -132,11 +95,11 @@ MapContentComponent.displayName = 'MapContentComponent';
 
 
 export function MapDisplay() {
-  const userLocation = USER_FIXED_LOCATION; // Usar la ubicación fija de Culiacán
+  const userLocation = USER_FIXED_LOCATION;
   const [displayedProviders, setDisplayedProviders] = useState<Provider[]>([]);
   const [mapCenter, setMapCenter] = useState(userLocation);
-  const [mapZoom, setMapZoom] = useState(14);
-  const [, setIsMapComponentLoaded] = useState(false);
+  const [mapZoom, setMapZoom] = useState(16); // <-- CAMBIO DE ZOOM DE 14 A 16
+  const [, setIsMapComponentLoaded] = useState(false); // Renombrado para claridad
   const [providersVisibleInPanel, setProvidersVisibleInPanel] = useState(false);
 
   const libraries = useMemo(() => ['places'] as const, []);
@@ -166,11 +129,12 @@ export function MapDisplay() {
       return false;
     });
 
+    // Ordenar por calificación descendente
     const sortedProviders = providersInRange.sort((a, b) => b.rating - a.rating);
     setDisplayedProviders(sortedProviders);
     
     if (sortedProviders.length > 0) {
-      setProvidersVisibleInPanel(true);
+      setProvidersVisibleInPanel(true); // Hacer visible el panel si hay proveedores
       console.log(`[MapDisplay useEffect] ${sortedProviders.length} proveedores encontrados cerca de Culiacán. El panel será visible.`);
     } else {
       setProvidersVisibleInPanel(false);
@@ -179,7 +143,6 @@ export function MapDisplay() {
     setMapCenter(userLocation); // Asegura que el mapa se centre en Culiacán
     
   }, []); // Dependencia vacía, ya que userLocation es constante para la demo
-
 
   const onMapLoadCallback = useCallback((mapInstance: google.maps.Map) => {
     console.log("Google Map component successfully loaded. Instancia del mapa:", mapInstance);
@@ -190,7 +153,6 @@ export function MapDisplay() {
     console.log("Google Map component unmounted.");
     setIsMapComponentLoaded(false);
   }, []);
-
 
   const renderMapArea = () => {
     console.log('[renderMapArea] Current state: isMapApiLoaded:', isMapApiLoaded, 'mapApiLoadError:', mapApiLoadError, 'googleMapsApiKey set:', !!googleMapsApiKey);
@@ -219,7 +181,7 @@ export function MapDisplay() {
     if (!isMapApiLoaded) {
       console.log('[renderMapArea] !isMapApiLoaded (Loading Map API...)');
       return (
-        <div className="flex flex-col items-center justify-center h-full text-primary p-4">
+        <div className="flex flex-col items-center justify-center h-full text-primary p-4 bg-primary/5">
           <Loader2 className="h-12 w-12 animate-spin mb-4" />
           <p className="text-lg font-semibold">Cargando Mapa...</p>
         </div>
@@ -244,18 +206,28 @@ export function MapDisplay() {
   return (
     <Card className="shadow-xl overflow-hidden h-full flex flex-col">
       <CardHeader className="border-b p-4">
-         {/* Barra de búsqueda oculta temporalmente para simplificar */}
-         {/* <div className="relative flex-grow w-full sm:w-auto">
+        {/* La barra de búsqueda por texto está oculta temporalmente */}
+        {/* 
+        <div className="flex items-center space-x-4">
+          <div className="relative flex-grow w-full">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input type="search" placeholder="Buscar servicio, nombre, categoría..." className="pl-8 w-full" />
-          </div> */}
+            <Input 
+              type="search" 
+              placeholder="Buscar servicio, nombre, categoría..." 
+              className="pl-8 w-full" 
+              // value={searchTerm} 
+              // onChange={(e) => setSearchTerm(e.target.value)} 
+            />
+          </div>
+        </div>
+        */}
          <h2 className="text-xl font-semibold text-primary text-center">
           Servicios Disponibles en Culiacán (Simulado)
         </h2>
       </CardHeader>
       <CardContent className="p-0 md:flex flex-grow overflow-hidden">
          <div className={cn(
-             "h-[calc(100vh-var(--header-height,150px)-var(--map-header-height,80px))] md:h-auto relative bg-muted flex items-center justify-center text-foreground flex-grow",
+             "h-[calc(100vh-var(--header-height,150px)-var(--map-header-height,80px)-var(--ad-banner-height,70px))] md:h-auto relative bg-muted flex items-center justify-center text-foreground flex-grow",
              shouldDisplayRightPanel ? "md:w-2/3" : "md:w-full" 
            )}>
           {renderMapArea()}
@@ -276,10 +248,23 @@ export function MapDisplay() {
              <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-full md:overflow-y-auto space-y-4 flex-shrink-0 flex flex-col items-center justify-center text-muted-foreground text-center">
                 <MapPinned className="h-10 w-10 mb-3 text-primary" />
                 <p className="font-semibold">No se encontraron proveedores disponibles a menos de 20km de la ubicación simulada.</p>
-                <p className="text-sm">O el mapa aún está cargando.</p>
+                <p className="text-sm">Ajusta tu búsqueda o explora el mapa.</p>
             </div>
         )}
       </CardContent>
     </Card>
   );
 }
+
+// Función para calcular la distancia (Haversine)
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371; // Radio de la Tierra en km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // Distancia en km
+};
