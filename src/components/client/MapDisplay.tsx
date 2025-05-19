@@ -3,12 +3,13 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleMap, MarkerF, useJsApiLoader } from '@react-google-maps/api';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { MapPinned, Search, LocateFixed, AlertTriangle, WifiOff, Loader2 } from 'lucide-react';
 import type { Provider } from '@/types';
 import { ProviderPreviewCard } from './ProviderPreviewCard';
+import { cn } from "@/lib/utils";
 
 // Log environment variable at module level - for debugging .env issues
 const apiKeyFromEnv = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -46,7 +47,7 @@ const mockPlumbers: Provider[] = [
     avatarUrl: 'https://placehold.co/100x100.png?text=PP',
     dataAiHint: 'friendly professional',
     rating: 4.8,
-    isAvailable: false, 
+    isAvailable: false,
     services: [{
       id: 's_p3', title: 'Desatascos Profesionales', description: 'Tuberías como nuevas.', price: 120, category: 'plumbing', providerId: 'plumber3', imageUrl: 'https://placehold.co/300x200.png?text=Desatascos', dataAiHint: 'clear drains'
     }],
@@ -60,10 +61,11 @@ const mapContainerStyle: React.CSSProperties = {
 };
 
 const defaultCenter = {
-  lat: 34.0522, 
+  lat: 34.0522,
   lng: -118.2437
 };
 
+// Define MapContentComponent outside MapDisplay
 const MapContentComponent = React.memo(({
   center,
   zoom,
@@ -99,7 +101,7 @@ const MapContentComponent = React.memo(({
           icon={{
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
-            fillColor: "#4285F4", 
+            fillColor: "#4285F4",
             fillOpacity: 1,
             strokeWeight: 2,
             strokeColor: "white",
@@ -107,7 +109,7 @@ const MapContentComponent = React.memo(({
         />
       )}
       {providersToDisplay.map(provider =>
-        provider.location && provider.isAvailable && ( 
+        provider.location && provider.isAvailable && (
           <MarkerF
             key={provider.id}
             position={provider.location}
@@ -128,22 +130,25 @@ export function MapDisplay() {
   const [providersToDisplay, setProvidersToDisplay] = useState<Provider[]>([]);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [mapZoom, setMapZoom] = useState(10);
-  const [, setIsMapComponentLoaded] = useState(false); 
+  const [, setIsMapComponentLoaded] = useState(false); // Keep for onLoad/onUnmount, might be useful later
 
   const libraries = useMemo(() => ['places'] as const, []);
 
   // TEMPORARY HARDCODED API KEY - REMOVE FOR PRODUCTION AND USE .env
-  const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU"; 
-  
+  const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU";
+  // const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+
+
   console.log('[MapDisplay Component] Using hardcoded googleMapsApiKey value:', googleMapsApiKey);
   console.log('[MapDisplay Component] Value from process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY (for comparison):', process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
+
 
   const { isLoaded: isMapApiLoaded, loadError: mapApiLoadError } = useJsApiLoader(
     googleMapsApiKey
       ? {
           googleMapsApiKey: googleMapsApiKey,
           libraries: libraries,
-          id: 'google-map-script' // Prevent multiple script loads
+          id: 'google-map-script-servimap' // Unique ID to prevent conflicts
         }
       : { skip: true } // Skip loading if API key is not present
   );
@@ -162,35 +167,38 @@ export function MapDisplay() {
           setUserLocation(coords);
           setIsLoadingLocation(false);
           console.log("Ubicación del usuario obtenida:", coords);
+          // Simulate finding plumbers after location is obtained
+          const sortedPlumbers = [...mockPlumbers]
+            .filter(p => p.location)
+            .sort((a, b) => b.rating - a.rating);
+          setProvidersToDisplay(sortedPlumbers);
         },
         (error) => {
           console.error("Error de geolocalización:", error);
           setLocationError(`Error obteniendo ubicación: ${error.message}. Por favor, habilita los permisos de ubicación.`);
           setIsLoadingLocation(false);
+          setProvidersToDisplay([]); // Clear providers on error
         }
       );
     } else {
       setLocationError("La geolocalización no es compatible con este navegador.");
       setIsLoadingLocation(false);
+      setProvidersToDisplay([]); // Clear providers if not supported
     }
   }, []);
 
   useEffect(() => {
+    // Automatically request location on component mount
     handleRequestUserLocation();
   }, [handleRequestUserLocation]);
 
   useEffect(() => {
     if (userLocation) {
       setMapCenter(userLocation);
-      setMapZoom(14); 
-      const sortedPlumbers = [...mockPlumbers]
-        .filter(p => p.location) 
-        .sort((a, b) => b.rating - a.rating);
-      setProvidersToDisplay(sortedPlumbers);
+      setMapZoom(14);
     } else {
       setMapCenter(defaultCenter);
       setMapZoom(10);
-      setProvidersToDisplay([]); 
     }
   }, [userLocation]);
 
@@ -215,7 +223,7 @@ export function MapDisplay() {
         </div>
       );
     }
-    
+
     if (mapApiLoadError) {
        return (
         <div className="flex flex-col items-center justify-center h-full text-destructive p-4 bg-destructive/10 rounded-md">
@@ -265,34 +273,53 @@ export function MapDisplay() {
     );
   };
 
+  const showProviderList = providersToDisplay.length > 0 && isMapApiLoaded && !mapApiLoadError;
 
   return (
-    <Card className="shadow-xl overflow-hidden">
-      <CardHeader className="border-b">
-        <CardTitle className="flex items-center gap-2 text-2xl">
-          <MapPinned className="text-primary" /> Encuentra Proveedores Cerca de Ti
-        </CardTitle>
-        <CardDescription>
-          Usa tu ubicación actual o busca manualmente para encontrar servicios. El mapa es interactivo.
-        </CardDescription>
-        <div className="mt-4 flex flex-col sm:flex-row gap-2">
-          <div className="relative flex-grow">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+    <Card className="shadow-xl overflow-hidden h-full flex flex-col">
+      <CardHeader className="border-b p-4">
+        {/* Title and Description removed for cleaner look */}
+        <div className="flex flex-col sm:flex-row gap-2 items-center">
+          <div className="relative flex-grow w-full sm:w-auto">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input type="search" placeholder="Buscar servicio, nombre, categoría..." className="pl-8 w-full" />
           </div>
-          <Button variant="outline" onClick={handleRequestUserLocation} disabled={isLoadingLocation}>
-            <LocateFixed className={`h-4 w-4 ${isLoadingLocation ? 'animate-spin' : ''}`} />
+          <Button variant="outline" onClick={handleRequestUserLocation} disabled={isLoadingLocation} className="w-full sm:w-auto flex-shrink-0">
+            <LocateFixed className={`mr-2 h-4 w-4 ${isLoadingLocation ? 'animate-spin' : ''}`} />
             {isLoadingLocation ? "Localizando..." : userLocation ? "Actualizar Ubicación" : "Obtener Mi Ubicación"}
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="p-0 md:flex">
-        <div className="md:w-2/3 h-[400px] md:h-[500px] relative bg-muted flex items-center justify-center text-foreground">
+      <CardContent className="p-0 md:flex flex-grow">
+        <div className={cn(
+            "h-[calc(100vh-var(--header-height,150px)-var(--map-header-height,80px))] md:h-auto relative bg-muted flex items-center justify-center text-foreground flex-grow", // Adjusted height
+            showProviderList ? "md:w-2/3" : "md:w-full"
+          )}>
           {renderMapArea()}
         </div>
-        <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-[500px] md:overflow-y-auto space-y-4">
-          {(!googleMapsApiKey || mapApiLoadError || (locationError && !userLocation)) && (
-            <div className="flex flex-col items-center justify-center text-muted-foreground p-4 text-center">
+        {showProviderList && (
+          <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-full md:overflow-y-auto space-y-4">
+            {providersToDisplay.map(provider => (
+                <ProviderPreviewCard
+                  key={provider.id}
+                  provider={provider}
+                  onSelectProvider={(providerId) => alert(`Ver perfil de ${provider.name} (ID: ${providerId}) (funcionalidad pendiente)`)}
+                />
+              ))}
+          </div>
+        )}
+         {!showProviderList && isMapApiLoaded && !mapApiLoadError && !isLoadingLocation && !locationError && (
+             <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 flex items-center justify-center text-muted-foreground md:max-h-full">
+                {/* This space is intentionally left for when providers list is not shown on larger screens, hidden on mobile.
+                    Can be used for messages or kept clean. On mobile, this div won't be visible due to flex-col and map taking full width.
+                    For a cleaner look, this can be entirely removed if the map should always take full width when no providers.
+                */}
+                {/* <p className="text-center">Selecciona tu ubicación o busca para ver proveedores.</p> */}
+             </div>
+         )}
+         {/* Fallback messages for errors when provider list would normally show or map has issues */}
+         {(!googleMapsApiKey || mapApiLoadError || (locationError && !userLocation)) && !showProviderList && (
+            <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l flex flex-col items-center justify-center text-muted-foreground text-center">
               {!googleMapsApiKey && (
                 <>
                   <WifiOff className="h-8 w-8 mx-auto mb-2 text-destructive" />
@@ -316,33 +343,8 @@ export function MapDisplay() {
                 </>
               )}
             </div>
-          )}
-
-          {providersToDisplay.length > 0 && googleMapsApiKey && isMapApiLoaded && !mapApiLoadError ? (
-            providersToDisplay.map(provider => (
-              <ProviderPreviewCard
-                key={provider.id}
-                provider={provider}
-                onSelectProvider={(providerId) => alert(`Ver perfil de ${provider.name} (ID: ${providerId}) (funcionalidad pendiente)`)}
-              />
-            ))
-          ) : (
-            !isLoadingLocation && userLocation && googleMapsApiKey && isMapApiLoaded && !mapApiLoadError && providersToDisplay.length === 0 && (
-              <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
-                <p>No se encontraron proveedores para esta simulación en tu ubicación actual.</p>
-              </div>
-            )
-          )}
-           {!isLoadingLocation && !userLocation && !locationError && googleMapsApiKey && isMapApiLoaded && !mapApiLoadError && providersToDisplay.length === 0 && (
-              <div className="flex items-center justify-center h-full text-muted-foreground p-4 text-center">
-                <p>Obtén tu ubicación para ver proveedores cercanos o intenta una búsqueda manual.</p>
-              </div>
-            )
-          }
-        </div>
+         )}
       </CardContent>
     </Card>
   );
 }
-    
-    
