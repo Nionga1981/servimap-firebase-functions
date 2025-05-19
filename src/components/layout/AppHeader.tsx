@@ -20,7 +20,7 @@ import React, { useState } from 'react';
 
 const navLinks = [
   { href: "/provider", label: "Ofrecer Servicios" },
-  { href: "/chat", label: "Demo de Chat" },
+  // { href: "/chat", label: "Demo de Chat" }, // Eliminado
 ];
 
 export function AppHeader() {
