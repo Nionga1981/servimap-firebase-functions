@@ -9,7 +9,6 @@ export const USER_FIXED_LOCATION = {
   lng: -107.4255
 };
 
-// Mock providers para demostración
 export const mockProviders: Provider[] = [
   {
     id: 'plumber1',
@@ -23,7 +22,7 @@ export const mockProviders: Provider[] = [
     }, {
       id: 's_p2', title: 'Instalación de Calentadores', description: 'Instalamos calentadores de agua de todas las marcas.', price: 150, category: SERVICE_CATEGORIES.find(c=>c.name === 'Plomería')?.id || 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'water heater'
     }],
-    location: { lat: 24.8050, lng: -107.4200 }, // Cerca de Culiacán (Villa Universidad)
+    location: { lat: 24.8070, lng: -107.4230 }, // Ajustado cerca de Culiacán
     specialties: ['Fugas de agua', 'Desazolves', 'Instalación de tuberías', 'Reparación de boilers']
   },
   {
@@ -36,7 +35,7 @@ export const mockProviders: Provider[] = [
     services: [{
       id: 's_e1', title: 'Instalaciones Eléctricas Completas', description: 'Expertos en cableado y cortos circuitos en la zona centro.', price: 80, category: SERVICE_CATEGORIES.find(c=>c.name === 'Electricidad')?.id || 'electrical', providerId: 'electrician1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'electrical panel'
     }],
-    location: { lat: 24.8150, lng: -107.4300 }, // Cerca de Culiacán (Villa Universidad)
+    location: { lat: 24.8100, lng: -107.4280 }, // Ajustado cerca de Culiacán
     specialties: ['Cortocircuitos', 'Instalaciones nuevas', 'Mantenimiento de tableros', 'Cambio de voltaje']
   },
   {
@@ -47,9 +46,9 @@ export const mockProviders: Provider[] = [
     rating: 4.95,
     isAvailable: true,
     services: [{
-      id: 's_n1', title: 'Cuidado Infantil Profesional por Horas', description: 'Cuidado amoroso y experto para tus hijos en tu domicilio (Chapultepec).', price: 75, category: SERVICE_CATEGORIES.find(c=>c.name === 'Cuidado de Niños')?.id || 'child_care', providerId: 'nanny1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'children playing'
+      id: 's_n1', title: 'Cuidado Infantil Profesional por Horas', description: 'Cuidado amoroso y experto para tus hijos en tu domicilio.', price: 75, category: SERVICE_CATEGORIES.find(c=>c.name === 'Cuidado de Niños')?.id || 'child_care', providerId: 'nanny1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'children playing'
     }],
-    location: { lat: 24.8000, lng: -107.4150 }, // Cerca de Culiacán (Villa Universidad)
+    location: { lat: 24.8080, lng: -107.4200 }, // Ajustado cerca de Culiacán
     specialties: ['Cuidado de bebés', 'Actividades lúdicas', 'Apoyo con tareas', 'Primeros auxilios básicos']
   },
   {
@@ -75,7 +74,34 @@ export const mockProviders: Provider[] = [
     services: [{
       id: 's_c1', title: 'Limpieza Profunda Residencial', description: 'Dejamos tu casa reluciente, servicio en Tres Ríos.', price: 100, category: SERVICE_CATEGORIES.find(c=>c.name === 'Limpieza')?.id || 'cleaning', providerId: 'cleaner1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'sparkling clean'
     }],
-    location: { lat: 24.7950, lng: -107.4100 } // Cerca de Culiacán
+    location: { lat: 24.7950, lng: -107.4100 }, // Cerca de Culiacán
+    specialties: ['Limpieza general', 'Limpieza de oficinas', 'Limpieza post-construcción']
+  },
+  {
+    id: 'doctor1',
+    name: 'Dr. House - Médico General',
+    avatarUrl: 'https://placehold.co/100x100.png?text=DH',
+    dataAiHint: 'doctor serious',
+    rating: 4.85,
+    isAvailable: true,
+    services: [{
+      id: 's_d1', title: 'Consulta Médica General a Domicilio', description: 'Atención médica primaria en la comodidad de tu hogar.', price: 120, category: SERVICE_CATEGORIES.find(c=>c.name === 'Doctores')?.id || 'doctors', providerId: 'doctor1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'medical equipment'
+    }],
+    location: { lat: 24.8065, lng: -107.4245 }, // Cerca de Culiacán
+    specialties: ['Diagnóstico general', 'Medicina familiar', 'Atención a domicilio']
+  },
+  {
+    id: 'nurse1',
+    name: 'Enfermera Laura Cuidados',
+    avatarUrl: 'https://placehold.co/100x100.png?text=EL',
+    dataAiHint: 'nurse caring',
+    rating: 4.92,
+    isAvailable: true,
+    services: [{
+      id: 's_nu1', title: 'Servicios de Enfermería Profesional', description: 'Inyecciones, curaciones, cuidado de pacientes post-operatorios.', price: 85, category: SERVICE_CATEGORIES.find(c=>c.name === 'Enfermeras')?.id || 'nurses', providerId: 'nurse1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'health care professional'
+    }],
+    location: { lat: 24.8110, lng: -107.4260 }, // Cerca de Culiacán
+    specialties: ['Inyecciones', 'Curaciones', 'Cuidado de adultos mayores', 'Toma de signos vitales']
   },
   { 
     id: 'plumber_far',
