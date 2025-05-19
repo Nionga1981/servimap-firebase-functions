@@ -1,3 +1,4 @@
+
 export interface Service {
   id: string;
   title: string;
@@ -5,6 +6,7 @@ export interface Service {
   price: number;
   category: string; // Category ID
   imageUrl?: string;
+  dataAiHint?: string; // Para imágenes de servicio también
   providerId: string;
 }
 
@@ -12,6 +14,7 @@ export interface Provider {
   id: string;
   name: string;
   avatarUrl: string;
+  dataAiHint?: string; // Para avatares de proveedor
   rating: number;
   services: Service[];
   isAvailable: boolean;

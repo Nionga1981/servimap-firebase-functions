@@ -9,87 +9,10 @@ import type { Provider } from '@/types';
 import { ProviderPreviewCard } from './ProviderPreviewCard';
 import { cn } from "@/lib/utils";
 import { SERVICE_CATEGORIES } from '@/lib/constants';
+import { USER_FIXED_LOCATION, mockProviders } from '@/lib/mockData'; // Importar desde mockData
 
 const apiKeyFromEnv = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 console.log('[MapDisplay Module] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:', apiKeyFromEnv);
-
-// Ubicación fija del usuario para la demostración
-const USER_FIXED_LOCATION = {
-  lat: 24.8093, // Galileo 772, Villa Universidad, Culiacán
-  lng: -107.4255
-};
-
-// Mock providers para demostración
-const mockProviders: Provider[] = [
-  {
-    id: 'plumber1',
-    name: 'Mario Fontanería Express',
-    avatarUrl: 'https://placehold.co/100x100.png?text=MF',
-    dataAiHint: 'plumber portrait',
-    rating: 4.9,
-    isAvailable: true,
-    services: [{
-      id: 's_p1', title: 'Reparaciones Urgentes 24/7', description: 'Solución rápida a fugas y atascos.', price: 90, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'water pipes'
-    }],
-    location: { lat: 24.8050, lng: -107.4200 } // Cerca de Culiacán
-  },
-  {
-    id: 'electrician1',
-    name: 'ElectroSoluciones Rápidas',
-    avatarUrl: 'https://placehold.co/100x100.png?text=ES',
-    dataAiHint: 'electrician smile',
-    rating: 4.8,
-    isAvailable: true,
-    services: [{
-      id: 's_e1', title: 'Instalaciones Eléctricas', description: 'Expertos en trabajos eléctricos.', price: 80, category: 'electrical', providerId: 'electrician1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'electrical panel'
-    }],
-    location: { lat: 24.8150, lng: -107.4300 } // Cerca de Culiacán
-  },
-  {
-    id: 'nanny1',
-    name: 'Super Niñeras Ana',
-    avatarUrl: 'https://placehold.co/100x100.png?text=SN',
-    dataAiHint: 'friendly nanny',
-    rating: 4.95,
-    isAvailable: true,
-    services: [{
-      id: 's_n1', title: 'Cuidado Infantil Profesional', description: 'Cuidado amoroso y experto para tus hijos.', price: 75, category: 'child_care', providerId: 'nanny1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'children playing'
-    }],
-    location: { lat: 24.8000, lng: -107.4150 } // Cerca de Culiacán
-  },
-  {
-    id: 'cleaner1',
-    name: 'Limpieza Impecable Hogar',
-    avatarUrl: 'https://placehold.co/100x100.png?text=LI',
-    dataAiHint: 'cleaning professional',
-    rating: 4.9,
-    isAvailable: true,
-    services: [{
-      id: 's_c1', title: 'Limpieza Profunda Residencial', description: 'Dejamos tu casa reluciente.', price: 100, category: 'cleaning', providerId: 'cleaner1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'sparkling clean'
-    }],
-    location: { lat: 24.7500, lng: -107.3800 } // Un poco más lejos de Culiacán, pero podría estar dentro de 20km
-  },
-  { // Proveedor más lejano, para probar filtro de distancia
-    id: 'plumber_far',
-    name: 'Fontanería Distante',
-    avatarUrl: 'https://placehold.co/100x100.png?text=FD',
-    dataAiHint: 'worker tools',
-    rating: 4.5,
-    isAvailable: true,
-    services: [{ id: 's_pf1', title: 'Servicios de Plomería General', description: 'Atendemos una amplia área.', price: 60, category: 'plumbing', providerId: 'plumber_far', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'wrench set' }],
-    location: { lat: 25.0000, lng: -107.6000 } // Más de 20km de Culiacán
-  },
-  { // Proveedor en otra ciudad, definitivamente fuera del radio
-    id: 'gardener_la',
-    name: 'Jardines Verdes LA',
-    avatarUrl: 'https://placehold.co/100x100.png?text=JVLA',
-    dataAiHint: 'gardener nature',
-    rating: 4.7,
-    isAvailable: false, // Para probar que no disponibles no aparecen
-    services: [{ id: 's_g_la', title: 'Mantenimiento de Jardines LA', description: 'Expertos en jardinería en Los Ángeles.', price: 65, category: 'gardening', providerId: 'gardener_la', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'lush garden' }],
-    location: { lat: 34.0600, lng: -118.2400 } // Los Angeles
-  },
-];
 
 
 const mapContainerStyle: React.CSSProperties = {
@@ -99,45 +22,18 @@ const mapContainerStyle: React.CSSProperties = {
 
 // Estilo para ocultar POIs
 const mapStyles: google.maps.MapTypeStyle[] = [
-  {
-    featureType: "poi.business",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.attraction",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.government",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.medical",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.park",
-    elementType: "labels.icon",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.place_of_worship",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.school",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "poi.sports_complex",
-    stylers: [{ visibility: "off" }],
-  },
-  { // Opcional: reduce la prominencia de las etiquetas de tránsito si es necesario
-    featureType: "transit.station",
-    elementType: "labels.icon",
-    stylers: [{ visibility: "off" }],
-  },
-  { // Opcional: reduce la prominencia de algunas carreteras
+  { featureType: "poi", stylers: [{ visibility: "off" }] }, // Oculta todos los POI
+  { featureType: "transit", stylers: [{ visibility: "off" }] }, // Oculta estaciones de tránsito
+  // Puedes ser más específico si quieres ocultar solo algunos tipos de POI
+  // { featureType: "poi.business", stylers: [{ visibility: "off" }] },
+  // { featureType: "poi.attraction", stylers: [{ visibility: "off" }] },
+  // { featureType: "poi.government", stylers: [{ visibility: "off" }] },
+  // { featureType: "poi.medical", stylers: [{ visibility: "off" }] },
+  // { featureType: "poi.park", elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+  // { featureType: "poi.place_of_worship", stylers: [{ visibility: "off" }] },
+  // { featureType: "poi.school", stylers: [{ visibility: "off" }] },
+  // { featureType: "poi.sports_complex", stylers: [{ visibility: "off" }] },
+  { // Reduce la prominencia de algunas carreteras
     featureType: "road.arterial",
     elementType: "labels",
     stylers: [{ visibility: "on" }], // Mantén las etiquetas de las carreteras principales
@@ -195,10 +91,10 @@ const MapContentComponent = React.memo(({
         streetViewControl: false,
         mapTypeControl: false,
         fullscreenControl: false,
-        zoomControl: false,
-        rotateControl: false,
-        scaleControl: false,
-        clickableIcons: false,
+        zoomControl: false, // Oculto para limpieza máxima
+        rotateControl: false, // Oculto
+        scaleControl: false, // Oculto
+        clickableIcons: false, // Oculto
         styles: mapStyles, // Aplicar estilos personalizados aquí
       }}
       onLoad={onLoad}
@@ -211,7 +107,7 @@ const MapContentComponent = React.memo(({
           icon={{
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
-            fillColor: "hsl(var(--primary))",
+            fillColor: "hsl(var(--primary))", // Azul primario del tema
             fillOpacity: 1,
             strokeWeight: 2,
             strokeColor: "white",
@@ -225,8 +121,7 @@ const MapContentComponent = React.memo(({
             position={provider.location}
             title={`${provider.name} (Calificación: ${provider.rating})`}
             // Iconos personalizados por categoría se implementarían aquí en el futuro
-            // Por ejemplo, podrías tener un objeto que mapee categoryId a una URL de icono
-            // icon={CATEGORY_ICONS[provider.services[0].category] || DEFAULT_MARKER_ICON_URL}
+            // Ejemplo: icon={getCategoryIconUrl(provider.services[0].category)}
           />
         )
       })}
@@ -237,19 +132,19 @@ MapContentComponent.displayName = 'MapContentComponent';
 
 
 export function MapDisplay() {
-  const userLocation = USER_FIXED_LOCATION; // Usar la ubicación fija
+  const userLocation = USER_FIXED_LOCATION; // Usar la ubicación fija de Culiacán
   const [displayedProviders, setDisplayedProviders] = useState<Provider[]>([]);
-  const [mapCenter, setMapCenter] = useState(USER_FIXED_LOCATION);
+  const [mapCenter, setMapCenter] = useState(userLocation);
   const [mapZoom, setMapZoom] = useState(14);
-  const [, setIsMapComponentLoaded] = useState(false); // Para rastrear si el componente GoogleMap interno se ha cargado
+  const [, setIsMapComponentLoaded] = useState(false);
   const [providersVisibleInPanel, setProvidersVisibleInPanel] = useState(false);
 
   const libraries = useMemo(() => ['places'] as const, []);
   // TEMPORARY HARDCODED - RECUERDA QUITAR ESTO Y USAR .ENV EN UN ENTORNO REAL
   const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU"; 
 
-  console.log('[MapDisplay Component] Using hardcoded googleMapsApiKey value:', googleMapsApiKey);
-  console.log('[MapDisplay Component] Value from process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY (for comparison):', process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
+  console.log('[MapDisplay Component] Using hardcoded googleMapsApiKey value for Culiacan demo:', googleMapsApiKey);
+  console.log('[MapDisplay Component] User fixed location (Culiacan):', userLocation);
 
   const { isLoaded: isMapApiLoaded, loadError: mapApiLoadError } = useJsApiLoader(
     googleMapsApiKey
@@ -260,31 +155,30 @@ export function MapDisplay() {
 
   // Cargar y filtrar proveedores basados en la ubicación fija del usuario
   useEffect(() => {
-    console.log("[MapDisplay useEffect] Procesando proveedores con ubicación fija:", userLocation);
-    if (userLocation) {
-      const providersInRange = mockProviders.filter(provider => {
-        if (provider.location && provider.isAvailable) {
-          const distance = calculateDistance(userLocation.lat, userLocation.lng, provider.location.lat, provider.location.lng);
-          return distance <= 20; // Radio de 20 km
-        }
-        return false;
-      });
-
-      const sortedProviders = providersInRange.sort((a, b) => b.rating - a.rating);
-      setDisplayedProviders(sortedProviders);
-      
-      // Mostrar el panel si se encuentran proveedores cercanos
-      if (sortedProviders.length > 0) {
-        setProvidersVisibleInPanel(true); // Hacemos visible el panel automáticamente si hay proveedores
-        console.log(`[MapDisplay useEffect] ${sortedProviders.length} proveedores encontrados dentro de 20km. El panel será visible.`);
-      } else {
-        setProvidersVisibleInPanel(false);
-        console.log("[MapDisplay useEffect] No se encontraron proveedores dentro de 20km. El panel estará oculto.");
+    console.log("[MapDisplay useEffect] Procesando proveedores con ubicación fija (Culiacán):", userLocation);
+    
+    const providersInRange = mockProviders.filter(provider => {
+      if (provider.location && provider.isAvailable) {
+        const distance = calculateDistance(userLocation.lat, userLocation.lng, provider.location.lat, provider.location.lng);
+        console.log(`[MapDisplay useEffect] Distancia a ${provider.name}: ${distance.toFixed(2)} km`);
+        return distance <= 20; // Radio de 20 km
       }
-      // Actualizar el centro del mapa a la ubicación del usuario una vez procesado
-      setMapCenter(userLocation);
+      return false;
+    });
+
+    const sortedProviders = providersInRange.sort((a, b) => b.rating - a.rating);
+    setDisplayedProviders(sortedProviders);
+    
+    if (sortedProviders.length > 0) {
+      setProvidersVisibleInPanel(true);
+      console.log(`[MapDisplay useEffect] ${sortedProviders.length} proveedores encontrados cerca de Culiacán. El panel será visible.`);
+    } else {
+      setProvidersVisibleInPanel(false);
+      console.log("[MapDisplay useEffect] No se encontraron proveedores cerca de Culiacán. El panel estará oculto.");
     }
-  }, [userLocation]); // Dependencia única: userLocation (que es constante aquí)
+    setMapCenter(userLocation); // Asegura que el mapa se centre en Culiacán
+    
+  }, []); // Dependencia vacía, ya que userLocation es constante para la demo
 
 
   const onMapLoadCallback = useCallback((mapInstance: google.maps.Map) => {
@@ -339,89 +233,53 @@ export function MapDisplay() {
         zoom={mapZoom}
         onLoad={onMapLoadCallback}
         onUnmount={onMapUnmountCallback}
-        userLocationToDisplay={userLocation} // Pasar la ubicación fija del usuario
-        providersToDisplayOnMap={displayedProviders} // Solo los filtrados por distancia
+        userLocationToDisplay={userLocation} 
+        providersToDisplayOnMap={displayedProviders} 
       />
     );
   };
-
-  const showProviderListPanel = isMapApiLoaded && !mapApiLoadError && googleMapsApiKey && providersVisibleInPanel;
   
-  const shouldDisplayRightPanel = showProviderListPanel || !googleMapsApiKey || mapApiLoadError;
+  const shouldDisplayRightPanel = isMapApiLoaded && !mapApiLoadError && googleMapsApiKey && providersVisibleInPanel && displayedProviders.length > 0;
 
   return (
     <Card className="shadow-xl overflow-hidden h-full flex flex-col">
       <CardHeader className="border-b p-4">
-        {/* La barra de búsqueda está temporalmente oculta para simplificar la UI según la petición */}
-        {/* <div className="flex flex-col sm:flex-row gap-2 items-center">
-          <div className="relative flex-grow w-full sm:w-auto">
+         {/* Barra de búsqueda oculta temporalmente para simplificar */}
+         {/* <div className="relative flex-grow w-full sm:w-auto">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input type="search" placeholder="Buscar servicio, nombre, categoría..." className="pl-8 w-full" />
-          </div>
-        </div> */}
+          </div> */}
          <h2 className="text-xl font-semibold text-primary text-center">
-          Servicios Cercanos en {userLocation.lat.toFixed(4)}, {userLocation.lng.toFixed(4)} (Culiacán)
+          Servicios Disponibles en Culiacán (Simulado)
         </h2>
       </CardHeader>
       <CardContent className="p-0 md:flex flex-grow overflow-hidden">
          <div className={cn(
              "h-[calc(100vh-var(--header-height,150px)-var(--map-header-height,80px))] md:h-auto relative bg-muted flex items-center justify-center text-foreground flex-grow",
-             shouldDisplayRightPanel ? "md:w-2/3" : "md:w-full" // Ajuste de ancho dinámico
+             shouldDisplayRightPanel ? "md:w-2/3" : "md:w-full" 
            )}>
           {renderMapArea()}
         </div>
 
         {shouldDisplayRightPanel && (
           <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-full md:overflow-y-auto space-y-4 flex-shrink-0">
-            {!googleMapsApiKey && (
-                <div className="flex flex-col items-center justify-center text-muted-foreground text-center h-full">
-                  <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-destructive" />
-                  <p className="font-semibold text-destructive">Mapa no disponible.</p>
-                  <p className="text-sm text-destructive-foreground">API Key no configurada.</p>
-                </div>
-            )}
-            {mapApiLoadError && googleMapsApiKey && (
-                <div className="flex flex-col items-center justify-center text-muted-foreground text-center h-full">
-                  <WifiOff className="h-8 w-8 mx-auto mb-2 text-destructive" />
-                  <p className="font-semibold text-destructive">Error al cargar el mapa.</p>
-                  <p className="text-sm text-destructive-foreground">{mapApiLoadError.message.split('.')[0]}.</p>
-                </div>
-            )}
-
-            {isMapApiLoaded && !mapApiLoadError && googleMapsApiKey && providersVisibleInPanel && displayedProviders.length > 0 && (
-              <>
-                <h3 className="text-lg font-semibold text-primary mb-2">Proveedores Cercanos (menos de 20km):</h3>
-                {displayedProviders.map(provider => ( 
-                    <ProviderPreviewCard
-                      key={provider.id}
-                      provider={provider}
-                      onSelectProvider={(providerId) => alert(`Ver perfil de ${provider.name} (ID: ${providerId}) (funcionalidad pendiente)`)}
-                    />
-                  ))}
-              </>
-            )}
-            {isMapApiLoaded && !mapApiLoadError && googleMapsApiKey && providersVisibleInPanel && displayedProviders.length === 0 && (
-               <div className="flex flex-col items-center justify-center text-muted-foreground text-center h-full">
-                <Search className="h-10 w-10 mb-3 text-primary" />
-                <p className="font-semibold">No se encontraron proveedores disponibles a menos de 20km.</p>
-                <p className="text-sm">Intenta buscar en otra área o expandir tu radio de búsqueda (funcionalidad futura).</p>
-              </div>
-            )}
-             {isMapApiLoaded && !mapApiLoadError && googleMapsApiKey && !providersVisibleInPanel && ( // Mensaje cuando no hay proveedores visibles o no se han buscado
-                 <div className="flex flex-col items-center justify-center text-muted-foreground text-center h-full">
-                    <MapPinned className="h-10 w-10 mb-3 text-primary" />
-                    <p className="font-semibold">Calculando proveedores cercanos...</p>
-                    <p className="text-sm">La lista de servicios aparecerá aquí si se encuentran dentro del radio y después de una búsqueda (funcionalidad actual: se muestran si están cerca de Culiacán).</p>
-                </div>
-            )}
+            <h3 className="text-lg font-semibold text-primary mb-2">Proveedores Cercanos (menos de 20km):</h3>
+            {displayedProviders.map(provider => ( 
+                <ProviderPreviewCard
+                  key={provider.id}
+                  provider={provider}
+                />
+              ))}
           </div>
+        )}
+         {isMapApiLoaded && !mapApiLoadError && googleMapsApiKey && !shouldDisplayRightPanel && (
+             <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-full md:overflow-y-auto space-y-4 flex-shrink-0 flex flex-col items-center justify-center text-muted-foreground text-center">
+                <MapPinned className="h-10 w-10 mb-3 text-primary" />
+                <p className="font-semibold">No se encontraron proveedores disponibles a menos de 20km de la ubicación simulada.</p>
+                <p className="text-sm">O el mapa aún está cargando.</p>
+            </div>
         )}
       </CardContent>
     </Card>
   );
 }
-    
-
-    
-
-    
