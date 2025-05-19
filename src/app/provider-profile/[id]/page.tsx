@@ -5,19 +5,22 @@
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-import { mockProviders, USER_FIXED_LOCATION } from '@/lib/mockData'; // Asegúrate que mockProviders se exporte
+import { mockProviders, USER_FIXED_LOCATION } from '@/lib/mockData'; 
 import type { Provider, Service } from '@/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Star, MapPin, MessageSquare, DollarSign, Tag, ArrowLeft, CheckCircle, ShieldCheck, CalendarDays } from 'lucide-react';
+import { Star, MapPin, MessageSquare, DollarSign, Tag, ArrowLeft, CheckCircle, ShieldCheck, CalendarDays, Loader2 as LoaderIcon } from 'lucide-react'; // Renamed Loader2 to LoaderIcon to avoid conflict
 import { SERVICE_CATEGORIES, DEFAULT_SERVICE_IMAGE, DEFAULT_USER_AVATAR } from '@/lib/constants';
 import { useEffect, useState } from 'react';
-import { cn } from '@/lib/utils'; // Import cn utility
+import { cn } from '@/lib/utils';
+import { Calendar } from "@/components/ui/calendar";
+import { useToast } from "@/hooks/use-toast";
 
-// Función para calcular la distancia (Haversine) - duplicada aquí por simplicidad o podría importarse
+
+// Función para calcular la distancia (Haversine)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
   const R = 6371; // Radio de la Tierra en km
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -38,14 +41,15 @@ export default function ProviderProfilePage() {
   const [provider, setProvider] = useState<Provider | undefined>(undefined);
   const [distanceFromUser, setDistanceFromUser] = useState<string | null>(null);
   const [reviewCount, setReviewCount] = useState<number>(0);
-
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (providerId) {
       const foundProvider = mockProviders.find(p => p.id === providerId);
       setProvider(foundProvider);
 
-      if (foundProvider?.location) {
+      if (foundProvider?.location && USER_FIXED_LOCATION) {
         const dist = calculateDistance(USER_FIXED_LOCATION.lat, USER_FIXED_LOCATION.lng, foundProvider.location.lat, foundProvider.location.lng);
         setDistanceFromUser(dist.toFixed(1));
       }
@@ -54,10 +58,39 @@ export default function ProviderProfilePage() {
     }
   }, [providerId]);
 
+  const handleDateSelect = (date: Date | undefined) => {
+    if (date) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); 
+      if (date < today) {
+        toast({
+          title: "Fecha Inválida",
+          description: "No puedes seleccionar una fecha pasada.",
+          variant: "destructive",
+        });
+        setSelectedDate(undefined);
+      } else {
+        setSelectedDate(date);
+      }
+    } else {
+      setSelectedDate(undefined);
+    }
+  };
+
+  const handleRequestAppointment = () => {
+    if (selectedDate) {
+      toast({
+        title: "Cita Solicitada",
+        description: `Se ha enviado una solicitud de cita para el ${selectedDate.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}. El proveedor se pondrá en contacto.`,
+      });
+       // Aquí podrías añadir lógica para enviar la solicitud al backend
+    }
+  };
+
   if (!provider) {
     return (
       <div className="container mx-auto py-8 text-center">
-        <Loader2 className="mx-auto h-12 w-12 animate-spin text-primary mb-4" />
+        <LoaderIcon className="mx-auto h-12 w-12 animate-spin text-primary mb-4" />
         <p className="text-xl text-muted-foreground">Cargando perfil del proveedor...</p>
         <p className="mt-4">Si esto persiste, el proveedor con ID '{providerId}' no fue encontrado.</p>
          <Button asChild variant="outline" className="mt-6">
@@ -90,10 +123,10 @@ export default function ProviderProfilePage() {
         <CardHeader className="bg-secondary/30 p-0">
             <div className="relative h-48 w-full">
                  <Image
-                    src={provider.services[0]?.imageUrl || provider.avatarUrl || DEFAULT_SERVICE_IMAGE} // Usa la imagen del primer servicio o avatar como banner
+                    src={provider.services[0]?.imageUrl || provider.avatarUrl || DEFAULT_SERVICE_IMAGE}
                     alt={`Banner de ${provider.name}`}
-                    layout="fill"
-                    objectFit="cover"
+                    fill // Reemplaza layout="fill"
+                    style={{ objectFit: "cover" }} // Reemplaza objectFit="cover"
                     className="opacity-80"
                     data-ai-hint={provider.dataAiHint || "provider banner"}
                   />
@@ -129,11 +162,10 @@ export default function ProviderProfilePage() {
             <div className="md:col-span-2">
               <h2 className="text-xl font-semibold text-primary mb-3">Acerca de {provider.name}</h2>
               <p className="text-muted-foreground mb-4">
-                {/* Placeholder para una descripción más detallada del proveedor */}
                 Un profesional dedicado con experiencia en {provider.specialties && provider.specialties.length > 0 ? provider.specialties.join(', ') : getCategoryName(provider.services[0]?.category || '')}.
                 Comprometido con la calidad y la satisfacción del cliente.
               </p>
-              {provider.location && distanceFromUser && (
+              {provider.location && distanceFromUser && USER_FIXED_LOCATION && (
                 <div className="flex items-center text-sm text-muted-foreground mb-2">
                   <MapPin className="mr-2 h-4 w-4 text-primary" />
                   <span>Aprox. {distanceFromUser} km de tu ubicación simulada en Culiacán.</span>
@@ -175,7 +207,52 @@ export default function ProviderProfilePage() {
             </div>
           </div>
 
-          <Separator className="my-6" />
+          <Separator className="my-8" />
+
+          {/* --- START: Nueva Sección de Agenda --- */}
+          <div className="mb-8">
+            <h2 className="text-xl font-semibold text-primary mb-4 flex items-center">
+              <CalendarDays className="mr-2 h-5 w-5" />
+              Agendar una Cita
+            </h2>
+            <div className="grid md:grid-cols-2 gap-x-8 gap-y-6 items-start">
+              <Card className="shadow-md w-full">
+                <CardContent className="p-2 sm:p-4 flex justify-center">
+                  <Calendar
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={handleDateSelect}
+                    className="rounded-md border"
+                    disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1))} // Disable dates before today
+                    footer={selectedDate ? <p className="text-sm p-2 text-center">Fecha seleccionada: {selectedDate.toLocaleDateString('es-ES')}.</p> : <p className="text-sm p-2 text-center">Elige una fecha.</p>}
+                  />
+                </CardContent>
+              </Card>
+              <div className="space-y-4 mt-4 md:mt-0">
+                {selectedDate ? (
+                  <p className="text-sm text-muted-foreground bg-secondary/30 p-3 rounded-md">
+                    Cita para: <span className="font-semibold text-foreground">{selectedDate.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground bg-secondary/30 p-3 rounded-md">Por favor, selecciona una fecha en el calendario para continuar.</p>
+                )}
+                <Button
+                  onClick={handleRequestAppointment}
+                  disabled={!selectedDate}
+                  className="w-full"
+                  size="lg"
+                >
+                  Solicitar Cita para esta Fecha
+                </Button>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Puedes solicitar una cita incluso si el proveedor no está disponible ahora. El proveedor confirmará la disponibilidad para la fecha seleccionada.
+                </p>
+              </div>
+            </div>
+          </div>
+          {/* --- END: Nueva Sección de Agenda --- */}
+
+          <Separator className="my-8" />
 
           <h2 className="text-xl font-semibold text-primary mb-4">Servicios Ofrecidos</h2>
           {provider.services && provider.services.length > 0 ? (
@@ -204,10 +281,9 @@ export default function ProviderProfilePage() {
                     <p className="text-sm text-muted-foreground mb-3">{service.description}</p>
                     {service.imageUrl && (
                          <div className="relative h-40 w-full rounded-md overflow-hidden mb-3">
-                            <Image src={service.imageUrl || DEFAULT_SERVICE_IMAGE} alt={service.title} layout="fill" objectFit="cover" data-ai-hint="service visual specific" />
+                            <Image src={service.imageUrl || DEFAULT_SERVICE_IMAGE} alt={service.title} fill style={{objectFit: "cover"}} data-ai-hint="service visual specific" />
                         </div>
                     )}
-                    {/* Podríamos añadir un botón específico de "Solicitar este servicio" aquí en el futuro */}
                   </CardContent>
                 </Card>
               ))}
@@ -222,7 +298,7 @@ export default function ProviderProfilePage() {
 }
 
 // Añadir un componente Loader básico para usar en la página
-const Loader2 = ({ className, ...props }: React.SVGProps<SVGSVGElement>) => (
+const Loader2 = ({ className, ...props }: React.SVGProps<SVGSVGElement>) => ( // This was the previous Loader2, renamed to LoaderIcon at the top to avoid conflict if another Loader2 exists
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="24"
@@ -239,6 +315,4 @@ const Loader2 = ({ className, ...props }: React.SVGProps<SVGSVGElement>) => (
     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
   </svg>
 );
-
-
     
