@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleMap, MarkerF, useJsApiLoader } from '@react-google-maps/api';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { MapPinned, Search, AlertTriangle, WifiOff, Loader2 } from 'lucide-react';
+import { MapPinned, Search, AlertTriangle, WifiOff, Loader2, Baby, Wrench, Zap } from 'lucide-react';
 import type { Provider } from '@/types';
 import { ProviderPreviewCard } from './ProviderPreviewCard';
 import { cn } from "@/lib/utils";
@@ -97,6 +97,64 @@ const mapContainerStyle: React.CSSProperties = {
   height: '100%',
 };
 
+// Estilo para ocultar POIs
+const mapStyles: google.maps.MapTypeStyle[] = [
+  {
+    featureType: "poi.business",
+    stylers: [{ visibility: "off" }],
+  },
+  {
+    featureType: "poi.attraction",
+    stylers: [{ visibility: "off" }],
+  },
+  {
+    featureType: "poi.government",
+    stylers: [{ visibility: "off" }],
+  },
+  {
+    featureType: "poi.medical",
+    stylers: [{ visibility: "off" }],
+  },
+  {
+    featureType: "poi.park",
+    elementType: "labels.icon",
+    stylers: [{ visibility: "off" }],
+  },
+  {
+    featureType: "poi.place_of_worship",
+    stylers: [{ visibility: "off" }],
+  },
+  {
+    featureType: "poi.school",
+    stylers: [{ visibility: "off" }],
+  },
+  {
+    featureType: "poi.sports_complex",
+    stylers: [{ visibility: "off" }],
+  },
+  { // Opcional: reduce la prominencia de las etiquetas de tránsito si es necesario
+    featureType: "transit.station",
+    elementType: "labels.icon",
+    stylers: [{ visibility: "off" }],
+  },
+  { // Opcional: reduce la prominencia de algunas carreteras
+    featureType: "road.arterial",
+    elementType: "labels",
+    stylers: [{ visibility: "on" }], // Mantén las etiquetas de las carreteras principales
+  },
+  {
+    featureType: "road.highway",
+    elementType: "labels",
+    stylers: [{ visibility: "on" }], // Mantén las etiquetas de las autopistas
+  },
+  {
+    featureType: "road.local",
+    elementType: "labels",
+    stylers: [{ visibility: "off" }], // Oculta etiquetas de calles locales si deseas máxima limpieza
+  },
+];
+
+
 // Función para calcular la distancia (Haversine)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
   const R = 6371; // Radio de la Tierra en km
@@ -137,10 +195,11 @@ const MapContentComponent = React.memo(({
         streetViewControl: false,
         mapTypeControl: false,
         fullscreenControl: false,
-        zoomControl: false,        // Desactivar control de zoom
-        rotateControl: false,     // Desactivar control de rotación
-        scaleControl: false,      // Desactivar control de escala
-        clickableIcons: false,    // Desactivar iconos de POI clickeables
+        zoomControl: false,
+        rotateControl: false,
+        scaleControl: false,
+        clickableIcons: false,
+        styles: mapStyles, // Aplicar estilos personalizados aquí
       }}
       onLoad={onLoad}
       onUnmount={onUnmount}
@@ -152,7 +211,7 @@ const MapContentComponent = React.memo(({
           icon={{
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
-            fillColor: "hsl(var(--primary))", // Azul primario del tema
+            fillColor: "hsl(var(--primary))",
             fillOpacity: 1,
             strokeWeight: 2,
             strokeColor: "white",
@@ -165,7 +224,9 @@ const MapContentComponent = React.memo(({
             key={provider.id}
             position={provider.location}
             title={`${provider.name} (Calificación: ${provider.rating})`}
-            // Aquí se podrían añadir iconos personalizados por categoría en el futuro
+            // Iconos personalizados por categoría se implementarían aquí en el futuro
+            // Por ejemplo, podrías tener un objeto que mapee categoryId a una URL de icono
+            // icon={CATEGORY_ICONS[provider.services[0].category] || DEFAULT_MARKER_ICON_URL}
           />
         )
       })}
@@ -214,7 +275,7 @@ export function MapDisplay() {
       
       // Mostrar el panel si se encuentran proveedores cercanos
       if (sortedProviders.length > 0) {
-        setProvidersVisibleInPanel(true);
+        setProvidersVisibleInPanel(true); // Hacemos visible el panel automáticamente si hay proveedores
         console.log(`[MapDisplay useEffect] ${sortedProviders.length} proveedores encontrados dentro de 20km. El panel será visible.`);
       } else {
         setProvidersVisibleInPanel(false);
@@ -359,6 +420,8 @@ export function MapDisplay() {
     </Card>
   );
 }
+    
+
     
 
     
