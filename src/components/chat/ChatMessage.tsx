@@ -1,8 +1,12 @@
+
+"use client";
+
 import type { ChatMessage as ChatMessageType } from '@/types';
 import { cn } from '@/lib/utils';
 import { Bot, User, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { DEFAULT_USER_AVATAR } from '@/lib/constants';
+import { useState, useEffect } from 'react';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -21,6 +25,14 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
   const avatarSrc = isUser ? DEFAULT_USER_AVATAR : 'https://placehold.co/100x100.png?text=P';
   const avatarFallback = isUser ? 'U' : 'P';
+
+  const [clientFormattedTimestamp, setClientFormattedTimestamp] = useState<string | null>(null);
+
+  useEffect(() => {
+    setClientFormattedTimestamp(
+      new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    );
+  }, [message.timestamp]);
 
 
   return (
@@ -53,9 +65,9 @@ export function ChatMessage({ message }: ChatMessageProps) {
             <span className="text-green-500">Mensaje verificado</span>
         </div>
       )}
-      {!isSystem && (
+      {!isSystem && clientFormattedTimestamp && (
         <p className={cn('text-xs text-muted-foreground', isUser ? 'text-right mr-10' : 'ml-10')}>
-          {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          {clientFormattedTimestamp}
         </p>
       )}
     </div>
