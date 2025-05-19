@@ -53,6 +53,19 @@ export const mockProviders: Provider[] = [
     specialties: ['Cuidado de bebés', 'Actividades lúdicas', 'Apoyo con tareas', 'Primeros auxilios básicos']
   },
   {
+    id: 'tutor1',
+    name: 'Profe Carlos - Tutorías',
+    avatarUrl: 'https://placehold.co/100x100.png?text=PC',
+    dataAiHint: 'teacher study',
+    rating: 4.7,
+    isAvailable: true,
+    services: [{
+      id: 's_t1', title: 'Clases de Matemáticas y Física', description: 'Preparación para exámenes, regularización. Niveles secundaria y preparatoria.', price: 50, category: SERVICE_CATEGORIES.find(c=>c.name === 'Tutoría')?.id || 'tutoring', providerId: 'tutor1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'books education'
+    }],
+    location: { lat: 24.8120, lng: -107.4280 }, // Cerca de Culiacán
+    specialties: ['Matemáticas', 'Física', 'Preparación exámenes', 'Álgebra']
+  },
+  {
     id: 'cleaner1',
     name: 'Limpieza Impecable Hogar',
     avatarUrl: 'https://placehold.co/100x100.png?text=LI',
@@ -62,9 +75,9 @@ export const mockProviders: Provider[] = [
     services: [{
       id: 's_c1', title: 'Limpieza Profunda Residencial', description: 'Dejamos tu casa reluciente, servicio en Tres Ríos.', price: 100, category: SERVICE_CATEGORIES.find(c=>c.name === 'Limpieza')?.id || 'cleaning', providerId: 'cleaner1', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'sparkling clean'
     }],
-    location: { lat: 24.7500, lng: -107.3800 } // Un poco más lejos de Culiacán, pero podría estar dentro de 20km
+    location: { lat: 24.7950, lng: -107.4100 } // Cerca de Culiacán
   },
-  { // Proveedor más lejano, para probar filtro de distancia
+  { 
     id: 'plumber_far',
     name: 'Fontanería Distante',
     avatarUrl: 'https://placehold.co/100x100.png?text=FD',
@@ -74,7 +87,7 @@ export const mockProviders: Provider[] = [
     services: [{ id: 's_pf1', title: 'Servicios de Plomería General (Área Extendida)', description: 'Atendemos una amplia área, incluyendo zonas rurales.', price: 60, category: SERVICE_CATEGORIES.find(c=>c.name === 'Plomería')?.id || 'plumbing', providerId: 'plumber_far', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'wrench set' }],
     location: { lat: 25.0000, lng: -107.6000 } // Más de 20km de Culiacán
   },
-  { // Proveedor en otra ciudad, definitivamente fuera del radio
+  { 
     id: 'gardener_la',
     name: 'Jardines Verdes LA',
     avatarUrl: 'https://placehold.co/100x100.png?text=JVLA',

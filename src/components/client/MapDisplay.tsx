@@ -4,12 +4,13 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleMap, MarkerF, useJsApiLoader } from '@react-google-maps/api';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { MapPinned, Search, AlertTriangle, WifiOff, Loader2, Baby, Wrench, Zap, Sparkles, Flower2, Palette, Hammer, Briefcase, Cog } from 'lucide-react';
+import { MapPinned, Search, AlertTriangle, WifiOff, Loader2, Filter } from 'lucide-react';
 import type { Provider } from '@/types';
 import { ProviderPreviewCard } from './ProviderPreviewCard';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { cn } from "@/lib/utils";
-import { SERVICE_CATEGORIES } from '@/lib/constants';
-import { USER_FIXED_LOCATION, mockProviders } from '@/lib/mockData';
+import { USER_FIXED_LOCATION, mockProviders } from '@/lib/mockData'; // Importar desde mockData
 
 const apiKeyFromEnv = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 console.log('[MapDisplay Module] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:', apiKeyFromEnv);
@@ -20,13 +21,27 @@ const mapContainerStyle: React.CSSProperties = {
   height: '100%',
 };
 
-// Estilo para ocultar POIs y controles
 const mapStyles: google.maps.MapTypeStyle[] = [
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-  { featureType: "road.arterial", elementType: "labels", stylers: [{ visibility: "on" }] },
-  { featureType: "road.highway", elementType: "labels", stylers: [{ visibility: "on" }] },
-  { featureType: "road.local", elementType: "labels", stylers: [{ visibility: "off" }] },
+  { elementType: "geometry", stylers: [{ color: "#f5f5f5" }] },
+  { elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#f5f5f5" }] },
+  { featureType: "administrative.land_parcel", stylers: [{ visibility: "off" }] },
+  { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#bdbdbd" }] },
+  { featureType: "poi", elementType: "geometry", stylers: [{ color: "#eeeeee" }] },
+  { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
+  { featureType: "poi.business", stylers: [{ visibility: "off" }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#e5e5e5" }] },
+  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#ffffff" }] },
+  { featureType: "road.arterial", elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#dadada" }] },
+  { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#616161" }] },
+  { featureType: "road.local", stylers: [{ visibility: "off" }] }, // Oculta calles locales para más limpieza
+  { featureType: "transit.line", elementType: "geometry", stylers: [{ color: "#e5e5e5" }] },
+  { featureType: "transit.station", elementType: "geometry", stylers: [{ color: "#eeeeee" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#c9c9c9" }] },
+  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
 ];
 
 // Define MapContentComponent outside MapDisplay
@@ -52,6 +67,7 @@ const MapContentComponent = React.memo(({
       center={center}
       zoom={zoom}
       options={{
+        styles: mapStyles,
         streetViewControl: false,
         mapTypeControl: false,
         fullscreenControl: false,
@@ -59,7 +75,6 @@ const MapContentComponent = React.memo(({
         rotateControl: false,
         scaleControl: false,
         clickableIcons: false,
-        styles: mapStyles,
       }}
       onLoad={onLoad}
       onUnmount={onUnmount}
@@ -71,7 +86,7 @@ const MapContentComponent = React.memo(({
           icon={{
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
-            fillColor: "hsl(var(--primary))",
+            fillColor: "hsl(var(--primary))", // Usa el color primario del tema
             fillOpacity: 1,
             strokeWeight: 2,
             strokeColor: "white",
@@ -85,6 +100,7 @@ const MapContentComponent = React.memo(({
             position={provider.location}
             title={`${provider.name} (Calificación: ${provider.rating.toFixed(1)})`}
             // Iconos personalizados por categoría se implementarían aquí en el futuro
+            // Ejemplo: icon={getCategoryIconUrl(provider.category)}
           />
         )
       })}
@@ -95,20 +111,21 @@ MapContentComponent.displayName = 'MapContentComponent';
 
 
 export function MapDisplay() {
-  const userLocation = USER_FIXED_LOCATION;
+  const userLocation = USER_FIXED_LOCATION; // Ubicación fija para la demo
   const [displayedProviders, setDisplayedProviders] = useState<Provider[]>([]);
-  const [mapCenter, setMapCenter] = useState(userLocation);
-  const [mapZoom, setMapZoom] = useState(16); // <-- CAMBIO DE ZOOM DE 14 A 16
-  const [, setIsMapComponentLoaded] = useState(false); // Renombrado para claridad
+  const [mapCenter, setMapCenter] = useState(USER_FIXED_LOCATION);
+  const [mapZoom, setMapZoom] = useState(16);
+  const [mapInstance, setMapInstance] = useState<google.maps.Map | null>(null);
   const [providersVisibleInPanel, setProvidersVisibleInPanel] = useState(false);
+  const [searchTerm, setSearchTerm] = useState(''); // Estado para el término de búsqueda
 
-  const libraries = useMemo(() => ['places'] as const, []);
   // TEMPORARY HARDCODED - RECUERDA QUITAR ESTO Y USAR .ENV EN UN ENTORNO REAL
   const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU"; 
 
   console.log('[MapDisplay Component] Using hardcoded googleMapsApiKey value for Culiacan demo:', googleMapsApiKey);
   console.log('[MapDisplay Component] User fixed location (Culiacan):', userLocation);
-
+  
+  const libraries = useMemo(() => ['places'] as const, []);
   const { isLoaded: isMapApiLoaded, loadError: mapApiLoadError } = useJsApiLoader(
     googleMapsApiKey
       ? { googleMapsApiKey, libraries, id: 'google-map-script-servimap' }
@@ -121,7 +138,7 @@ export function MapDisplay() {
     console.log("[MapDisplay useEffect] Procesando proveedores con ubicación fija (Culiacán):", userLocation);
     
     const providersInRange = mockProviders.filter(provider => {
-      if (provider.location && provider.isAvailable) {
+      if (provider.location && provider.isAvailable) { // Asegurarse que solo disponibles se consideren
         const distance = calculateDistance(userLocation.lat, userLocation.lng, provider.location.lat, provider.location.lng);
         console.log(`[MapDisplay useEffect] Distancia a ${provider.name}: ${distance.toFixed(2)} km`);
         return distance <= 20; // Radio de 20 km
@@ -134,25 +151,47 @@ export function MapDisplay() {
     setDisplayedProviders(sortedProviders);
     
     if (sortedProviders.length > 0) {
-      setProvidersVisibleInPanel(true); // Hacer visible el panel si hay proveedores
-      console.log(`[MapDisplay useEffect] ${sortedProviders.length} proveedores encontrados cerca de Culiacán. El panel será visible.`);
+      // La visibilidad del panel se controla por la búsqueda explícita ahora
+      // setProvidersVisibleInPanel(true); 
+      console.log(`[MapDisplay useEffect] ${sortedProviders.length} proveedores encontrados cerca de Culiacán.`);
     } else {
       setProvidersVisibleInPanel(false);
-      console.log("[MapDisplay useEffect] No se encontraron proveedores cerca de Culiacán. El panel estará oculto.");
+      console.log("[MapDisplay useEffect] No se encontraron proveedores cerca de Culiacán.");
     }
-    setMapCenter(userLocation); // Asegura que el mapa se centre en Culiacán
+    setMapCenter(userLocation);
     
-  }, []); // Dependencia vacía, ya que userLocation es constante para la demo
+  }, [userLocation]); // Dependencia en userLocation (que es constante aquí)
 
-  const onMapLoadCallback = useCallback((mapInstance: google.maps.Map) => {
-    console.log("Google Map component successfully loaded. Instancia del mapa:", mapInstance);
-    setIsMapComponentLoaded(true);
+  const onMapLoadCallback = useCallback((map: google.maps.Map) => {
+    console.log("Google Map component successfully loaded. Instancia del mapa:", map);
+    setMapInstance(map);
   }, []);
 
   const onMapUnmountCallback = useCallback(() => {
     console.log("Google Map component unmounted.");
-    setIsMapComponentLoaded(false);
+    setMapInstance(null);
   }, []);
+
+  // Función para simular la búsqueda
+  const handleSearch = () => {
+    // Por ahora, simplemente mostramos los proveedores que ya están filtrados por distancia.
+    // En una implementación real, aquí se filtraría 'displayedProviders' por 'searchTerm'.
+    if (displayedProviders.length > 0) {
+        setProvidersVisibleInPanel(true);
+        console.log(`Búsqueda simulada. Mostrando ${displayedProviders.length} proveedores cercanos.`);
+    } else {
+        setProvidersVisibleInPanel(false);
+        console.log("Búsqueda simulada. No hay proveedores cercanos para mostrar.");
+    }
+    // Si se quiere implementar filtrado por texto (ejemplo básico):
+    // const filteredBySearchTerm = displayedProviders.filter(provider => 
+    //   provider.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    //   provider.services.some(service => service.title.toLowerCase().includes(searchTerm.toLowerCase()))
+    // );
+    // setFilteredProvidersForPanel(filteredBySearchTerm); // Necesitarías un nuevo estado para esto
+    // setProvidersVisibleInPanel(true);
+  };
+
 
   const renderMapArea = () => {
     console.log('[renderMapArea] Current state: isMapApiLoaded:', isMapApiLoaded, 'mapApiLoadError:', mapApiLoadError, 'googleMapsApiKey set:', !!googleMapsApiKey);
@@ -201,33 +240,42 @@ export function MapDisplay() {
     );
   };
   
-  const shouldDisplayRightPanel = isMapApiLoaded && !mapApiLoadError && googleMapsApiKey && providersVisibleInPanel && displayedProviders.length > 0;
+  // El panel derecho solo se muestra si providersVisibleInPanel es true Y hay proveedores
+  const shouldDisplayRightPanel = providersVisibleInPanel && displayedProviders.length > 0;
 
   return (
     <Card className="shadow-xl overflow-hidden h-full flex flex-col">
-      <CardHeader className="border-b p-4">
-        {/* La barra de búsqueda por texto está oculta temporalmente */}
-        {/* 
-        <div className="flex items-center space-x-4">
-          <div className="relative flex-grow w-full">
+      <CardHeader className="border-b p-4 space-y-3">
+         <h2 className="text-xl font-semibold text-primary text-center">
+          Servicios Disponibles en Culiacán (Simulado)
+        </h2>
+        <div className="flex items-center space-x-2">
+          <div className="relative flex-grow">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input 
               type="search" 
               placeholder="Buscar servicio, nombre, categoría..." 
-              className="pl-8 w-full" 
-              // value={searchTerm} 
-              // onChange={(e) => setSearchTerm(e.target.value)} 
+              className="pl-8 w-full"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
             />
           </div>
+          <Button onClick={handleSearch} aria-label="Buscar">
+            <Search className="h-4 w-4 md:mr-2" />
+            <span className="hidden md:inline">Buscar</span>
+          </Button>
+          {/* Botón de filtro (funcionalidad futura) */}
+          {/* 
+          <Button variant="outline" size="icon" aria-label="Filtrar servicios">
+            <Filter className="h-4 w-4" />
+          </Button> 
+          */}
         </div>
-        */}
-         <h2 className="text-xl font-semibold text-primary text-center">
-          Servicios Disponibles en Culiacán (Simulado)
-        </h2>
       </CardHeader>
       <CardContent className="p-0 md:flex flex-grow overflow-hidden">
          <div className={cn(
-             "h-[calc(100vh-var(--header-height,150px)-var(--map-header-height,80px)-var(--ad-banner-height,70px))] md:h-auto relative bg-muted flex items-center justify-center text-foreground flex-grow",
+             "h-[calc(100vh-var(--header-height,150px)-var(--map-header-height,120px)-var(--ad-banner-height,70px))] md:h-auto relative bg-muted flex items-center justify-center text-foreground flex-grow",
              shouldDisplayRightPanel ? "md:w-2/3" : "md:w-full" 
            )}>
           {renderMapArea()}
@@ -247,8 +295,8 @@ export function MapDisplay() {
          {isMapApiLoaded && !mapApiLoadError && googleMapsApiKey && !shouldDisplayRightPanel && (
              <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-full md:overflow-y-auto space-y-4 flex-shrink-0 flex flex-col items-center justify-center text-muted-foreground text-center">
                 <MapPinned className="h-10 w-10 mb-3 text-primary" />
-                <p className="font-semibold">No se encontraron proveedores disponibles a menos de 20km de la ubicación simulada.</p>
-                <p className="text-sm">Ajusta tu búsqueda o explora el mapa.</p>
+                <p className="font-semibold">Realiza una búsqueda para ver proveedores.</p>
+                <p className="text-sm">Ingresa un término en la barra de arriba y presiona "Buscar".</p>
             </div>
         )}
       </CardContent>
