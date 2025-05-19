@@ -4,8 +4,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleMap, MarkerF, useJsApiLoader } from '@react-google-maps/api';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-// import { Input } from '@/components/ui/input'; // Temporalmente oculto
-// import { Button } from '@/components/ui/button'; // Temporalmente oculto
 import { MapPinned, Search, AlertTriangle, WifiOff, Loader2 } from 'lucide-react';
 import type { Provider } from '@/types';
 import { ProviderPreviewCard } from './ProviderPreviewCard';
@@ -119,8 +117,8 @@ const MapContentComponent = React.memo(({
   zoom,
   onLoad,
   onUnmount,
-  userLocationToDisplay, // Cambiado el nombre para claridad
-  providersToDisplayOnMap // Cambiado el nombre para claridad
+  userLocationToDisplay,
+  providersToDisplayOnMap
 }: {
   center: { lat: number; lng: number };
   zoom: number;
@@ -139,6 +137,10 @@ const MapContentComponent = React.memo(({
         streetViewControl: false,
         mapTypeControl: false,
         fullscreenControl: false,
+        zoomControl: false,        // Desactivar control de zoom
+        rotateControl: false,     // Desactivar control de rotación
+        scaleControl: false,      // Desactivar control de escala
+        clickableIcons: false,    // Desactivar iconos de POI clickeables
       }}
       onLoad={onLoad}
       onUnmount={onUnmount}
@@ -158,18 +160,12 @@ const MapContentComponent = React.memo(({
         />
       )}
       {providersToDisplayOnMap.map(provider => {
-        // const category = SERVICE_CATEGORIES.find(c => c.id === provider.services[0]?.category);
-        // Lógica para íconos personalizados por categoría (futuro)
-        // Para usar iconos de lucide-react directamente aquí, necesitarías un enfoque más avanzado
-        // como OverlayView o convertir los iconos de Lucide a SVG data URIs.
-        // Por ahora, se usarán los marcadores predeterminados de Google Maps para proveedores.
-        // const iconUrl = category?.iconUrl; // Si tuvieras URLs de imágenes para los iconos
         return provider.location && provider.isAvailable && (
           <MarkerF
             key={provider.id}
             position={provider.location}
             title={`${provider.name} (Calificación: ${provider.rating})`}
-            // icon={iconUrl ? { url: iconUrl, scaledSize: new google.maps.Size(30, 30) } : undefined}
+            // Aquí se podrían añadir iconos personalizados por categoría en el futuro
           />
         )
       })}
@@ -183,8 +179,8 @@ export function MapDisplay() {
   const userLocation = USER_FIXED_LOCATION; // Usar la ubicación fija
   const [displayedProviders, setDisplayedProviders] = useState<Provider[]>([]);
   const [mapCenter, setMapCenter] = useState(USER_FIXED_LOCATION);
-  const [mapZoom, setMapZoom] = useState(14); // Zoom un poco más cercano para una ciudad
-  const [, setIsMapComponentLoaded] = useState(false);
+  const [mapZoom, setMapZoom] = useState(14);
+  const [, setIsMapComponentLoaded] = useState(false); // Para rastrear si el componente GoogleMap interno se ha cargado
   const [providersVisibleInPanel, setProvidersVisibleInPanel] = useState(false);
 
   const libraries = useMemo(() => ['places'] as const, []);
@@ -363,4 +359,6 @@ export function MapDisplay() {
     </Card>
   );
 }
+    
+
     
