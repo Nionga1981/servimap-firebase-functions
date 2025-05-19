@@ -87,7 +87,7 @@ const mockProviders: Provider[] = [
     avatarUrl: 'https://placehold.co/100x100.png?text=JVLA',
     dataAiHint: 'gardener nature',
     rating: 4.7,
-    isAvailable: false,
+    isAvailable: false, // Para probar que no disponibles no aparecen
     services: [{ id: 's_g_la', title: 'Mantenimiento de Jardines LA', description: 'Expertos en jardinería en Los Ángeles.', price: 65, category: 'gardening', providerId: 'gardener_la', imageUrl: 'https://placehold.co/300x200.png', dataAiHint: 'lush garden' }],
     location: { lat: 34.0600, lng: -118.2400 } // Los Angeles
   },
@@ -150,7 +150,7 @@ const MapContentComponent = React.memo(({
           icon={{
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
-            fillColor: "hsl(var(--primary))",
+            fillColor: "hsl(var(--primary))", // Azul primario del tema
             fillOpacity: 1,
             strokeWeight: 2,
             strokeColor: "white",
@@ -158,9 +158,12 @@ const MapContentComponent = React.memo(({
         />
       )}
       {providersToDisplayOnMap.map(provider => {
-        const category = SERVICE_CATEGORIES.find(c => c.id === provider.services[0]?.category);
+        // const category = SERVICE_CATEGORIES.find(c => c.id === provider.services[0]?.category);
         // Lógica para íconos personalizados por categoría (futuro)
-        // const iconUrl = category?.iconUrl; 
+        // Para usar iconos de lucide-react directamente aquí, necesitarías un enfoque más avanzado
+        // como OverlayView o convertir los iconos de Lucide a SVG data URIs.
+        // Por ahora, se usarán los marcadores predeterminados de Google Maps para proveedores.
+        // const iconUrl = category?.iconUrl; // Si tuvieras URLs de imágenes para los iconos
         return provider.location && provider.isAvailable && (
           <MarkerF
             key={provider.id}
@@ -179,7 +182,7 @@ MapContentComponent.displayName = 'MapContentComponent';
 export function MapDisplay() {
   const userLocation = USER_FIXED_LOCATION; // Usar la ubicación fija
   const [displayedProviders, setDisplayedProviders] = useState<Provider[]>([]);
-  const [mapCenter, setMapCenter] = useState(userLocation);
+  const [mapCenter, setMapCenter] = useState(USER_FIXED_LOCATION);
   const [mapZoom, setMapZoom] = useState(14); // Zoom un poco más cercano para una ciudad
   const [, setIsMapComponentLoaded] = useState(false);
   const [providersVisibleInPanel, setProvidersVisibleInPanel] = useState(false);
@@ -213,6 +216,7 @@ export function MapDisplay() {
       const sortedProviders = providersInRange.sort((a, b) => b.rating - a.rating);
       setDisplayedProviders(sortedProviders);
       
+      // Mostrar el panel si se encuentran proveedores cercanos
       if (sortedProviders.length > 0) {
         setProvidersVisibleInPanel(true);
         console.log(`[MapDisplay useEffect] ${sortedProviders.length} proveedores encontrados dentro de 20km. El panel será visible.`);
@@ -220,6 +224,8 @@ export function MapDisplay() {
         setProvidersVisibleInPanel(false);
         console.log("[MapDisplay useEffect] No se encontraron proveedores dentro de 20km. El panel estará oculto.");
       }
+      // Actualizar el centro del mapa a la ubicación del usuario una vez procesado
+      setMapCenter(userLocation);
     }
   }, [userLocation]); // Dependencia única: userLocation (que es constante aquí)
 
@@ -236,6 +242,7 @@ export function MapDisplay() {
 
 
   const renderMapArea = () => {
+    console.log('[renderMapArea] Current state: isMapApiLoaded:', isMapApiLoaded, 'mapApiLoadError:', mapApiLoadError, 'googleMapsApiKey set:', !!googleMapsApiKey);
     if (!googleMapsApiKey) {
       console.log('[renderMapArea] No API Key');
       return (
@@ -259,7 +266,7 @@ export function MapDisplay() {
     }
 
     if (!isMapApiLoaded) {
-      console.log('[renderMapArea] !isMapApiLoaded (Loading Map...)');
+      console.log('[renderMapArea] !isMapApiLoaded (Loading Map API...)');
       return (
         <div className="flex flex-col items-center justify-center h-full text-primary p-4">
           <Loader2 className="h-12 w-12 animate-spin mb-4" />
@@ -268,7 +275,7 @@ export function MapDisplay() {
       );
     }
     
-    console.log('[renderMapArea] Rendering MapContentComponent');
+    console.log('[renderMapArea] Rendering MapContentComponent with mapCenter:', mapCenter, 'and userLocation:', userLocation);
     return (
       <MapContentComponent
         center={mapCenter}
@@ -281,11 +288,9 @@ export function MapDisplay() {
     );
   };
 
-  const showProviderListPanel = isMapApiLoaded && !mapApiLoadError && googleMapsApiKey;
-  const showProvidersInPanel = showProviderListPanel && providersVisibleInPanel && displayedProviders.length > 0;
-  const showNoProvidersFoundInPanel = showProviderListPanel && providersVisibleInPanel && displayedProviders.length === 0;
+  const showProviderListPanel = isMapApiLoaded && !mapApiLoadError && googleMapsApiKey && providersVisibleInPanel;
   
-  const shouldDisplayRightPanel = showProvidersInPanel || showNoProvidersFoundInPanel || !googleMapsApiKey || mapApiLoadError;
+  const shouldDisplayRightPanel = showProviderListPanel || !googleMapsApiKey || mapApiLoadError;
 
   return (
     <Card className="shadow-xl overflow-hidden h-full flex flex-col">
@@ -304,7 +309,7 @@ export function MapDisplay() {
       <CardContent className="p-0 md:flex flex-grow overflow-hidden">
          <div className={cn(
              "h-[calc(100vh-var(--header-height,150px)-var(--map-header-height,80px))] md:h-auto relative bg-muted flex items-center justify-center text-foreground flex-grow",
-             shouldDisplayRightPanel ? "md:w-2/3" : "md:w-full"
+             shouldDisplayRightPanel ? "md:w-2/3" : "md:w-full" // Ajuste de ancho dinámico
            )}>
           {renderMapArea()}
         </div>
@@ -345,11 +350,11 @@ export function MapDisplay() {
                 <p className="text-sm">Intenta buscar en otra área o expandir tu radio de búsqueda (funcionalidad futura).</p>
               </div>
             )}
-             {isMapApiLoaded && !mapApiLoadError && googleMapsApiKey && !providersVisibleInPanel && (
+             {isMapApiLoaded && !mapApiLoadError && googleMapsApiKey && !providersVisibleInPanel && ( // Mensaje cuando no hay proveedores visibles o no se han buscado
                  <div className="flex flex-col items-center justify-center text-muted-foreground text-center h-full">
                     <MapPinned className="h-10 w-10 mb-3 text-primary" />
                     <p className="font-semibold">Calculando proveedores cercanos...</p>
-                    <p className="text-sm">La lista de servicios aparecerá aquí si se encuentran dentro del radio.</p>
+                    <p className="text-sm">La lista de servicios aparecerá aquí si se encuentran dentro del radio y después de una búsqueda (funcionalidad actual: se muestran si están cerca de Culiacán).</p>
                 </div>
             )}
           </div>
