@@ -4,18 +4,17 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { GoogleMap, MarkerF, useJsApiLoader } from '@react-google-maps/api';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { MapPinned, Search, AlertTriangle, WifiOff, Loader2 } from 'lucide-react';
+import { MapPinned, Search, AlertTriangle, WifiOff, Loader2, LocateFixed } from 'lucide-react';
 import type { Provider } from '@/types';
 import { ProviderPreviewCard } from './ProviderPreviewCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from "@/lib/utils";
-import { USER_FIXED_LOCATION, mockProviders } from '@/lib/mockData'; // Importar desde mockData
-import { useSearchParams } from 'next/navigation'; // Importar useSearchParams
+import { USER_FIXED_LOCATION, mockProviders } from '@/lib/mockData';
+import { useSearchParams } from 'next/navigation';
 
 const apiKeyFromEnv = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 // console.log('[MapDisplay Module] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:', apiKeyFromEnv);
-
 
 const mapContainerStyle: React.CSSProperties = {
   width: '100%',
@@ -31,7 +30,7 @@ const mapStyles: google.maps.MapTypeStyle[] = [
   { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#bdbdbd" }] },
   { featureType: "poi", elementType: "geometry", stylers: [{ color: "#eeeeee" }] },
   { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
-  { featureType: "poi.business", stylers: [{ visibility: "off" }] }, // Oculta negocios
+  { featureType: "poi.business", stylers: [{ visibility: "off" }] },
   { featureType: "poi.attraction", stylers: [{ visibility: "off" }] },
   { featureType: "poi.government", stylers: [{ visibility: "off" }] },
   { featureType: "poi.medical", stylers: [{ visibility: "off" }] },
@@ -54,7 +53,6 @@ const mapStyles: google.maps.MapTypeStyle[] = [
   { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
 ];
 
-// Define MapContentComponent outside MapDisplay
 const MapContentComponent = React.memo(({
   center,
   zoom,
@@ -104,12 +102,11 @@ const MapContentComponent = React.memo(({
         />
       )}
       {providersToDisplayOnMap.map(provider => {
-        return provider.location && ( // No es necesario checar provider.isAvailable aquí si ya se filtró antes
+        return provider.location && (
           <MarkerF
             key={provider.id}
             position={provider.location}
             title={`${provider.name} (Calificación: ${provider.rating.toFixed(1)})`}
-            // Iconos personalizados por categoría se implementarían aquí en el futuro
           />
         )
       })}
@@ -118,108 +115,92 @@ const MapContentComponent = React.memo(({
 });
 MapContentComponent.displayName = 'MapContentComponent';
 
-
 export function MapDisplay() {
-  const userLocation = USER_FIXED_LOCATION; // Ubicación fija para la demo en Culiacán
+  const userLocation = USER_FIXED_LOCATION;
   const [displayedProviders, setDisplayedProviders] = useState<Provider[]>([]);
   const [mapCenter, setMapCenter] = useState(USER_FIXED_LOCATION);
-  const [mapZoom, setMapZoom] = useState(16); // Zoom más cercano por defecto
+  const [mapZoom, setMapZoom] = useState(16);
   const [mapInstance, setMapInstance] = useState<google.maps.Map | null>(null);
   const [providersVisibleInPanel, setProvidersVisibleInPanel] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const searchParams = useSearchParams(); // Hook para leer parámetros de URL
+  
+  const searchParams = useSearchParams();
+  const categoryParam = useMemo(() => searchParams.get('category'), [searchParams]);
 
   const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU"; // TEMPORARY HARDCODED
-
-  // console.log('[MapDisplay Component] Using hardcoded googleMapsApiKey for Culiacan demo.');
-  // console.log('[MapDisplay Component] User fixed location (Culiacan):', userLocation);
   
   const libraries = useMemo(() => ['places'] as const, []);
-  const { isLoaded: isMapApiLoaded, loadError: mapApiLoadError } = useJsApiLoader(
-    googleMapsApiKey
-      ? { googleMapsApiKey, libraries, id: 'google-map-script-servimap' }
-      : { skip: true }
-  );
-  // console.log('[MapDisplay Render] isMapApiLoaded:', isMapApiLoaded, 'mapApiLoadError:', mapApiLoadError);
+  const { isLoaded: isMapApiLoaded, loadError: mapApiLoadError } = useJsApiLoader({
+    googleMapsApiKey,
+    libraries,
+    id: 'google-map-script-servimap'
+  });
 
   useEffect(() => {
+    console.log('[MapDisplay useEffect] Triggered. Deps: userLocation, categoryParam, isMapApiLoaded, mapApiLoadError');
     if (!isMapApiLoaded || mapApiLoadError || !googleMapsApiKey) {
-      console.log('[MapDisplay useEffect] Map API not ready or error, skipping provider processing.');
+      console.log('[MapDisplay useEffect] Map API not ready or error, skipping provider processing. isLoaded:', isMapApiLoaded, 'loadError:', mapApiLoadError);
       setDisplayedProviders([]);
       setProvidersVisibleInPanel(false);
       return;
     }
     
-    console.log('[MapDisplay useEffect] Processing providers. UserLocation:', userLocation);
-    let providersSource = [...mockProviders]; // Start with a fresh copy
+    console.log('[MapDisplay useEffect] Processing providers. UserLocation:', userLocation, 'CategoryParam:', categoryParam);
+    let providersSource = [...mockProviders];
     console.log('[MapDisplay useEffect] Initial mockProviders count:', providersSource.length);
-
 
     // 1. Filter by distance (20km radius)
     if (userLocation) {
       providersSource = providersSource.filter(provider => {
-        if (provider.location && provider.isAvailable) { // Asegurar que solo disponibles se consideren
+        if (provider.location && provider.isAvailable) {
           const distance = calculateDistance(userLocation.lat, userLocation.lng, provider.location.lat, provider.location.lng);
           return distance <= 20; 
         }
         return false;
       });
       console.log('[MapDisplay useEffect] Providers after distance filter (and isAvailable):', providersSource.length, providersSource.map(p => p.name));
-    } else {
-      console.log('[MapDisplay useEffect] No userLocation, skipping distance filter.');
     }
 
-    // 2. Filter by category from URL
-    const categoryParam = searchParams.get('category');
-    console.log('[MapDisplay useEffect] categoryParam from URL:', categoryParam);
-
-    if (categoryParam && categoryParam !== 'all' && categoryParam !== '') {
-      console.log(`[MapDisplay useEffect] Applying category filter: ${categoryParam}`);
+    // 2. Filter by category from URL (if categoryParam is a specific category ID)
+    const isActiveCategoryFilter = categoryParam && categoryParam !== 'all' && categoryParam !== '';
+    if (isActiveCategoryFilter) {
+      console.log(`[MapDisplay useEffect] Applying specific category filter: ${categoryParam}`);
       providersSource = providersSource.filter(provider =>
         provider.services.some(service => service.category === categoryParam)
       );
-      console.log('[MapDisplay useEffect] Providers after category filter:', providersSource.length, providersSource.map(p => p.name));
-    } else {
-      console.log("[MapDisplay useEffect] Not filtering by category (all or no param).");
+      console.log('[MapDisplay useEffect] Providers after specific category filter:', providersSource.length, providersSource.map(p => p.name));
     }
+    // If categoryParam is 'all', no further category filtering is done here; all nearby providers are kept.
+    // If categoryParam is null/undefined, no category filtering from URL.
 
-    // 3. Sort by rating (descending)
     providersSource.sort((a, b) => b.rating - a.rating);
-    // console.log('[MapDisplay useEffect] Providers after sorting:', providersSource.map(p => `${p.name} (${p.rating})`));
-
     setDisplayedProviders(providersSource);
     
-    // Si hay un filtro de categoría activo (y no es "all"), y hay resultados, mostrar el panel.
-    // Si no, la visibilidad del panel se controla por handleSearch (botón "Buscar").
-    if (categoryParam && categoryParam !== 'all' && categoryParam !== '') {
+    // Panel Visibility Logic based on categoryParam
+    if (categoryParam) { // User has interacted with category filter (selected a category or "all")
+      console.log(`[MapDisplay useEffect] Category param is '${categoryParam}'. Setting panel visibility based on results.`);
       setProvidersVisibleInPanel(providersSource.length > 0);
-      console.log(`[MapDisplay useEffect] Category filter '${categoryParam}' is active. Panel visible: ${providersSource.length > 0}`);
-    } else {
-      // Si no hay filtro de categoría activo desde la URL, el panel se oculta inicialmente o después de limpiar el filtro.
-      // Se mostrará solo si el usuario presiona "Buscar".
-      // Si `providersVisibleInPanel` ya era true por una búsqueda previa, y el filtro de categoría se limpia,
-      // el panel debería ocultarse si la intención es volver a un estado "sin búsqueda activa".
-      // Esto podría necesitar una lógica más fina si se quiere mantener el panel visible con "todos" los proveedores después de una búsqueda.
-      // Por ahora, si no hay filtro de categoría, el panel se oculta a menos que se presione "Buscar".
-      if (providersVisibleInPanel && (!categoryParam || categoryParam === 'all' || categoryParam === '')) {
-         // Si el panel estaba visible y se limpia el filtro, lo ocultamos.
-         // OJO: Esto podría ser contraintuitivo si el usuario espera ver "todos" los proveedores cercanos.
-         // Por ahora, la política es: el panel se muestra explícitamente por búsqueda o filtro de categoría activo.
-         // setProvidersVisibleInPanel(false); 
-         // console.log('[MapDisplay useEffect] No category filter or "all". Panel visibility relies on search button click.');
-      }
+    } else { // No category param from URL (e.g., initial load, or URL cleared of category)
+      console.log('[MapDisplay useEffect] No category param from URL. Panel visibility not changed by useEffect, relies on handleSearch or remains hidden.');
+      // To ensure panel hides if filter is cleared and no search was made:
+      // setProvidersVisibleInPanel(false); // This line would hide it if categoryParam is removed.
+      // For now, let's keep it this way: useEffect only shows panel if categoryParam is active.
+      // It doesn't hide it if categoryParam is removed. handleSearch can still show it.
+      // A better approach: if categoryParam is null, hide panel.
+      setProvidersVisibleInPanel(false); // Explicitly hide if no category param from URL
     }
-    setMapCenter(userLocation); // Asegurarse que el mapa se centra en la ubicación del usuario
     
-  }, [userLocation, searchParams, isMapApiLoaded, mapApiLoadError, googleMapsApiKey]);
+    setMapCenter(userLocation);
+    
+  }, [userLocation, categoryParam, isMapApiLoaded, mapApiLoadError, googleMapsApiKey]);
 
   const onMapLoadCallback = useCallback((map: google.maps.Map) => {
-    // console.log("Google Map component successfully loaded. Instancia del mapa:", map);
+    console.log("Google Map component successfully loaded. Instancia del mapa:", map);
     setMapInstance(map);
   }, []);
 
   const onMapUnmountCallback = useCallback(() => {
-    // console.log("Google Map component unmounted.");
+    console.log("Google Map component unmounted.");
     setMapInstance(null);
   }, []);
 
@@ -227,60 +208,42 @@ export function MapDisplay() {
     console.log('[MapDisplay handleSearch] Search button clicked.');
     let providersToDisplay = [...mockProviders]; 
 
-    // 1. Filter by distance
     if (userLocation) {
       providersToDisplay = providersToDisplay.filter(provider => {
-        if (provider.location && provider.isAvailable) { // Asegurar que solo disponibles se consideren
+        if (provider.location && provider.isAvailable) {
           const distance = calculateDistance(userLocation.lat, userLocation.lng, provider.location.lat, provider.location.lng);
           return distance <= 20;
         }
         return false;
       });
     }
-    console.log('[MapDisplay handleSearch] Providers after distance filter (and isAvailable):', providersToDisplay.length, providersToDisplay.map(p => p.name));
+    console.log('[MapDisplay handleSearch] Providers after distance filter (and isAvailable):', providersToDisplay.length);
 
-    // 2. Filter by category from URL
-    const categoryParam = searchParams.get('category');
-    console.log(`[MapDisplay handleSearch] categoryParam from URL: ${categoryParam}`);
-    if (categoryParam && categoryParam !== 'all' && categoryParam !== '') {
-      console.log(`[MapDisplay handleSearch] Applying category filter: ${categoryParam}`);
+    const currentCategoryParam = searchParams.get('category'); // Use searchParams directly here
+    console.log(`[MapDisplay handleSearch] categoryParam from URL: ${currentCategoryParam}`);
+    if (currentCategoryParam && currentCategoryParam !== 'all' && currentCategoryParam !== '') {
+      console.log(`[MapDisplay handleSearch] Applying category filter: ${currentCategoryParam}`);
       providersToDisplay = providersToDisplay.filter(provider =>
-        provider.services.some(service => service.category === categoryParam)
+        provider.services.some(service => service.category === currentCategoryParam)
       );
     }
-    console.log('[MapDisplay handleSearch] Providers after category filter:', providersToDisplay.length, providersToDisplay.map(p => p.name));
+    console.log('[MapDisplay handleSearch] Providers after category filter:', providersToDisplay.length);
+    
+    // Placeholder for future text search based on `searchTerm`
+    // if (searchTerm.trim() !== '') { ... }
 
-    // 3. Filter by searchTerm (futura implementación)
-    // if (searchTerm.trim() !== '') {
-    //   console.log(`[MapDisplay handleSearch] Applying text search: ${searchTerm}`);
-    //   providersToDisplay = providersToDisplay.filter(provider =>
-    //     provider.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    //     provider.specialties?.some(s => s.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    //     provider.services.some(service => service.title.toLowerCase().includes(searchTerm.toLowerCase()) || service.description.toLowerCase().includes(searchTerm.toLowerCase()))
-    //   );
-    // }
-    // console.log('[MapDisplay handleSearch] Providers after text search:', providersToDisplay.length, providersToDisplay.map(p => p.name));
-
-
-    // 4. Sort by rating
     providersToDisplay.sort((a, b) => b.rating - a.rating);
-
     setDisplayedProviders(providersToDisplay);
     setProvidersVisibleInPanel(providersToDisplay.length > 0);
     console.log(`[MapDisplay handleSearch] Setting providersVisibleInPanel to ${providersToDisplay.length > 0}. Final displayed providers:`, providersToDisplay.map(p=>p.name));
 
     if (providersToDisplay.length === 0) {
-      // Aquí podrías usar un toast para indicar que no se encontraron resultados.
-      // toast({ title: "Sin resultados", description: "No se encontraron proveedores con los filtros actuales." });
       console.log("[MapDisplay handleSearch] No providers found for current filters.");
     }
   };
 
-
   const renderMapArea = () => {
-    // console.log('[renderMapArea] Current state: isMapApiLoaded:', isMapApiLoaded, 'mapApiLoadError:', mapApiLoadError, 'googleMapsApiKey set:', !!googleMapsApiKey);
     if (!googleMapsApiKey) {
-      // console.log('[renderMapArea] No API Key');
       return (
         <div className="flex flex-col items-center justify-center h-full text-destructive p-4 bg-destructive/10 rounded-md">
           <AlertTriangle className="h-12 w-12 mb-4" />
@@ -291,18 +254,16 @@ export function MapDisplay() {
     }
 
     if (mapApiLoadError) {
-       // console.log('[renderMapArea] mapApiLoadError:', mapApiLoadError);
        return (
         <div className="flex flex-col items-center justify-center h-full text-destructive p-4 bg-destructive/10 rounded-md">
           <WifiOff className="h-12 w-12 mb-4" />
           <p className="text-lg font-semibold mb-2">Error Cargando Google Maps</p>
-          <p className="text-sm text-center">Error al cargar la API de Google Maps: {mapApiLoadError.message}. Revisa la consola para más detalles.</p>
+          <p className="text-sm text-center">Error al cargar la API: {mapApiLoadError.message}.</p>
         </div>
       );
     }
 
     if (!isMapApiLoaded) {
-      // console.log('[renderMapArea] !isMapApiLoaded (Loading Map API...)');
       return (
         <div className="flex flex-col items-center justify-center h-full text-primary p-4 bg-primary/5">
           <Loader2 className="h-12 w-12 animate-spin mb-4" />
@@ -311,7 +272,6 @@ export function MapDisplay() {
       );
     }
     
-    // console.log('[renderMapArea] Rendering MapContentComponent with mapCenter:', mapCenter, 'and userLocation:', userLocation);
     return (
       <MapContentComponent
         center={mapCenter}
@@ -319,12 +279,11 @@ export function MapDisplay() {
         onLoad={onMapLoadCallback}
         onUnmount={onMapUnmountCallback}
         userLocationToDisplay={userLocation} 
-        providersToDisplayOnMap={displayedProviders} // Pasar los proveedores filtrados y ordenados al mapa
+        providersToDisplayOnMap={displayedProviders}
       />
     );
   };
   
-  // El panel derecho solo se muestra si providersVisibleInPanel es true Y hay proveedores
   const shouldDisplayRightPanel = providersVisibleInPanel && displayedProviders.length > 0;
 
   return (
@@ -359,8 +318,8 @@ export function MapDisplay() {
         {shouldDisplayRightPanel && (
           <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-full md:overflow-y-auto space-y-4 flex-shrink-0">
             <h3 className="text-lg font-semibold text-primary mb-2">
-              {searchParams.get('category') && searchParams.get('category') !== 'all' 
-                ? `Proveedores de "${searchParams.get('category')}" cercanos:`
+              {categoryParam && categoryParam !== 'all' 
+                ? `Proveedores de "${searchParams.get('category')}" cercanos:` // Use searchParams here for display
                 : "Proveedores Cercanos:"}
             </h3>
             {displayedProviders.map(provider => ( 
@@ -383,7 +342,6 @@ export function MapDisplay() {
   );
 }
 
-// Función para calcular la distancia (Haversine)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
   const R = 6371; // Radio de la Tierra en km
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -393,5 +351,7 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
     Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c; // Distancia en km
+  return R * c;
 };
+
+    
