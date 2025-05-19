@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { mockProviders, USER_FIXED_LOCATION } from '@/lib/mockData'; // Asegúrate que mockProviders se exporte
-import { Provider, Service } from '@/types';
+import type { Provider, Service } from '@/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,7 @@ import { Separator } from '@/components/ui/separator';
 import { Star, MapPin, MessageSquare, DollarSign, Tag, ArrowLeft, CheckCircle, ShieldCheck, CalendarDays } from 'lucide-react';
 import { SERVICE_CATEGORIES, DEFAULT_SERVICE_IMAGE, DEFAULT_USER_AVATAR } from '@/lib/constants';
 import { useEffect, useState } from 'react';
+import { cn } from '@/lib/utils'; // Import cn utility
 
 // Función para calcular la distancia (Haversine) - duplicada aquí por simplicidad o podría importarse
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -239,3 +240,5 @@ const Loader2 = ({ className, ...props }: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+
+    
