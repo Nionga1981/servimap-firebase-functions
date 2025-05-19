@@ -10,6 +10,7 @@ import { MapPinned, Search, LocateFixed, AlertTriangle, WifiOff, Loader2 } from 
 import type { Provider } from '@/types';
 import { ProviderPreviewCard } from './ProviderPreviewCard';
 import { cn } from "@/lib/utils";
+import { SERVICE_CATEGORIES } from '@/lib/constants'; // Necesario si fuéramos a usar iconos de categoría
 
 // Log environment variable at module level - for debugging .env issues
 const apiKeyFromEnv = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -135,26 +136,32 @@ const MapContentComponent = React.memo(({
         <MarkerF
           position={userLocation}
           title="Tu ubicación"
-          icon={{
+          icon={{ // Icono personalizado para la ubicación del usuario
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
-            fillColor: "hsl(var(--primary))",
+            fillColor: "hsl(var(--primary))", // Azul primario del tema
             fillOpacity: 1,
             strokeWeight: 2,
             strokeColor: "white",
           }}
         />
       )}
-      {providersToDisplay.map(provider =>
-        provider.location && provider.isAvailable && ( // Only show available providers on map
+      {providersToDisplay.map(provider => {
+        // Placeholder para iconos de categoría.
+        // En una implementación real, aquí se determinaría el icono
+        // basado en provider.services[0].category.
+        // const categoryInfo = SERVICE_CATEGORIES.find(c => c.id === provider.services[0]?.category);
+        // const markerIcon = categoryInfo ? { url: 'path/to/icon.png' } : undefined; // o un objeto Symbol
+        
+        return provider.location && provider.isAvailable && (
           <MarkerF
             key={provider.id}
             position={provider.location}
             title={`${provider.name} (Calificación: ${provider.rating})`}
-            // Consider custom icons per category later
+            // icon={markerIcon} // Descomentar y ajustar cuando tengas iconos de categoría
           />
         )
-      )}
+      })}
     </GoogleMap>
   );
 });
@@ -163,13 +170,13 @@ MapContentComponent.displayName = 'MapContentComponent';
 
 export function MapDisplay() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [isLoadingLocation, setIsLoadingLocation] = useState(true);
+  const [isLoadingLocation, setIsLoadingLocation] = useState(true); // Inicia como true para reflejar carga inicial
   const [locationError, setLocationError] = useState<string | null>(null);
   const [displayedProviders, setDisplayedProviders] = useState<Provider[]>([]);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [mapZoom, setMapZoom] = useState(10);
   const [, setIsMapComponentLoaded] = useState(false); // Keep for map load/unmount logging
-  const [providersVisible, setProvidersVisible] = useState(false); // New state
+  const [providersVisible, setProvidersVisible] = useState(false);
 
   const libraries = useMemo(() => ['places'] as const, []);
 
@@ -196,10 +203,8 @@ export function MapDisplay() {
   const handleRequestUserLocation = useCallback((isUserInitiated: boolean = false) => {
     setIsLoadingLocation(true);
     setLocationError(null);
-    if (isUserInitiated) { // Only clear providers if user explicitly requests location
-        setProvidersVisible(false); 
-        // setDisplayedProviders([]); // Optionally clear providers immediately
-    }
+    // No ocultamos la lista si es carga inicial, solo si es error o no hay geoloc.
+    // setProvidersVisible(false) se manejará en error o si no hay navigator.geolocation
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -212,14 +217,10 @@ export function MapDisplay() {
           setIsLoadingLocation(false);
           console.log("Ubicación del usuario obtenida:", coords);
           
-          // Simulate finding providers after location is obtained
-          // Sort all mock providers by rating
           const sortedProviders = [...mockProviders]
             .sort((a, b) => b.rating - a.rating);
           setDisplayedProviders(sortedProviders);
-          if (isUserInitiated) {
-            setProvidersVisible(true);
-          }
+          setProvidersVisible(true); // Mostrar proveedores al obtener ubicación exitosamente
         },
         (error) => {
           console.error("Error de geolocalización:", error);
@@ -235,17 +236,17 @@ export function MapDisplay() {
       setDisplayedProviders([]); 
       setProvidersVisible(false);
     }
-  }, []); // Empty dependency array, as it doesn't depend on component state/props that change
+  }, []);
 
   useEffect(() => {
-    // Request location on initial load, but don't make providers visible yet
-    handleRequestUserLocation(false); 
+    // Solicitar ubicación al cargar y mostrar proveedores si tiene éxito.
+    handleRequestUserLocation(true); 
   }, [handleRequestUserLocation]);
 
   useEffect(() => {
     if (userLocation) {
       setMapCenter(userLocation);
-      setMapZoom(14); // Zoom in when user location is available
+      setMapZoom(14);
     } else {
       setMapCenter(defaultCenter);
       setMapZoom(10);
@@ -296,13 +297,13 @@ export function MapDisplay() {
 
     return (
       <>
-        {isLoadingLocation && !userLocation && !locationError && (
+        {isLoadingLocation && !userLocation && !locationError && ( // Mostrar solo si está cargando Y no hay ubicación NI error aún
           <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-background/80 z-10">
             <Loader2 className="h-8 w-8 text-primary animate-spin mb-2" />
             <p className="text-lg font-semibold text-foreground">Obteniendo tu ubicación...</p>
           </div>
         )}
-        {locationError && !userLocation && (
+        {locationError && !userLocation && ( // Mostrar si hay error Y no hay ubicación
            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 bg-destructive/20 z-10 text-center">
               <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-2" />
               <p className="text-lg font-semibold text-destructive-foreground">Error de Ubicación</p>
@@ -332,16 +333,16 @@ export function MapDisplay() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input type="search" placeholder="Buscar servicio, nombre, categoría..." className="pl-8 w-full" />
           </div>
-          <Button variant="outline" onClick={() => handleRequestUserLocation(true)} disabled={isLoadingLocation} className="w-full sm:w-auto flex-shrink-0">
-            <LocateFixed className={`mr-2 h-4 w-4 ${isLoadingLocation ? 'animate-spin' : ''}`} />
-            {isLoadingLocation ? "Localizando..." : userLocation ? "Actualizar Ubicación" : "Obtener Mi Ubicación"}
+          <Button variant="outline" onClick={() => handleRequestUserLocation(true)} disabled={isLoadingLocation && !userLocation} className="w-full sm:w-auto flex-shrink-0">
+            <LocateFixed className={`mr-2 h-4 w-4 ${isLoadingLocation && !userLocation ? 'animate-spin' : ''}`} />
+            {isLoadingLocation && !userLocation ? "Localizando..." : "Actualizar Ubicación"}
           </Button>
         </div>
       </CardHeader>
       <CardContent className="p-0 md:flex flex-grow">
         <div className={cn(
              "h-[calc(100vh-var(--header-height,150px)-var(--map-header-height,80px))] md:h-auto relative bg-muted flex items-center justify-center text-foreground",
-             showProviderList ? "md:w-2/3 flex-grow" : "w-full flex-grow" // Occupy full width if no list
+             showProviderList ? "md:w-2/3 flex-grow" : "w-full flex-grow"
            )}>
           {renderMapArea()}
         </div>
@@ -357,7 +358,6 @@ export function MapDisplay() {
               ))}
           </div>
         )}
-         {/* Fallback messages for errors when provider list would normally show or map has issues */}
          {(!googleMapsApiKey || mapApiLoadError || (locationError && !userLocation && !isLoadingLocation)) && !showProviderList && (
             <div className={cn("p-4 border-t md:border-t-0 md:border-l flex flex-col items-center justify-center text-muted-foreground text-center", showProviderList ? "hidden" : "md:w-1/3")}>
               {!googleMapsApiKey && (
@@ -383,7 +383,7 @@ export function MapDisplay() {
                 </>
               )}
                {!isLoadingLocation && !locationError && !mapApiLoadError && displayedProviders.length === 0 && !providersVisible && (
-                 <p className="text-center text-muted-foreground">Haz clic en "Obtener Mi Ubicación" o realiza una búsqueda para ver proveedores.</p>
+                 <p className="text-center text-muted-foreground">Haz clic en "Actualizar Ubicación" o realiza una búsqueda para ver proveedores.</p>
                )}
                 {!isLoadingLocation && !locationError && !mapApiLoadError && displayedProviders.length === 0 && providersVisible && (
                  <p className="text-center text-muted-foreground">No se encontraron proveedores para tu búsqueda actual.</p>
