@@ -12,13 +12,15 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Star, MapPin, MessageSquare, DollarSign, Tag, ArrowLeft, CheckCircle, ShieldCheck, CalendarDays, Loader2 as LoaderIcon } from 'lucide-react'; // Renamed Loader2 to LoaderIcon to avoid conflict
+import { Star, MapPin, MessageSquare, DollarSign, Tag, ArrowLeft, CheckCircle, ShieldCheck, CalendarDays, Loader2 as LoaderIcon, ShoppingBag } from 'lucide-react';
 import { SERVICE_CATEGORIES, DEFAULT_SERVICE_IMAGE, DEFAULT_USER_AVATAR } from '@/lib/constants';
 import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Calendar } from "@/components/ui/calendar";
 import { useToast } from "@/hooks/use-toast";
-
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 
 // Función para calcular la distancia (Haversine)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -44,19 +46,37 @@ export default function ProviderProfilePage() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const { toast } = useToast();
 
+  // State for "Contratar Ahora" Popover
+  const [selectedServices, setSelectedServices] = useState<Record<string, boolean>>({});
+  const [subtotal, setSubtotal] = useState(0);
+  const [popoverOpen, setPopoverOpen] = useState(false);
+
   useEffect(() => {
     if (providerId) {
       const foundProvider = mockProviders.find(p => p.id === providerId);
       setProvider(foundProvider);
+      console.log('Provider data in useEffect:', foundProvider); // DEBUG LOG
 
       if (foundProvider?.location && USER_FIXED_LOCATION) {
         const dist = calculateDistance(USER_FIXED_LOCATION.lat, USER_FIXED_LOCATION.lng, foundProvider.location.lat, foundProvider.location.lng);
         setDistanceFromUser(dist.toFixed(1));
       }
-      // Simular número de reseñas
       setReviewCount(Math.floor(Math.random() * 200) + 10);
     }
   }, [providerId]);
+
+  // Calculate subtotal for "Contratar Ahora"
+  useEffect(() => {
+    if (provider) {
+      const currentSubtotal = provider.services.reduce((acc, service) => {
+        if (selectedServices[service.id]) {
+          return acc + service.price;
+        }
+        return acc;
+      }, 0);
+      setSubtotal(currentSubtotal);
+    }
+  }, [selectedServices, provider]);
 
   const handleDateSelect = (date: Date | undefined) => {
     if (date) {
@@ -83,9 +103,31 @@ export default function ProviderProfilePage() {
         title: "Cita Solicitada",
         description: `Se ha enviado una solicitud de cita para el ${selectedDate.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}. El proveedor se pondrá en contacto.`,
       });
-       // Aquí podrías añadir lógica para enviar la solicitud al backend
     }
   };
+
+  const handleServiceSelection = (serviceId: string, checked: boolean) => {
+    setSelectedServices(prev => ({ ...prev, [serviceId]: checked }));
+  };
+
+  const handleConfirmImmediateServices = () => {
+    const chosenServices = provider?.services.filter(s => selectedServices[s.id]).map(s => s.title).join(', ');
+    if (!chosenServices || subtotal === 0) {
+      toast({
+        title: "Ningún servicio seleccionado",
+        description: "Por favor, selecciona al menos un servicio para contratar.",
+        variant: "destructive",
+      });
+      return;
+    }
+    toast({
+      title: "Procesando Solicitud Inmediata...",
+      description: `Servicios: ${chosenServices}. Subtotal: $${subtotal.toFixed(2)}. (Simulación: el pago no se procesará).`,
+    });
+    setPopoverOpen(false); // Cerrar el popover
+    setSelectedServices({}); // Resetear selección
+  };
+
 
   if (!provider) {
     return (
@@ -110,6 +152,8 @@ export default function ProviderProfilePage() {
     return CategoryIcon ? <CategoryIcon className="h-4 w-4 text-muted-foreground" /> : <Tag className="h-4 w-4 text-muted-foreground" />;
   };
 
+  // DEBUG LOG
+  console.log('Rendering Contratar Ahora button for provider:', provider?.name, 'isAvailable:', provider?.isAvailable);
 
   return (
     <div className="container mx-auto py-8 max-w-4xl">
@@ -125,8 +169,8 @@ export default function ProviderProfilePage() {
                  <Image
                     src={provider.services[0]?.imageUrl || provider.avatarUrl || DEFAULT_SERVICE_IMAGE}
                     alt={`Banner de ${provider.name}`}
-                    fill // Reemplaza layout="fill"
-                    style={{ objectFit: "cover" }} // Reemplaza objectFit="cover"
+                    fill
+                    style={{ objectFit: "cover" }}
                     className="opacity-80"
                     data-ai-hint={provider.dataAiHint || "provider banner"}
                   />
@@ -194,6 +238,67 @@ export default function ProviderProfilePage() {
                         <MessageSquare className="mr-2 h-5 w-5" /> Contactar por Chat
                     </Link>
                 </Button>
+
+                {/* --- START: Botón Contratar Ahora --- */}
+                {provider.isAvailable && (
+                  <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <Button 
+                        className="w-full bg-accent hover:bg-accent/80 text-accent-foreground" 
+                        size="lg"
+                        // style={{ border: '2px solid red', padding: '10px' }} // TEMPORARY STYLE FOR VISIBILITY
+                      >
+                        <ShoppingBag className="mr-2 h-5 w-5" /> Contratar Ahora
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-80 p-4" align="end">
+                      <div className="grid gap-4">
+                        <div className="space-y-2">
+                          <h4 className="font-medium leading-none text-primary">Seleccionar Servicios</h4>
+                          <p className="text-sm text-muted-foreground">
+                            Elige los servicios que necesitas ahora.
+                          </p>
+                        </div>
+                        <div className="grid gap-2 max-h-60 overflow-y-auto">
+                          {provider.services.length > 0 ? (
+                            provider.services.map((service) => (
+                              <div key={service.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-secondary/50">
+                                <Checkbox
+                                  id={`service-${service.id}`}
+                                  checked={selectedServices[service.id] || false}
+                                  onCheckedChange={(checked) => handleServiceSelection(service.id, !!checked)}
+                                />
+                                <Label
+                                  htmlFor={`service-${service.id}`}
+                                  className="flex-grow text-sm font-normal cursor-pointer"
+                                >
+                                  {service.title}
+                                </Label>
+                                <span className="text-sm font-semibold text-primary">${service.price.toFixed(2)}</span>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm text-muted-foreground">Este proveedor no tiene servicios detallados para contratación inmediata.</p>
+                          )}
+                        </div>
+                        {provider.services.length > 0 && (
+                          <>
+                            <Separator />
+                            <div className="flex justify-between items-center">
+                              <span className="text-md font-semibold">Subtotal:</span>
+                              <span className="text-md font-bold text-primary">${subtotal.toFixed(2)}</span>
+                            </div>
+                            <Button onClick={handleConfirmImmediateServices} disabled={subtotal === 0}>
+                              Confirmar y Pagar Servicios
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                )}
+                {/* --- END: Botón Contratar Ahora --- */}
+
                 <Card className="bg-secondary/20">
                     <CardHeader className="pb-2">
                         <CardTitle className="text-md flex items-center">
@@ -209,7 +314,6 @@ export default function ProviderProfilePage() {
 
           <Separator className="my-8" />
 
-          {/* --- START: Nueva Sección de Agenda --- */}
           <div className="mb-8">
             <h2 className="text-xl font-semibold text-primary mb-4 flex items-center">
               <CalendarDays className="mr-2 h-5 w-5" />
@@ -223,7 +327,7 @@ export default function ProviderProfilePage() {
                     selected={selectedDate}
                     onSelect={handleDateSelect}
                     className="rounded-md border"
-                    disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1))} // Disable dates before today
+                    disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1))}
                     footer={selectedDate ? <p className="text-sm p-2 text-center">Fecha seleccionada: {selectedDate.toLocaleDateString('es-ES')}.</p> : <p className="text-sm p-2 text-center">Elige una fecha.</p>}
                   />
                 </CardContent>
@@ -250,7 +354,6 @@ export default function ProviderProfilePage() {
               </div>
             </div>
           </div>
-          {/* --- END: Nueva Sección de Agenda --- */}
 
           <Separator className="my-8" />
 
@@ -297,8 +400,7 @@ export default function ProviderProfilePage() {
   );
 }
 
-// Añadir un componente Loader básico para usar en la página
-const Loader2 = ({ className, ...props }: React.SVGProps<SVGSVGElement>) => ( // This was the previous Loader2, renamed to LoaderIcon at the top to avoid conflict if another Loader2 exists
+const Loader2 = ({ className, ...props }: React.SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="24"
@@ -315,4 +417,6 @@ const Loader2 = ({ className, ...props }: React.SVGProps<SVGSVGElement>) => ( //
     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
   </svg>
 );
+    
+
     
