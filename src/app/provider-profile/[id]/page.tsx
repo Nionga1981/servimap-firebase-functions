@@ -2,7 +2,7 @@
 // src/app/provider-profile/[id]/page.tsx
 "use client";
 
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation'; // Importar useRouter
 import Image from 'next/image';
 import Link from 'next/link';
 import { mockProviders, USER_FIXED_LOCATION } from '@/lib/mockData'; 
@@ -38,6 +38,7 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
 
 export default function ProviderProfilePage() {
   const params = useParams();
+  const router = useRouter(); // Inicializar useRouter
   const providerId = params.id as string;
   
   const [provider, setProvider] = useState<Provider | undefined>(undefined);
@@ -55,7 +56,7 @@ export default function ProviderProfilePage() {
     if (providerId) {
       const foundProvider = mockProviders.find(p => p.id === providerId);
       setProvider(foundProvider);
-      console.log('Provider data in useEffect:', foundProvider); // DEBUG LOG
+      // console.log('Provider data in useEffect:', foundProvider); 
 
       if (foundProvider?.location && USER_FIXED_LOCATION) {
         const dist = calculateDistance(USER_FIXED_LOCATION.lat, USER_FIXED_LOCATION.lng, foundProvider.location.lat, foundProvider.location.lng);
@@ -126,6 +127,11 @@ export default function ProviderProfilePage() {
     });
     setPopoverOpen(false); // Cerrar el popover
     setSelectedServices({}); // Resetear selección
+
+    // Redirigir al mapa con el ID del proveedor contratado
+    if (provider) {
+      router.push(`/?hiredProviderId=${provider.id}`);
+    }
   };
 
 
@@ -152,8 +158,7 @@ export default function ProviderProfilePage() {
     return CategoryIcon ? <CategoryIcon className="h-4 w-4 text-muted-foreground" /> : <Tag className="h-4 w-4 text-muted-foreground" />;
   };
 
-  // DEBUG LOG
-  console.log('Rendering Contratar Ahora button for provider:', provider?.name, 'isAvailable:', provider?.isAvailable);
+  // console.log('Rendering Contratar Ahora button for provider:', provider?.name, 'isAvailable:', provider?.isAvailable);
 
   return (
     <div className="container mx-auto py-8 max-w-4xl">
@@ -246,7 +251,6 @@ export default function ProviderProfilePage() {
                       <Button 
                         className="w-full bg-accent hover:bg-accent/80 text-accent-foreground" 
                         size="lg"
-                        // style={{ border: '2px solid red', padding: '10px' }} // TEMPORARY STYLE FOR VISIBILITY
                       >
                         <ShoppingBag className="mr-2 h-5 w-5" /> Contratar Ahora
                       </Button>
@@ -327,7 +331,7 @@ export default function ProviderProfilePage() {
                     selected={selectedDate}
                     onSelect={handleDateSelect}
                     className="rounded-md border"
-                    disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1))}
+                    disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1))} // No se pueden seleccionar fechas pasadas
                     footer={selectedDate ? <p className="text-sm p-2 text-center">Fecha seleccionada: {selectedDate.toLocaleDateString('es-ES')}.</p> : <p className="text-sm p-2 text-center">Elige una fecha.</p>}
                   />
                 </CardContent>
