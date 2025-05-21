@@ -18,6 +18,7 @@ export function AdBanner() {
           width={120} 
           height={38} 
           className="object-contain rounded-sm"
+          style={{ height: 'auto' }} // Added to maintain aspect ratio
           data-ai-hint="advertisement logo"
         />
         <div className="text-sm">
