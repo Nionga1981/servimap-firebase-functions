@@ -35,10 +35,10 @@ export function BottomSearchContainer({ onSearch }: BottomSearchContainerProps) 
             value={internalSearchTerm}
             onChange={(e) => setInternalSearchTerm(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-grow text-md border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent"
+            className="flex-grow text-base border border-input bg-background px-3 py-2 h-11 ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 md:text-sm"
             aria-label="Buscar servicio"
           />
-          <Button onClick={handleSearchClick} size="icon" variant="ghost" className="text-primary hover:bg-primary/10">
+          <Button onClick={handleSearchClick} size="icon" variant="ghost" className="text-primary hover:bg-primary/10 h-10 w-10">
             <Search className="h-5 w-5" />
             <span className="sr-only">Buscar</span>
           </Button>
