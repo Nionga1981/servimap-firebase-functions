@@ -1,19 +1,18 @@
 import type {Metadata} from 'next';
-import { Inter } from 'next/font/google';
+// import { Inter } from 'next/font/google'; // Commented out
 import './globals.css';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Toaster } from "@/components/ui/toaster"
 
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-});
+// const inter = Inter({
+//   subsets: ['latin'],
+//   variable: '--font-inter',
+// }); // Commented out
 
 export const metadata: Metadata = {
   title: 'ServiMap',
   description: 'Conecta con profesionales calificados en tiempo real.',
-  // Explicitly state no icons should be processed via metadata
-  icons: null, 
+  icons: null, // Explicitly state no icons should be processed via metadata
 };
 
 export default function RootLayout({
@@ -23,7 +22,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" suppressHydrationWarning>
-      <body className={`${inter.variable} font-sans antialiased`}>
+      {/* <body className={`${inter.variable} font-sans antialiased`}> */}
+      <body className="font-sans antialiased"> {/* Removed inter.variable */}
         <AppLayout>
           {children}
         </AppLayout>
