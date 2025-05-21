@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import ReactDOMServer from 'react-dom/server';
 import type { LucideIcon } from 'lucide-react';
 import { GoogleMap, MarkerF, useJsApiLoader, PolylineF, DirectionsService, DirectionsRenderer } from '@react-google-maps/api';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card'; // CardFooter might not be needed
 import { MapPinned, Search, AlertTriangle, WifiOff, Loader2 as LoaderIcon, LocateFixed, Car, Clock } from 'lucide-react';
 import type { Provider, Service } from '@/types';
 import { ProviderPreviewCard } from './ProviderPreviewCard';
@@ -15,6 +15,8 @@ import { cn } from "@/lib/utils";
 import { mockProviders, USER_FIXED_LOCATION } from '@/lib/mockData';
 import { SERVICE_CATEGORIES, DEFAULT_USER_AVATAR } from '@/lib/constants';
 import { useSearchParams, useRouter } from 'next/navigation';
+import Image from 'next/image';
+import { BottomSearchContainer } from './BottomSearchContainer'; // Import the new component
 
 // Helper function to convert Lucide Icon component to SVG Data URI
 function lucideIconToDataUri(
@@ -42,7 +44,7 @@ function lucideIconToDataUri(
 
 const mapContainerStyle: React.CSSProperties = {
   width: '100%',
-  height: '100%',
+  height: '100%', // Map will take full height of its parent
 };
 
 const mapStylesArray: google.maps.MapTypeStyle[] = [
@@ -77,7 +79,6 @@ const mapStylesArray: google.maps.MapTypeStyle[] = [
   { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#9e9e9e" }] },
 ];
 
-// Define MapContentComponent outside MapDisplay
 const MapContentComponent = React.memo(({
   center,
   zoom,
@@ -122,7 +123,7 @@ const MapContentComponent = React.memo(({
           icon={{
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
-            fillColor: "hsl(var(--primary))", // Blue color for user
+            fillColor: "hsl(var(--primary))",
             fillOpacity: 1,
             strokeWeight: 2,
             strokeColor: "white",
@@ -139,12 +140,16 @@ const MapContentComponent = React.memo(({
           if (categoryIconCache.current?.has(serviceCategory.id)) {
             iconDataUri = categoryIconCache.current.get(serviceCategory.id);
           } else {
-            iconDataUri = lucideIconToDataUri(serviceCategory.icon);
-            if (iconDataUri) {
-              console.log(`[MapDisplay] Generated iconDataUri for ${serviceCategory.id}: ${iconDataUri.substring(0,100)}...`);
-              categoryIconCache.current?.set(serviceCategory.id, iconDataUri);
-            } else {
-              console.warn(`[MapDisplay] Failed to generate iconDataUri for ${serviceCategory.id}`);
+            try {
+              iconDataUri = lucideIconToDataUri(serviceCategory.icon, { color: '#3F51B5' }); // Use fixed color
+              if (iconDataUri) {
+                // console.log(`[MapDisplay] Generated iconDataUri for ${serviceCategory.id}: ${iconDataUri.substring(0,100)}...`);
+                categoryIconCache.current?.set(serviceCategory.id, iconDataUri);
+              } else {
+                // console.warn(`[MapDisplay] Failed to generate iconDataUri for ${serviceCategory.id}`);
+              }
+            } catch (e) {
+              console.error(`[MapDisplay] Error calling lucideIconToDataUri for ${serviceCategory.id}:`, e);
             }
           }
         }
@@ -154,17 +159,12 @@ const MapContentComponent = React.memo(({
             try {
                 markerIcon = {
                     url: iconDataUri,
-                    scaledSize: new window.google.maps.Size(32, 32), // Adjust size as needed
-                    anchor: new window.google.maps.Point(16, 32),    // Center bottom
+                    scaledSize: new window.google.maps.Size(32, 32), 
+                    anchor: new window.google.maps.Point(16, 32),    
                 };
-                // console.log(`[MapDisplay] Using custom icon for ${provider.name}:`, markerIcon);
             } catch (e) {
                 console.error(`[MapDisplay] Error creating google.maps.Size/Point for ${provider.name}:`, e);
             }
-        } else if (iconDataUri) {
-            // console.warn(`[MapDisplay] window.google.maps not available (yet?) for custom icon for ${provider.name}. iconDataUri was present.`);
-        } else {
-            // console.log(`[MapDisplay] No custom icon for ${provider.name}. Using default marker.`);
         }
         
         return (
@@ -172,7 +172,7 @@ const MapContentComponent = React.memo(({
             key={provider.id}
             position={provider.location}
             title={`${provider.name} (Calificación: ${provider.rating.toFixed(1)})`}
-            icon={markerIcon} // Use custom icon if available, otherwise default
+            icon={markerIcon}
           />
         )
       })}
@@ -191,9 +191,8 @@ interface EnRouteProviderInfo {
   route: google.maps.DirectionsRoute | null;
 }
 
-// Función para calcular la distancia (Haversine)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-  const R = 6371; // Radio de la Tierra en km
+  const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a =
@@ -202,14 +201,13 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
     Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distance = R * c;
-  // console.log(`[MapDisplay calculateDistance] From (${lat1},${lon1}) to (${lat2},${lon2}) = ${distance.toFixed(1)} km`);
   return distance;
 };
 
 
 export function MapDisplay() {
   const libraries = useMemo(() => ['places'] as const, []);
-  const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU"; // Hardcoded for debugging
+  const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU"; 
 
   const { isLoaded: isMapApiLoaded, loadError: mapApiLoadError } = useJsApiLoader({
     googleMapsApiKey,
@@ -219,14 +217,13 @@ export function MapDisplay() {
 
   const [userLocation, setUserLocation] = useState<google.maps.LatLngLiteral | null>(USER_FIXED_LOCATION);
   const [mapCenter, setMapCenter] = useState<google.maps.LatLngLiteral>(USER_FIXED_LOCATION);
-  const [mapZoom, setMapZoom] = useState(13); // Zoom out a bit more
+  const [mapZoom, setMapZoom] = useState(13);
   const [mapInstance, setMapInstance] = useState<google.maps.Map | null>(null);
   
   const [displayedProviders, setDisplayedProviders] = useState<Provider[]>([]);
-  const [providersVisibleInPanel, setProvidersVisibleInPanel] = useState(false);
+  const [providersVisibleInPanel, setProvidersVisibleInPanel] = useState(false); // Hidden by default for new UI
   const [searchTerm, setSearchTerm] = useState('');
   const categoryIconCache = useRef(new Map<string, string>());
-
 
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -237,10 +234,7 @@ export function MapDisplay() {
   const [directionsResponse, setDirectionsResponse] = useState<google.maps.DirectionsResult | null>(null);
   const simulationTimeoutIds = useRef<NodeJS.Timeout[]>([]);
 
-  // console.log(`[MapDisplay RENDER] dp: ${displayedProviders.length}, pVPanel: ${providersVisibleInPanel}, cat: ${categoryParam}, search: ${searchTerm}, hiredId: ${currentHiredProviderId}, mapApi: ${isMapApiLoaded}`);
-
   const onMapLoadCallback = useCallback((map: google.maps.Map) => {
-    console.log("[MapDisplay] Google Map component successfully loaded.");
     setMapInstance(map);
     if (userLocation) {
       map.setCenter(userLocation);
@@ -249,7 +243,6 @@ export function MapDisplay() {
   }, [userLocation, mapZoom]);
 
   const onMapUnmountCallback = useCallback(() => {
-    console.log("[MapDisplay] Google Map component unmounted.");
     setMapInstance(null);
     setDirectionsResponse(null);
     simulationTimeoutIds.current.forEach(clearTimeout);
@@ -257,12 +250,10 @@ export function MapDisplay() {
   }, []);
 
   const simulateProviderMovement = useCallback((route: google.maps.DirectionsRoute, provider: Provider) => {
-    console.log('[MapDisplay simulateProviderMovement] Started for route with provider:', provider.name);
     simulationTimeoutIds.current.forEach(clearTimeout);
     simulationTimeoutIds.current = [];
 
     if (!route.legs || !route.legs[0] || !route.legs[0].steps || !userLocation) {
-      console.error('[MapDisplay simulateProviderMovement] No steps in route or userLocation missing. Route:', route);
       if (userLocation) {
         const arrivalTimeout = setTimeout(() => {
           setEnRouteProviderInfo(prev => prev ? {
@@ -271,7 +262,6 @@ export function MapDisplay() {
             status: "Ha llegado",
             eta: "0 min",
           } : null);
-          console.log('[MapDisplay simulateProviderMovement] Fallback: Provider arrived at user location.');
           if (mapInstance) {
             mapInstance.panTo(userLocation);
             mapInstance.setZoom(17);
@@ -284,8 +274,7 @@ export function MapDisplay() {
 
     const steps = route.legs[0].steps;
     let cumulativeDelay = 0;
-    // Simulate travel over ~10-20 seconds total by adjusting stepDuration
-    const totalSimulationDuration = Math.max(10000, Math.min(20000, (route.legs[0].duration?.value || steps.length * 2) * 1000 * 0.1)); // between 10-20s or 10% of real time
+    const totalSimulationDuration = Math.max(10000, Math.min(20000, (route.legs[0].duration?.value || steps.length * 2) * 1000 * 0.1));
     const stepDuration = Math.max(500, totalSimulationDuration / steps.length);
 
     steps.forEach((step, index) => {
@@ -298,8 +287,7 @@ export function MapDisplay() {
         } else {
           newLocation = step.end_location as google.maps.LatLngLiteral;
         }
-         // console.log(`[MapDisplay simulateProviderMovement] Simulating step ${index + 1}/${steps.length}: Moving to`, newLocation);
-
+        
         let remainingSecondsInSimulation = 0;
         for (let i = index + 1; i < steps.length; i++) {
           remainingSecondsInSimulation += (route.legs[0].steps[i].duration?.value || ( (route.legs[0].duration?.value || steps.length * 2) / steps.length) );
@@ -309,7 +297,6 @@ export function MapDisplay() {
         
         setEnRouteProviderInfo(prev => {
           if (!prev) return null;
-          // console.log(`[MapDisplay simulateProviderMovement] Updating enRouteProviderInfo.currentLocation to:`, newLocation);
           return { ...prev, currentLocation: newLocation, eta: newEta };
         });
 
@@ -318,7 +305,6 @@ export function MapDisplay() {
         }
 
         if (index === steps.length - 1) {
-          console.log('[MapDisplay simulateProviderMovement] Simulation: Provider arrived at destination.');
           setEnRouteProviderInfo(prev => {
             if (!prev) return null;
             return { ...prev, currentLocation: userLocation, status: "Ha llegado", eta: "0 min" };
@@ -332,43 +318,36 @@ export function MapDisplay() {
       simulationTimeoutIds.current.push(timeoutId);
       cumulativeDelay += stepDuration;
     });
-     console.log(`[MapDisplay simulateProviderMovement] Total ${steps.length} steps scheduled. Step duration: ${stepDuration}ms, Total sim time: ${cumulativeDelay}ms`);
   }, [mapInstance, userLocation]);
 
 
  useEffect(() => {
-    // console.log('[MapDisplay hiredProvider-useEffect] currentHiredProviderId:', currentHiredProviderId, 'isMapApiLoaded:', isMapApiLoaded, 'mapInstance:', !!mapInstance, 'userLocation:', !!userLocation);
-
     if (!currentHiredProviderId && enRouteProviderInfo) {
-      // console.log('[MapDisplay hiredProvider-useEffect] No hiredProviderId, clearing enRouteProviderInfo and directions.');
       setEnRouteProviderInfo(null);
       setDirectionsResponse(null);
       simulationTimeoutIds.current.forEach(clearTimeout);
       simulationTimeoutIds.current = [];
-      if (userLocation) setMapCenter(userLocation); // Reset map center to user
-      setMapZoom(13); // Reset zoom
-      handleSearch(); // Re-populate nearby providers if any
+      if (userLocation) setMapCenter(userLocation);
+      setMapZoom(13);
+      // handleSearch(); // Do not auto-search on clearing hired provider
       return;
     }
     
     if (currentHiredProviderId && isMapApiLoaded && mapInstance && userLocation) {
       const providerInRoute = mockProviders.find(p => p.id === currentHiredProviderId);
-      // console.log('[MapDisplay hiredProvider-useEffect] Found providerInRoute:', providerInRoute);
 
       if (providerInRoute && providerInRoute.location) {
         setProvidersVisibleInPanel(false); // Hide normal provider list
-        setDisplayedProviders([]); // Clear normal provider list
+        setDisplayedProviders([]);
         
-        // Initialize enRouteProviderInfo
         setEnRouteProviderInfo({
           provider: providerInRoute,
-          currentLocation: providerInRoute.location, // Start at provider's location
+          currentLocation: providerInRoute.location,
           status: "En camino",
           eta: "Calculando...",
           route: null,
         });
         
-        // console.log('[MapDisplay hiredProvider-useEffect] Requesting directions from:', providerInRoute.location, 'to:', userLocation);
         if (typeof window !== 'undefined' && window.google && window.google.maps) {
             const directionsService = new window.google.maps.DirectionsService();
             directionsService.route(
@@ -378,26 +357,22 @@ export function MapDisplay() {
                 travelMode: window.google.maps.TravelMode.DRIVING,
               },
               (result, status) => {
-                console.log('[MapDisplay hiredProvider-useEffect] DirectionsService callback. Status:', status, 'Result:', result);
                 if (status === window.google.maps.DirectionsStatus.OK && result) {
                   setDirectionsResponse(result);
                   const route = result.routes[0];
                   if (route && route.legs[0] && route.legs[0].duration) {
                     const etaText = route.legs[0].duration.text;
-                    console.log('[MapDisplay hiredProvider-useEffect] Route found. ETA:', etaText);
                     setEnRouteProviderInfo(prev => prev ? {...prev, eta: etaText, route } : null);
                     if (mapInstance && route.bounds) {
                       mapInstance.fitBounds(route.bounds);
                     }
                     simulateProviderMovement(route, providerInRoute);
                   } else {
-                    console.error('[MapDisplay hiredProvider-useEffect] Route or leg duration not found in directions result.');
                     setEnRouteProviderInfo(prev => prev ? {...prev, eta: "ETA no disp." } : null);
                   }
                 } else {
-                  console.error(`[MapDisplay hiredProvider-useEffect] Error fetching directions ${status}`);
                   setEnRouteProviderInfo(prev => prev ? {...prev, eta: "Error ruta" } : null);
-                    if (mapInstance && providerInRoute.location && userLocation) { // Fallback fit bounds
+                    if (mapInstance && providerInRoute.location && userLocation) {
                         const bounds = new window.google.maps.LatLngBounds();
                         bounds.extend(providerInRoute.location);
                         bounds.extend(userLocation);
@@ -406,149 +381,99 @@ export function MapDisplay() {
                 }
               }
             );
-        } else {
-            console.warn('[MapDisplay hiredProvider-useEffect] window.google.maps not available when trying to request directions.');
         }
-      } else {
-        // console.log('[MapDisplay hiredProvider-useEffect] Hired provider or its location not found for ID:', currentHiredProviderId);
       }
     }
-    // Cleanup timeouts when effect re-runs or component unmounts
     return () => {
       simulationTimeoutIds.current.forEach(clearTimeout);
       simulationTimeoutIds.current = [];
     };
-  }, [currentHiredProviderId, isMapApiLoaded, mapInstance, userLocation, router, simulateProviderMovement]); // Added router and simulateProviderMovement
+  }, [currentHiredProviderId, isMapApiLoaded, mapInstance, userLocation, router, simulateProviderMovement]);
 
 
   useEffect(() => {
-    // console.log(`[MapDisplay category-useEffect] Triggered. userLocation: ${!!userLocation}, categoryParam: ${categoryParam}, hiredId: ${currentHiredProviderId}, searchTerm: "${searchTerm}", isMapLoaded: ${isMapApiLoaded}`);
-    
     if (currentHiredProviderId || !userLocation || !isMapApiLoaded) {
-        // console.log("[MapDisplay category-useEffect] Bailing: Hired provider active, or no user location, or map not loaded.");
-        if (!currentHiredProviderId) { // Only clear if no hired provider
-            setDisplayedProviders([]);
-            // setProvidersVisibleInPanel(false); // Do not hide panel if category is changing
-        }
-        return;
+      if (!currentHiredProviderId) {
+        setDisplayedProviders([]);
+      }
+      return;
     }
 
     let filtered = [...mockProviders];
-    // console.log('[MapDisplay category-useEffect] Initial providers for filtering:', filtered.length);
-
-    // 1. Filter by distance
     filtered = filtered.filter(provider => {
       if (provider.location) {
         const distance = calculateDistance(userLocation.lat, userLocation.lng, provider.location.lat, provider.location.lng);
-        return distance <= 20; // Max 20km
+        return distance <= 20;
       }
       return false;
     });
-    // console.log('[MapDisplay category-useEffect] Providers after distance filter (20km):', filtered.length);
-
-    // 2. Filter by category (if categoryParam exists and is not 'all')
+    
     const isActiveCategoryFilter = categoryParam && categoryParam !== 'all' && categoryParam !== '';
     if (isActiveCategoryFilter) {
-      // console.log(`[MapDisplay category-useEffect] Applying specific category filter: ${categoryParam}`);
       filtered = filtered.filter(provider =>
         provider.services.some(service => service.category === categoryParam)
       );
     }
-    // console.log('[MapDisplay category-useEffect] Providers after category filter:', filtered.length);
     
-    // 3. Filter by search term (if searchTerm exists)
-    // This useEffect does not handle search term, handleSearch does.
-    
-    // 4. Sort by rating
     filtered.sort((a, b) => b.rating - a.rating);
-    // console.log('[MapDisplay category-useEffect] BEFORE setDisplayedProviders. Filtered count:', filtered.length);
     setDisplayedProviders(filtered);
     
-    // Show panel if category filter is active AND there are results
-    if(categoryParam) { // If categoryParam is present (even 'all')
-        setProvidersVisibleInPanel(filtered.length > 0);
-        // console.log(`[MapDisplay category-useEffect] Active category filter "${categoryParam}". Setting providersVisibleInPanel to ${filtered.length > 0}.`);
-    } else {
-        // If no categoryParam (e.g., initial load, or navigating to '/'), panel visibility is controlled by handleSearch
-        // setProvidersVisibleInPanel(false); 
-        // console.log(`[MapDisplay category-useEffect] No active category filter. Panel visibility unchanged by this effect.`);
-    }
+    // Visibility of panel controlled by explicit actions now (search or category selection)
+    // setProvidersVisibleInPanel(categoryParam && filtered.length > 0);
     
-  }, [userLocation, categoryParam, isMapApiLoaded, currentHiredProviderId]); // searchTerm removed, handleSearch takes care of it
+  }, [userLocation, categoryParam, isMapApiLoaded, currentHiredProviderId]);
 
 
   const handleSearch = () => {
-    // console.log('[MapDisplay handleSearch] Search triggered. HiredProviderId:', currentHiredProviderId, 'SearchTerm:', searchTerm, 'CategoryParam from URL:', categoryParam);
+    // This function will be triggered by the new BottomSearchContainer's input
+    // For now, it just shows nearby providers based on category or all if no category.
+    // Actual text search logic needs to be added if the input in BottomSearchContainer becomes functional.
     if (currentHiredProviderId || !userLocation) {
-        // console.log('[MapDisplay handleSearch] Hired provider active or no user location, search aborted.');
         return;
     }
 
     let tempProviders = [...mockProviders];
-    // console.log('[MapDisplay handleSearch] Initial mockProviders count:', tempProviders.length);
-
-    // 1. Filter by distance
     tempProviders = tempProviders.filter(provider => {
       if (provider.location) {
         const distance = calculateDistance(userLocation.lat, userLocation.lng, provider.location.lat, provider.location.lng);
-        return distance <= 20; // Max 20km
+        return distance <= 20;
       }
       return false;
     });
-    // console.log('[MapDisplay handleSearch] Providers after distance filter:', tempProviders.length);
     
-    // 2. Filter by category (if categoryParam exists and is not 'all')
     const isActiveCategoryFilter = categoryParam && categoryParam !== 'all' && categoryParam !== '';
     if (isActiveCategoryFilter) {
-      // console.log(`[MapDisplay handleSearch] Applying category filter from URL: ${categoryParam}`);
       tempProviders = tempProviders.filter(provider =>
         provider.services.some(service => service.category === categoryParam)
       );
     }
-    // console.log('[MapDisplay handleSearch] Providers after category filter (from URL):', tempProviders.length);
     
-    // 3. Filter by search term
-    if (searchTerm.trim() !== '') {
-        // console.log(`[MapDisplay handleSearch] Applying text search for: "${searchTerm}"`);
-        tempProviders = tempProviders.filter(provider =>
-            provider.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            provider.services.some(service => service.title.toLowerCase().includes(searchTerm.toLowerCase())) ||
-            provider.specialties?.some(specialty => specialty.toLowerCase().includes(searchTerm.toLowerCase()))
-        );
-    }
-    // console.log('[MapDisplay handleSearch] Providers after text search:', tempProviders.length);
+    // Add text search logic here if searchTerm from BottomSearchContainer is used
+    // if (searchTerm.trim() !== '') { ... }
 
-    // 4. Sort by rating
     tempProviders.sort((a, b) => b.rating - a.rating);
-
-    // console.log('[MapDisplay handleSearch] BEFORE setDisplayedProviders. Filtered count:', tempProviders.length);
     setDisplayedProviders(tempProviders);
-
-    const shouldBeVisible = tempProviders.length > 0;
-    // console.log(`[MapDisplay handleSearch] Setting providersVisibleInPanel to ${shouldBeVisible} (based on ${tempProviders.length} results, search: "${searchTerm}", category: "${categoryParam}")`);
-    setProvidersVisibleInPanel(shouldBeVisible); 
+    setProvidersVisibleInPanel(tempProviders.length > 0); 
   };
 
 
   const renderMapArea = () => {
-    // console.log("[MapDisplay renderMapArea] Attempting to render map. isMapApiLoaded:", isMapApiLoaded, "mapApiLoadError:", !!mapApiLoadError);
     if (!googleMapsApiKey) {
       return (
         <div className="flex flex-col items-center justify-center h-full text-destructive p-4 bg-destructive/10 rounded-md">
           <AlertTriangle className="h-12 w-12 mb-4" />
           <p className="text-lg font-semibold mb-2">Configuración Requerida</p>
-          <p className="text-sm text-center">La API Key de Google Maps no está configurada. Por favor, añádela a tu archivo .env como NEXT_PUBLIC_GOOGLE_MAPS_API_KEY.</p>
+          <p className="text-sm text-center">La API Key de Google Maps no está configurada.</p>
         </div>
       );
     }
 
     if (mapApiLoadError) {
-      //  console.error("[MapDisplay renderMapArea] mapApiLoadError:", mapApiLoadError);
        return (
         <div className="flex flex-col items-center justify-center h-full text-destructive p-4 bg-destructive/10 rounded-md">
           <WifiOff className="h-12 w-12 mb-4" />
           <p className="text-lg font-semibold mb-2">Error Cargando Google Maps</p>
-          <p className="text-sm text-center">Error al cargar la API: {mapApiLoadError.message}. Revisa la consola para más detalles.</p>
+          <p className="text-sm text-center">Error al cargar la API: {mapApiLoadError.message}.</p>
         </div>
       );
     }
@@ -563,8 +488,6 @@ export function MapDisplay() {
     }
     
     const providersOnMap = enRouteProviderInfo?.provider ? [] : displayedProviders;
-    // console.log("[MapDisplay renderMapArea] Providers to display on map (excluding enRoute):", providersOnMap.length);
-    // console.log("[MapDisplay renderMapArea] EnRoute provider info:", enRouteProviderInfo);
     
     return (
       <MapContentComponent
@@ -580,40 +503,39 @@ export function MapDisplay() {
             <DirectionsRenderer 
               directions={directionsResponse} 
               options={{ 
-                suppressMarkers: true, // We handle our own markers
-                preserveViewport: true, // Let our logic control viewport fit
+                suppressMarkers: true, 
+                preserveViewport: true, 
                  polylineOptions: {
-                  strokeColor: "hsl(var(--accent))", // Use accent color for route
+                  strokeColor: "hsl(var(--accent))", 
                   strokeOpacity: 0.8,
                   strokeWeight: 6,
                 }
               }} 
             />
         )}
-        {/* Marker for the provider who is en-route */}
         {enRouteProviderInfo?.provider.location && enRouteProviderInfo.currentLocation && (
            <MarkerF
              key={enRouteProviderInfo.provider.id + "-route"}
              position={enRouteProviderInfo.currentLocation}
              title={enRouteProviderInfo.provider.name + (enRouteProviderInfo.status === "En camino" ? " (En camino)" : " (Ha llegado)")}
-             icon={ typeof window !== 'undefined' && window.google && window.google.maps ? { // Check for window.google.maps
-                path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, // Example: a moving arrow
+             icon={ typeof window !== 'undefined' && window.google && window.google.maps ? { 
+                path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
                 scale: 5,
                 strokeColor: "hsl(var(--accent))",
                 fillColor: "hsl(var(--accent))",
                 fillOpacity: 1,
-                rotation: 0, // This might need dynamic calculation based on route segment bearing
+                rotation: 0, 
              } : undefined}
-             zIndex={typeof window !== 'undefined' && window.google && window.google.maps ? window.google.maps.Marker.MAX_ZINDEX + 1 : undefined} // Ensure it's on top
+             zIndex={typeof window !== 'undefined' && window.google && window.google.maps ? window.google.maps.Marker.MAX_ZINDEX + 1 : undefined}
            />
         )}
       </MapContentComponent>
     );
   };
   
-  const shouldDisplayRightPanel = providersVisibleInPanel && displayedProviders.length > 0 && isMapApiLoaded && !mapApiLoadError && !!googleMapsApiKey && !enRouteProviderInfo;
-  const showNoResultsMessage = providersVisibleInPanel && displayedProviders.length === 0 && (!!categoryParam || searchTerm.trim() !== '') && !enRouteProviderInfo;
-  // console.log(`[MapDisplay RENDER] shouldDisplayRightPanel: ${shouldDisplayRightPanel}, showNoResults: ${showNoResultsMessage}`);
+  // The right-hand panel logic is now simplified or removed for the DiDi-like UI
+  // const shouldDisplayRightPanel = providersVisibleInPanel && displayedProviders.length > 0 && isMapApiLoaded && !mapApiLoadError && !!googleMapsApiKey && !enRouteProviderInfo;
+  // const showNoResultsMessage = providersVisibleInPanel && displayedProviders.length === 0 && (!!categoryParam || searchTerm.trim() !== '') && !enRouteProviderInfo;
 
   const EnRouteProviderPanel = () => {
     if (!enRouteProviderInfo || !enRouteProviderInfo.provider) return null;
@@ -622,7 +544,7 @@ export function MapDisplay() {
     const IconComponent = providerCategory?.icon || Car;
 
     return (
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-11/12 max-w-md z-10">
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 w-11/12 max-w-md z-20"> {/* Increased z-index */}
         <Card className="shadow-xl bg-background/90 backdrop-blur-sm">
           <CardHeader className="flex flex-row items-center gap-4 p-4">
             <Image 
@@ -632,6 +554,7 @@ export function MapDisplay() {
                 height={64}
                 className="w-16 h-16 rounded-full border-2 border-primary object-cover"
                 data-ai-hint={provider.dataAiHint || "provider avatar"}
+                style={{objectFit: "cover"}}
             />
             <div>
               <h3 className="text-lg font-semibold text-primary">{provider.name}</h3>
@@ -657,8 +580,7 @@ export function MapDisplay() {
               </div>
             )}
              <Button variant="outline" size="sm" className="mt-4" onClick={() => {
-                router.push('/'); // Clear hiredProviderId from URL
-                // enRouteProviderInfo will be cleared by its useEffect dependency on currentHiredProviderId
+                router.push('/'); 
              }}>
                 Volver a Búsqueda
              </Button>
@@ -669,110 +591,38 @@ export function MapDisplay() {
   };
 
  useEffect(() => {
+    // This useEffect now primarily ensures the map is centered on the user's fixed location
+    // and potentially loads initial nearby providers if that's the desired default behavior.
+    // For the DiDi-like UI, we might want to delay showing providers until a search.
     if (userLocation && isMapApiLoaded && !currentHiredProviderId) {
-        // console.log('[MapDisplay initial-load-useEffect] No filters or hired provider active, loading initial providers within 20km.');
-        let initialProviders = mockProviders.filter(provider => {
-            if (provider.location) {
-                const distance = calculateDistance(userLocation.lat, userLocation.lng, provider.location.lat, provider.location.lng);
-                return distance <= 20;
-            }
-            return false;
-        });
-        initialProviders.sort((a, b) => b.rating - a.rating);
-        
-        // For demonstration, ensure specific types are shown if available
-        const requiredCategories = ['doctors', 'plumbing', 'gardening'];
-        const demoProviders = initialProviders.filter(p => requiredCategories.includes(p.services[0]?.category));
-
-        const exampleProvidersToShow = initialProviders.filter(p => 
-            p.id === 'doctor1' || p.id === 'plumber1' || p.id === 'gardener1'
-        );
-        
-        setDisplayedProviders(exampleProvidersToShow); // Show specific examples by default
-        setProvidersVisibleInPanel(exampleProvidersToShow.length > 0); // Make panel visible if examples are found
+        // For initial DiDi-like view, don't show providers or panel automatically
+        setDisplayedProviders([]);
+        setProvidersVisibleInPanel(false);
       
         if (mapInstance) {
-          const bounds = new window.google.maps.LatLngBounds();
-          bounds.extend(userLocation);
-          exampleProvidersToShow.forEach(p => {
-            if (p.location) bounds.extend(p.location);
-          });
-          mapInstance.fitBounds(bounds);
-          if (exampleProvidersToShow.length === 0) {
-             mapInstance.setZoom(mapZoom); 
-          } else if (mapInstance.getZoom() && mapInstance.getZoom()! > 15) { // Don't zoom in too much
-             mapInstance.setZoom(15);
-          }
+          mapInstance.setCenter(userLocation);
+          mapInstance.setZoom(mapZoom); 
         }
-    } else if (!currentHiredProviderId) { // If no hired provider, ensure panel is hidden if no category or search
-      if (!categoryParam && !searchTerm) {
-       // setProvidersVisibleInPanel(false); // Keep hidden if no active filter/search
-      }
     }
-  }, [userLocation, isMapApiLoaded, currentHiredProviderId, mapInstance, mapZoom, categoryParam, searchTerm]);
+  }, [userLocation, isMapApiLoaded, currentHiredProviderId, mapInstance, mapZoom]);
 
 
   return (
-    <Card className="shadow-xl overflow-hidden h-full flex flex-col">
-      {!enRouteProviderInfo && ( 
-        <CardHeader className="border-b p-4 space-y-3">
-          <div className="flex items-center space-x-2">
-            <div className="relative flex-grow">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input 
-                type="search" 
-                placeholder="Buscar por nombre, servicio, especialidad..." 
-                className="pl-8 w-full"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              />
-            </div>
-            <Button onClick={handleSearch} aria-label="Buscar">
-              <Search className="h-4 w-4 md:mr-2" />
-              <span className="hidden md:inline">Buscar</span>
-            </Button>
-          </div>
-        </CardHeader>
-      )}
-      <CardContent className="p-0 md:flex flex-grow overflow-hidden relative"> 
-         <div className={cn(
-             "h-[calc(100vh-var(--header-height,150px)-var(--map-header-height,80px)-var(--ad-banner-height,70px))] md:h-auto relative bg-muted flex items-center justify-center text-foreground flex-grow",
-             (shouldDisplayRightPanel || showNoResultsMessage) ? "md:w-2/3" : "md:w-full" 
-           )}>
-          {renderMapArea()}
-        </div>
+    <div className="h-full w-full relative"> {/* Main container for map and overlays */}
+      <div className="absolute inset-0 z-0"> {/* Map container */}
+        {renderMapArea()}
+      </div>
+      
+      {/* EnRouteProviderPanel will overlay on top, only when a provider is en-route */}
+      {enRouteProviderInfo && <EnRouteProviderPanel />}
 
-        {(shouldDisplayRightPanel || showNoResultsMessage) && (
-          <div className={cn(
-              "md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-full md:overflow-y-auto space-y-4 flex-shrink-0",
-            )}>
-            <h3 className="text-lg font-semibold text-primary mb-2">
-              {categoryParam && categoryParam !== 'all' && SERVICE_CATEGORIES.find(c=>c.id === categoryParam)
-                ? `Proveedores de "${SERVICE_CATEGORIES.find(c=>c.id === categoryParam)?.name}" cercanos:`
-                : "Proveedores Cercanos:"}
-            </h3>
-            {displayedProviders.length > 0 ? (
-              displayedProviders.map(provider => ( 
-                <ProviderPreviewCard
-                  key={provider.id}
-                  provider={provider}
-                />
-              ))
-            ) : (
-              <p className="text-muted-foreground">No se encontraron proveedores que coincidan con tus criterios.</p>
-            )}
-          </div>
-        )}
-         {isMapApiLoaded && !mapApiLoadError && !!googleMapsApiKey && !shouldDisplayRightPanel && !showNoResultsMessage && !enRouteProviderInfo && (
-             <div className="md:w-1/3 p-4 border-t md:border-t-0 md:border-l bg-background/50 md:max-h-full md:overflow-y-auto space-y-4 flex-shrink-0 flex flex-col items-center justify-center text-muted-foreground text-center">
-                <MapPinned className="h-10 w-10 mb-3 text-primary" />
-                <p className="font-semibold">Realiza una búsqueda o selecciona una categoría.</p>
-                <p className="text-sm">Usa el botón "Buscar" o elige una categoría del menú superior para ver proveedores.</p>
-            </div>
-        )}
-        <EnRouteProviderPanel />
-      </CardContent>
-    </Card>
+      {/* BottomSearchContainer overlays on top, only when NO provider is en-route */}
+      {!enRouteProviderInfo && <BottomSearchContainer />}
+
+      {/* The right-hand provider list is now removed for the DiDi-like UI. 
+          It can be reintroduced later, perhaps as a modal or a different view
+          triggered by the bottom search bar. 
+      */}
+    </div>
   );
 }
