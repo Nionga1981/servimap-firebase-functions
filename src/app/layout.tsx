@@ -1,5 +1,5 @@
 import type {Metadata} from 'next';
-// import { Inter } from 'next/font/google'; // Commented out
+// import { Inter } from 'next/font/google'; // Font loading commented out to simplify
 import './globals.css';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Toaster } from "@/components/ui/toaster"
@@ -7,7 +7,7 @@ import { Toaster } from "@/components/ui/toaster"
 // const inter = Inter({
 //   subsets: ['latin'],
 //   variable: '--font-inter',
-// }); // Commented out
+// });
 
 export const metadata: Metadata = {
   title: 'ServiMap',
@@ -23,7 +23,7 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       {/* <body className={`${inter.variable} font-sans antialiased`}> */}
-      <body className="font-sans antialiased"> {/* Removed inter.variable */}
+      <body className="font-sans antialiased"> {/* Font class removed */}
         <AppLayout>
           {children}
         </AppLayout>
