@@ -5,46 +5,44 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import ReactDOMServer from 'react-dom/server';
 import type { LucideIcon } from 'lucide-react';
 import { GoogleMap, MarkerF, useJsApiLoader, PolylineF, DirectionsService, DirectionsRenderer } from '@react-google-maps/api';
-import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card'; // CardFooter might not be needed
-import { MapPinned, Search, AlertTriangle, WifiOff, Loader2 as LoaderIcon, LocateFixed, Car, Clock } from 'lucide-react';
-import type { Provider, Service } from '@/types';
-import { ProviderPreviewCard } from './ProviderPreviewCard';
+import { Card, CardContent, CardHeader } from '@/components/ui/card'; // CardFooter might not be needed
+import { MapPinned, Search, WifiOff, Loader2 as LoaderIcon, LocateFixed, Car, Clock, AlertTriangle, X } from 'lucide-react';
+import type { Provider } from '@/types';
+// ProviderPreviewCard is not used in this layout.
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+// Input is not used directly in MapDisplay for search anymore.
 import { cn } from "@/lib/utils";
 import { mockProviders, USER_FIXED_LOCATION } from '@/lib/mockData';
 import { SERVICE_CATEGORIES, DEFAULT_USER_AVATAR } from '@/lib/constants';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { BottomSearchContainer } from './BottomSearchContainer'; // Import the new component
+import { BottomSearchContainer } from './BottomSearchContainer';
 
 // Helper function to convert Lucide Icon component to SVG Data URI
 function lucideIconToDataUri(
   IconComponent: LucideIcon,
   options: { size?: number; color?: string; strokeWidth?: number } = {}
 ): string {
-  const { size = 24, color = '#3F51B5', strokeWidth = 2 } = options; // Using a fixed hex color
+  const { size = 24, color = '#3F51B5', strokeWidth = 2 } = options;
   if (typeof IconComponent !== 'function' && typeof IconComponent !== 'object') {
-    console.error('[MapDisplay lucideIconToDataUri] Invalid IconComponent passed:', IconComponent);
+    // console.error('[MapDisplay lucideIconToDataUri] Invalid IconComponent passed:', IconComponent);
     return '';
   }
   try {
     const element = React.createElement(IconComponent, { color, size, strokeWidth });
     const svgString = ReactDOMServer.renderToStaticMarkup(element);
-    // console.log(`[MapDisplay lucideIconToDataUri] SVG string for ${IconComponent.displayName || 'icon'}:`, svgString);
     const dataUri = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svgString)}`;
-    // console.log(`[MapDisplay lucideIconToDataUri] Generated Data URI (first 100 chars) for ${IconComponent.displayName || 'icon'}: ${dataUri.substring(0,100)}...`);
+    // console.log(`[MapDisplay] Generated iconDataUri for category: ${dataUri.substring(0,100)}...`);
     return dataUri;
   } catch (error) {
-    console.error('[MapDisplay lucideIconToDataUri] Error rendering Lucide icon to SVG string:', error, IconComponent);
+    // console.error('[MapDisplay lucideIconToDataUri] Error rendering Lucide icon to SVG string:', error, IconComponent);
     return '';
   }
 }
 
-
 const mapContainerStyle: React.CSSProperties = {
   width: '100%',
-  height: '100%', // Map will take full height of its parent
+  height: '100%',
 };
 
 const mapStylesArray: google.maps.MapTypeStyle[] = [
@@ -123,7 +121,7 @@ const MapContentComponent = React.memo(({
           icon={{
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
-            fillColor: "hsl(var(--primary))",
+            fillColor: "#3F51B5", 
             fillOpacity: 1,
             strokeWeight: 2,
             strokeColor: "white",
@@ -141,15 +139,12 @@ const MapContentComponent = React.memo(({
             iconDataUri = categoryIconCache.current.get(serviceCategory.id);
           } else {
             try {
-              iconDataUri = lucideIconToDataUri(serviceCategory.icon, { color: '#3F51B5' }); // Use fixed color
+              iconDataUri = lucideIconToDataUri(serviceCategory.icon, { color: '#3F51B5' });
               if (iconDataUri) {
-                // console.log(`[MapDisplay] Generated iconDataUri for ${serviceCategory.id}: ${iconDataUri.substring(0,100)}...`);
                 categoryIconCache.current?.set(serviceCategory.id, iconDataUri);
-              } else {
-                // console.warn(`[MapDisplay] Failed to generate iconDataUri for ${serviceCategory.id}`);
               }
             } catch (e) {
-              console.error(`[MapDisplay] Error calling lucideIconToDataUri for ${serviceCategory.id}:`, e);
+              // console.error(`[MapDisplay] Error calling lucideIconToDataUri for ${serviceCategory.id}:`, e);
             }
           }
         }
@@ -163,7 +158,7 @@ const MapContentComponent = React.memo(({
                     anchor: new window.google.maps.Point(16, 32),    
                 };
             } catch (e) {
-                console.error(`[MapDisplay] Error creating google.maps.Size/Point for ${provider.name}:`, e);
+                // console.error(`[MapDisplay] Error creating google.maps.Size/Point for ${provider.name}:`, e);
             }
         }
         
@@ -181,7 +176,6 @@ const MapContentComponent = React.memo(({
   );
 });
 MapContentComponent.displayName = 'MapContentComponent';
-
 
 interface EnRouteProviderInfo {
   provider: Provider;
@@ -204,7 +198,6 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
   return distance;
 };
 
-
 export function MapDisplay() {
   const libraries = useMemo(() => ['places'] as const, []);
   const googleMapsApiKey = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU"; 
@@ -221,8 +214,7 @@ export function MapDisplay() {
   const [mapInstance, setMapInstance] = useState<google.maps.Map | null>(null);
   
   const [displayedProviders, setDisplayedProviders] = useState<Provider[]>([]);
-  const [providersVisibleInPanel, setProvidersVisibleInPanel] = useState(false); // Hidden by default for new UI
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(''); // Currently not connected to BottomSearchContainer input
   const categoryIconCache = useRef(new Map<string, string>());
 
   const searchParams = useSearchParams();
@@ -256,17 +248,9 @@ export function MapDisplay() {
     if (!route.legs || !route.legs[0] || !route.legs[0].steps || !userLocation) {
       if (userLocation) {
         const arrivalTimeout = setTimeout(() => {
-          setEnRouteProviderInfo(prev => prev ? {
-            ...prev,
-            currentLocation: userLocation,
-            status: "Ha llegado",
-            eta: "0 min",
-          } : null);
-          if (mapInstance) {
-            mapInstance.panTo(userLocation);
-            mapInstance.setZoom(17);
-          }
-        }, 5000);
+          setEnRouteProviderInfo(prev => prev ? { ...prev, currentLocation: userLocation, status: "Ha llegado", eta: "0 min" } : null);
+          if (mapInstance) { mapInstance.panTo(userLocation); mapInstance.setZoom(17); }
+        }, 5000); 
         simulationTimeoutIds.current.push(arrivalTimeout);
       }
       return;
@@ -289,8 +273,8 @@ export function MapDisplay() {
         }
         
         let remainingSecondsInSimulation = 0;
-        for (let i = index + 1; i < steps.length; i++) {
-          remainingSecondsInSimulation += (route.legs[0].steps[i].duration?.value || ( (route.legs[0].duration?.value || steps.length * 2) / steps.length) );
+        for(let i = index + 1; i < steps.length; i++) {
+          remainingSecondsInSimulation += (route.legs[0].steps[i].duration?.value || ((route.legs[0].duration?.value || steps.length * 2) / steps.length) );
         }
         const remainingMinutes = Math.ceil(remainingSecondsInSimulation / 60);
         const newEta = remainingMinutes > 0 ? `${remainingMinutes} min` : "Casi llega";
@@ -311,7 +295,7 @@ export function MapDisplay() {
           });
           if (mapInstance) {
             mapInstance.panTo(userLocation);
-            mapInstance.setZoom(17);
+            mapInstance.setZoom(17); 
           }
         }
       }, cumulativeDelay);
@@ -328,8 +312,7 @@ export function MapDisplay() {
       simulationTimeoutIds.current.forEach(clearTimeout);
       simulationTimeoutIds.current = [];
       if (userLocation) setMapCenter(userLocation);
-      setMapZoom(13);
-      // handleSearch(); // Do not auto-search on clearing hired provider
+      setMapZoom(13); 
       return;
     }
     
@@ -337,8 +320,7 @@ export function MapDisplay() {
       const providerInRoute = mockProviders.find(p => p.id === currentHiredProviderId);
 
       if (providerInRoute && providerInRoute.location) {
-        setProvidersVisibleInPanel(false); // Hide normal provider list
-        setDisplayedProviders([]);
+        setDisplayedProviders([]); 
         
         setEnRouteProviderInfo({
           provider: providerInRoute,
@@ -403,7 +385,7 @@ export function MapDisplay() {
     filtered = filtered.filter(provider => {
       if (provider.location) {
         const distance = calculateDistance(userLocation.lat, userLocation.lng, provider.location.lat, provider.location.lng);
-        return distance <= 20;
+        return distance <= 20; 
       }
       return false;
     });
@@ -415,47 +397,13 @@ export function MapDisplay() {
       );
     }
     
-    filtered.sort((a, b) => b.rating - a.rating);
+    // Search term filtering is not active with BottomSearchContainer yet
+    // if (searchTerm.trim() !== '') { ... }
+    
+    filtered.sort((a, b) => b.rating - a.rating); 
     setDisplayedProviders(filtered);
     
-    // Visibility of panel controlled by explicit actions now (search or category selection)
-    // setProvidersVisibleInPanel(categoryParam && filtered.length > 0);
-    
-  }, [userLocation, categoryParam, isMapApiLoaded, currentHiredProviderId]);
-
-
-  const handleSearch = () => {
-    // This function will be triggered by the new BottomSearchContainer's input
-    // For now, it just shows nearby providers based on category or all if no category.
-    // Actual text search logic needs to be added if the input in BottomSearchContainer becomes functional.
-    if (currentHiredProviderId || !userLocation) {
-        return;
-    }
-
-    let tempProviders = [...mockProviders];
-    tempProviders = tempProviders.filter(provider => {
-      if (provider.location) {
-        const distance = calculateDistance(userLocation.lat, userLocation.lng, provider.location.lat, provider.location.lng);
-        return distance <= 20;
-      }
-      return false;
-    });
-    
-    const isActiveCategoryFilter = categoryParam && categoryParam !== 'all' && categoryParam !== '';
-    if (isActiveCategoryFilter) {
-      tempProviders = tempProviders.filter(provider =>
-        provider.services.some(service => service.category === categoryParam)
-      );
-    }
-    
-    // Add text search logic here if searchTerm from BottomSearchContainer is used
-    // if (searchTerm.trim() !== '') { ... }
-
-    tempProviders.sort((a, b) => b.rating - a.rating);
-    setDisplayedProviders(tempProviders);
-    setProvidersVisibleInPanel(tempProviders.length > 0); 
-  };
-
+  }, [userLocation, categoryParam, searchTerm, isMapApiLoaded, currentHiredProviderId]);
 
   const renderMapArea = () => {
     if (!googleMapsApiKey) {
@@ -533,10 +481,6 @@ export function MapDisplay() {
     );
   };
   
-  // The right-hand panel logic is now simplified or removed for the DiDi-like UI
-  // const shouldDisplayRightPanel = providersVisibleInPanel && displayedProviders.length > 0 && isMapApiLoaded && !mapApiLoadError && !!googleMapsApiKey && !enRouteProviderInfo;
-  // const showNoResultsMessage = providersVisibleInPanel && displayedProviders.length === 0 && (!!categoryParam || searchTerm.trim() !== '') && !enRouteProviderInfo;
-
   const EnRouteProviderPanel = () => {
     if (!enRouteProviderInfo || !enRouteProviderInfo.provider) return null;
     const { provider, status, eta } = enRouteProviderInfo;
@@ -544,7 +488,7 @@ export function MapDisplay() {
     const IconComponent = providerCategory?.icon || Car;
 
     return (
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 w-11/12 max-w-md z-20"> {/* Increased z-index */}
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 w-11/12 max-w-md z-20">
         <Card className="shadow-xl bg-background/90 backdrop-blur-sm">
           <CardHeader className="flex flex-row items-center gap-4 p-4">
             <Image 
@@ -560,6 +504,10 @@ export function MapDisplay() {
               <h3 className="text-lg font-semibold text-primary">{provider.name}</h3>
               <p className="text-sm text-muted-foreground">{providerCategory?.name || "Servicio Contratado"}</p>
             </div>
+             <Button variant="ghost" size="icon" className="ml-auto text-muted-foreground hover:text-destructive" onClick={() => router.push('/')}>
+                <X className="h-5 w-5" />
+                <span className="sr-only">Cancelar Seguimiento</span>
+            </Button>
           </CardHeader>
           <CardContent className="p-4 pt-0 text-center">
             {status === "En camino" ? (
@@ -591,20 +539,30 @@ export function MapDisplay() {
   };
 
  useEffect(() => {
-    // This useEffect now primarily ensures the map is centered on the user's fixed location
-    // and potentially loads initial nearby providers if that's the desired default behavior.
-    // For the DiDi-like UI, we might want to delay showing providers until a search.
     if (userLocation && isMapApiLoaded && !currentHiredProviderId) {
-        // For initial DiDi-like view, don't show providers or panel automatically
-        setDisplayedProviders([]);
-        setProvidersVisibleInPanel(false);
+        let initialProviders = [...mockProviders].filter(provider => {
+            if (provider.location) {
+                const distance = calculateDistance(userLocation.lat, userLocation.lng, provider.location.lat, provider.location.lng);
+                return distance <= 20;
+            }
+            return false;
+        });
+
+        const isActiveCategoryFilter = categoryParam && categoryParam !== 'all' && categoryParam !== '';
+        if (isActiveCategoryFilter) {
+            initialProviders = initialProviders.filter(provider =>
+                provider.services.some(service => service.category === categoryParam)
+            );
+        }
+        initialProviders.sort((a,b) => b.rating - a.rating);
+        setDisplayedProviders(initialProviders);
       
         if (mapInstance) {
           mapInstance.setCenter(userLocation);
           mapInstance.setZoom(mapZoom); 
         }
     }
-  }, [userLocation, isMapApiLoaded, currentHiredProviderId, mapInstance, mapZoom]);
+  }, [userLocation, isMapApiLoaded, mapInstance, mapZoom, categoryParam, currentHiredProviderId]);
 
 
   return (
@@ -613,16 +571,11 @@ export function MapDisplay() {
         {renderMapArea()}
       </div>
       
-      {/* EnRouteProviderPanel will overlay on top, only when a provider is en-route */}
       {enRouteProviderInfo && <EnRouteProviderPanel />}
-
-      {/* BottomSearchContainer overlays on top, only when NO provider is en-route */}
-      {!enRouteProviderInfo && <BottomSearchContainer />}
-
-      {/* The right-hand provider list is now removed for the DiDi-like UI. 
-          It can be reintroduced later, perhaps as a modal or a different view
-          triggered by the bottom search bar. 
-      */}
+      {/* Only show BottomSearchContainer if no provider is en-route */}
+      {!enRouteProviderInfo && <BottomSearchContainer />} 
     </div>
   );
 }
+
+    
