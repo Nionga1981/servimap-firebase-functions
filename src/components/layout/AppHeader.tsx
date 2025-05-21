@@ -2,7 +2,7 @@
 "use client";
 
 import Link from 'next/link';
-import { Menu, Package2, UserCircle, Globe, ChevronDown } from 'lucide-react';
+import { Menu, Package2, UserCircle, Globe, ChevronDown, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import {
@@ -17,15 +17,18 @@ import {
 import Image from 'next/image';
 import { DEFAULT_USER_AVATAR, SERVICE_CATEGORIES } from '@/lib/constants';
 import React, { useState } from 'react';
-import { useRouter } from 'next/navigation'; // Importar useRouter
+import { useRouter, usePathname } from 'next/navigation';
 
 const navLinks = [
+  // { href: "/client", label: "Buscar Servicios" }, // Eliminado
   { href: "/provider", label: "Ofrecer Servicios" },
+  // { href: "/chat", label: "Demo de Chat" }, // Eliminado
 ];
 
 export function AppHeader() {
   const [currentLanguage, setCurrentLanguage] = useState<'ES' | 'EN'>('ES');
-  const router = useRouter(); // Inicializar useRouter
+  const router = useRouter();
+  const pathname = usePathname();
 
   const toggleLanguage = () => {
     const newLang = currentLanguage === 'ES' ? 'EN' : 'ES';
@@ -34,11 +37,19 @@ export function AppHeader() {
   };
 
   const handleCategorySelect = (categoryId: string | null) => {
-    if (categoryId) {
-      router.push(`/?category=${categoryId}`);
+    if (pathname === '/') { // Solo aplicar filtro si estamos en la página del mapa
+      if (categoryId && categoryId !== 'all') {
+        router.push(`/?category=${categoryId}`);
+      } else {
+        router.push('/'); // Limpiar filtro o ir a "Todas las Categorías"
+      }
     } else {
-      // Si categoryId es null, significa "Todas las Categorías" o limpiar filtro
-      router.push('/');
+      // Si no estamos en la página del mapa, redirigir a la página del mapa con el filtro
+      if (categoryId && categoryId !== 'all') {
+        router.push(`/?category=${categoryId}`);
+      } else {
+        router.push('/');
+      }
     }
   };
 
@@ -54,7 +65,6 @@ export function AppHeader() {
           ServiMap
         </Link>
 
-        {/* Dropdown de Categorías */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="text-foreground/80 transition-colors hover:text-foreground hover:bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0">
@@ -65,8 +75,8 @@ export function AppHeader() {
             <DropdownMenuLabel>Explorar por Categoría</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => handleCategorySelect('all')}> {/* Opción para todas las categorías */}
-                {/* Podrías añadir un ícono genérico si quieres */}
+              <DropdownMenuItem onClick={() => handleCategorySelect('all')}>
+                <Search className="mr-2 h-4 w-4 text-muted-foreground" />
                 <span>Todas las Categorías</span>
               </DropdownMenuItem>
               {SERVICE_CATEGORIES.map((category) => {
@@ -114,7 +124,6 @@ export function AppHeader() {
               ServiMap
             </Link>
             
-            {/* Dropdown de Categorías para móvil */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="flex items-center justify-start text-muted-foreground hover:text-foreground w-full text-left">
@@ -126,6 +135,7 @@ export function AppHeader() {
                  <DropdownMenuSeparator />
                  <DropdownMenuGroup>
                    <DropdownMenuItem onClick={() => handleCategorySelect('all')}>
+                     <Search className="mr-2 h-4 w-4 text-muted-foreground" />
                      <span>Todas las Categorías</span>
                    </DropdownMenuItem>
                     {SERVICE_CATEGORIES.map((category) => {
@@ -168,6 +178,7 @@ export function AppHeader() {
                 alt="Avatar de Usuario"
                 className="rounded-full"
                 data-ai-hint="user avatar"
+                style={{ objectFit: "cover" }}
               />
               <span className="sr-only">Alternar menú de usuario</span>
             </Button>

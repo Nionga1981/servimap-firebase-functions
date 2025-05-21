@@ -11,7 +11,7 @@ import { Toaster } from "@/components/ui/toaster"
 // });
 
 export const metadata: Metadata = {
-  title: 'ServiMap',
+  title: 'ServiMap', 
   description: 'Conecta con profesionales calificados en tiempo real.',
   icons: null, // Explicitly state no icons should be processed via metadata
 };
