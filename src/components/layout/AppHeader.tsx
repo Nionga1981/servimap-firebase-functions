@@ -17,26 +17,29 @@ import {
 import Image from 'next/image';
 import { DEFAULT_USER_AVATAR, SERVICE_CATEGORIES } from '@/lib/constants';
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation'; // Importar useRouter
 
 const navLinks = [
   { href: "/provider", label: "Ofrecer Servicios" },
-  // { href: "/chat", label: "Demo de Chat" }, // Eliminado
 ];
 
 export function AppHeader() {
   const [currentLanguage, setCurrentLanguage] = useState<'ES' | 'EN'>('ES');
+  const router = useRouter(); // Inicializar useRouter
 
   const toggleLanguage = () => {
     const newLang = currentLanguage === 'ES' ? 'EN' : 'ES';
     setCurrentLanguage(newLang);
-    // En una implementación real, aquí llamarías a tu lógica de i18n para cambiar el idioma.
-    console.log(`Idioma cambiado a: ${newLang}. Funcionalidad de i18n completa pendiente.`);
     alert(`Simulación: Idioma cambiado a ${newLang === 'EN' ? 'Inglés' : 'Español'}.\nLa traducción completa de la interfaz requiere un sistema i18n.`);
   };
 
-  const handleCategorySelect = (categoryName: string) => {
-    alert(`Has seleccionado la categoría: "${categoryName}".\n\nActualmente, esto solo muestra esta alerta.\nLa funcionalidad para filtrar proveedores por esta categoría aún no está implementada.`);
-    // Aquí se podría implementar la lógica para filtrar servicios por categoría en el futuro
+  const handleCategorySelect = (categoryId: string | null) => {
+    if (categoryId) {
+      router.push(`/?category=${categoryId}`);
+    } else {
+      // Si categoryId es null, significa "Todas las Categorías" o limpiar filtro
+      router.push('/');
+    }
   };
 
   return (
@@ -62,15 +65,19 @@ export function AppHeader() {
             <DropdownMenuLabel>Explorar por Categoría</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-            {SERVICE_CATEGORIES.map((category) => {
-              const IconComponent = category.icon;
-              return (
-                <DropdownMenuItem key={category.id} onClick={() => handleCategorySelect(category.name)}>
-                  <IconComponent className="mr-2 h-4 w-4 text-muted-foreground" />
-                  <span>{category.name}</span>
-                </DropdownMenuItem>
-              );
-            })}
+              <DropdownMenuItem onClick={() => handleCategorySelect('all')}> {/* Opción para todas las categorías */}
+                {/* Podrías añadir un ícono genérico si quieres */}
+                <span>Todas las Categorías</span>
+              </DropdownMenuItem>
+              {SERVICE_CATEGORIES.map((category) => {
+                const IconComponent = category.icon;
+                return (
+                  <DropdownMenuItem key={category.id} onClick={() => handleCategorySelect(category.id)}>
+                    <IconComponent className="mr-2 h-4 w-4 text-muted-foreground" />
+                    <span>{category.name}</span>
+                  </DropdownMenuItem>
+                );
+              })}
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -118,15 +125,18 @@ export function AppHeader() {
                  <DropdownMenuLabel>Explorar por Categoría</DropdownMenuLabel>
                  <DropdownMenuSeparator />
                  <DropdownMenuGroup>
-                {SERVICE_CATEGORIES.map((category) => {
-                  const IconComponent = category.icon;
-                  return (
-                    <DropdownMenuItem key={category.id} onClick={() => handleCategorySelect(category.name)}>
-                       <IconComponent className="mr-2 h-4 w-4 text-muted-foreground" />
-                      <span>{category.name}</span>
-                    </DropdownMenuItem>
-                  );
-                })}
+                   <DropdownMenuItem onClick={() => handleCategorySelect('all')}>
+                     <span>Todas las Categorías</span>
+                   </DropdownMenuItem>
+                    {SERVICE_CATEGORIES.map((category) => {
+                      const IconComponent = category.icon;
+                      return (
+                        <DropdownMenuItem key={category.id} onClick={() => handleCategorySelect(category.id)}>
+                           <IconComponent className="mr-2 h-4 w-4 text-muted-foreground" />
+                          <span>{category.name}</span>
+                        </DropdownMenuItem>
+                      );
+                    })}
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
