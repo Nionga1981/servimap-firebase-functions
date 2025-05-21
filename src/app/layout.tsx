@@ -12,6 +12,7 @@ const inter = Inter({ // Initialize Inter font
 export const metadata: Metadata = {
   title: 'ServiMap',
   description: 'Conecta con profesionales calificados en tiempo real.',
+  // The 'icon' property has been completely removed.
 };
 
 export default function RootLayout({
