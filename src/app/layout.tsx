@@ -1,10 +1,10 @@
 import type {Metadata} from 'next';
-import { Inter } from 'next/font/google'; // Changed from Geist to Inter
+import { Inter } from 'next/font/google';
 import './globals.css';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Toaster } from "@/components/ui/toaster"
 
-const inter = Inter({ // Initialize Inter font
+const inter = Inter({
   subsets: ['latin'],
   variable: '--font-inter',
 });
@@ -12,7 +12,8 @@ const inter = Inter({ // Initialize Inter font
 export const metadata: Metadata = {
   title: 'ServiMap',
   description: 'Conecta con profesionales calificados en tiempo real.',
-  // The 'icon' property has been completely removed.
+  // Explicitly state no icons should be processed via metadata
+  icons: null, 
 };
 
 export default function RootLayout({
