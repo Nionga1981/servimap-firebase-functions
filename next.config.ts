@@ -1,5 +1,6 @@
 import type {NextConfig} from 'next';
 
+// Ensuring this configuration is up-to-date for the build process
 const nextConfig: NextConfig = {
   /* config options here */
   typescript: {
