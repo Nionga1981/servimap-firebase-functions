@@ -1,7 +1,7 @@
 // src/services/requestService.ts
 "use client"; 
 import type { ServiceRequest, ServiceRequestStatus, PaymentStatus, FixedServiceRequest, HourlyServiceRequest, Provider } from '@/types';
-import { mockProviders } from '@/lib/mockData'; // Importar mockProviders
+import { mockProviders, USER_FIXED_LOCATION } from '@/lib/mockData'; // Importar mockProviders
 
 // Simulación de una "base de datos" en memoria para las solicitudes
 let mockServiceRequests: ServiceRequest[] = [];
@@ -57,6 +57,7 @@ export const confirmServiceCompletionByUser = async (
     return null; 
   }
 
+  // El usuario puede confirmar si el proveedor la marcó como completa, o incluso si está en camino/iniciada (flujo flexible para demo)
   const validPreviousStates: ServiceRequestStatus[] = ['completado_proveedor', 'servicio_iniciado', 'en_camino_proveedor', 'confirmado_proveedor', 'agendado'];
   if (!validPreviousStates.includes(request.status)) {
     console.error(`[RequestService] La solicitud ${requestId} no está en un estado válido (${request.status}) para confirmación por el usuario.`);
@@ -68,12 +69,15 @@ export const confirmServiceCompletionByUser = async (
   request.userConfirmedCompletionAt = now; 
   request.updatedAt = now;
   
+  // Activar sistema de calificación y ventana de 7 días
   request.ratingWindowExpiresAt = now + SEVEN_DAYS_MS;
-  console.log(`[RequestService] Sistema de calificación activado para solicitud ${requestId}. Ventana expira en 7 días.`);
+  console.log(`[RequestService] Sistema de calificación mutua activado para solicitud ${requestId}. Ventana expira en 7 días.`);
 
+  // Retener el pago hasta que pase la ventana de calificación/disputa
   request.paymentStatus = 'retenido_para_liberacion';
-  console.log(`[RequestService] Pago para solicitud ${requestId} ahora está '${request.paymentStatus}'.`);
+  console.log(`[RequestService] Pago para solicitud ${requestId} ahora está '${request.paymentStatus}'. Se liberará al proveedor después de 7 días si no hay reclamos.`);
 
+  // Aplicar garantía
   if (MOCK_IS_USER_PREMIUM) { 
     request.warrantyEndDate = new Date(now + EXTENDED_WARRANTY_DAYS_MS).toISOString().split('T')[0];
     console.log(`[RequestService] Usuario premium: Garantía extendida aplicada hasta ${request.warrantyEndDate}`);
@@ -89,44 +93,71 @@ export const confirmServiceCompletionByUser = async (
 };
 
 /**
- * Simula el reporte de un problema por parte del usuario.
+ * Permite al usuario reportar un problema con un servicio finalizado.
  */
 export const reportServiceIssue = async (
   userId: string,
   requestId: string,
-  issueDetails: string
+  issueDetails: string // Motivo y comentario del problema
 ): Promise<ServiceRequest | null> => {
-  console.log(`[RequestService] Usuario ${userId} reportando problema para solicitud ${requestId}: ${issueDetails}`);
+  console.log(`[RequestService] Usuario ${userId} reportando problema para solicitud ${requestId}. Detalles: ${issueDetails}`);
 
   const requestIndex = mockServiceRequests.findIndex(req => req.id === requestId);
   if (requestIndex === -1) {
-    console.error(`[RequestService] Solicitud ${requestId} no encontrada.`);
+    console.error(`[RequestService] Reporte de problema: Solicitud ${requestId} no encontrada.`);
     return null;
   }
   
   let request = mockServiceRequests[requestIndex];
 
+  // Verificar propiedad
   if (request.userId !== userId) {
-    console.error(`[RequestService] Usuario ${userId} no es propietario de la solicitud ${requestId}.`);
+    console.error(`[RequestService] Reporte de problema: Usuario ${userId} no es propietario de la solicitud ${requestId}.`);
     return null;
   }
 
-  if (request.status !== 'finalizado_usuario' || (request.ratingWindowExpiresAt && Date.now() > request.ratingWindowExpiresAt)) {
-    console.error(`[RequestService] No se puede reportar problema para la solicitud ${requestId}. Estado: ${request.status}, Ventana de disputa expiró: ${request.ratingWindowExpiresAt && Date.now() > request.ratingWindowExpiresAt}`);
+  // Verificar que la solicitud esté en estado 'finalizado_usuario' y dentro de la ventana de 7 días
+  const canReportIssueStates: ServiceRequestStatus[] = ['finalizado_usuario'];
+  if (!canReportIssueStates.includes(request.status)) {
+     console.error(`[RequestService] Reporte de problema: Solicitud ${requestId} no está en estado 'finalizado_usuario' (estado actual: ${request.status}).`);
+    return null;
+  }
+  if (request.ratingWindowExpiresAt && Date.now() > request.ratingWindowExpiresAt) {
+    console.error(`[RequestService] Reporte de problema: La ventana para reportar problemas para la solicitud ${requestId} ha expirado.`);
     return null;
   }
 
   const now = Date.now();
+  // 1. Cambiar el estado de la solicitud a "en disputa"
   request.status = 'en_disputa';
-  request.paymentStatus = 'congelado_por_disputa'; 
+  request.updatedAt = now;
+
+  // 2. Crear (simular) un documento en la colección "reclamos"
+  const claimDocument = {
+    solicitudId: requestId,
+    usuarioId: userId,
+    prestadorId: request.providerId,
+    motivo: issueDetails.substring(0, 100), // Tomar una parte como motivo
+    comentario: issueDetails,
+    fechaCreacion: now,
+    estadoReclamo: 'abierto', // Estado inicial del reclamo
+  };
+  console.log('[RequestService] Simulación: Creando documento en "reclamos":', claimDocument);
+  // En una app real: await addDoc(collection(db, "reclamos"), claimDocument);
+
+  // 3. Detener la liberación del pago automáticamente
+  request.paymentStatus = 'congelado_por_disputa';
+  console.log(`[RequestService] Reporte de problema: Pago para solicitud ${requestId} ahora está '${request.paymentStatus}'.`);
+
+  // 4. Notificar al prestador y marcar el servicio como en revisión (simulación)
   request.disputeDetails = {
     reportedAt: now,
     reason: issueDetails,
   };
-  request.updatedAt = now;
+  console.log(`[RequestService] Simulación: Notificando al prestador ${request.providerId} sobre el problema y marcando el servicio como en revisión.`);
   
   mockServiceRequests[requestIndex] = request;
-  console.log(`[RequestService] Problema reportado para solicitud ${requestId}. Pago congelado. Detalles:`, request);
+  console.log(`[RequestService] Problema reportado para solicitud ${requestId}. Estado y pago actualizados. Detalles:`, request);
   return request;
 };
 
@@ -135,7 +166,7 @@ export const reportServiceIssue = async (
  */
 export const addServiceRatingAndReview = async (
   requestId: string,
-  evaluatorId: string, // ID del que está calificando (usuario o proveedor)
+  evaluatorId: string, 
   evaluatorRole: 'user' | 'provider',
   rating: number,
   comment?: string
@@ -151,16 +182,27 @@ export const addServiceRatingAndReview = async (
   let request = mockServiceRequests[requestIndex];
 
   // Verificar que la solicitud esté en un estado apto para calificar
+  // El usuario puede calificar si está 'finalizado_usuario' y dentro de la ventana.
+  // El proveedor podría calificar también en estos estados.
   const canRateStates: ServiceRequestStatus[] = ['finalizado_usuario', 'cerrado_automaticamente', 'cerrado_con_calificacion'];
   if (!canRateStates.includes(request.status)) {
     console.error(`[RequestService] Calificación: Solicitud ${requestId} no está en estado para calificar (estado actual: ${request.status}).`);
     throw new Error(`La solicitud no está en un estado válido para ser calificada.`);
   }
 
+  // Verificar que esté dentro de la ventana de calificación, si está definida
+  if (request.ratingWindowExpiresAt && Date.now() > request.ratingWindowExpiresAt) {
+    console.error(`[RequestService] Calificación: La ventana para calificar la solicitud ${requestId} ha expirado.`);
+    // Opcionalmente, permitir calificar fuera de ventana pero sin impacto en pago, o mostrar error.
+    // Por ahora, lanzaremos un error para ser estrictos con la ventana.
+    throw new Error(`La ventana para calificar esta solicitud ha expirado.`);
+  }
+
+
   // Verificar que el evaluador solo pueda calificar una vez
   if (evaluatorRole === 'user' && request.userRating) {
     console.warn(`[RequestService] Calificación: Usuario ${evaluatorId} ya calificó esta solicitud.`);
-    throw new Error(`Usuario ya calificó esta solicitud.`);
+    throw new Error(`Ya has calificado esta solicitud.`);
   }
   if (evaluatorRole === 'provider' && request.providerRating) {
     console.warn(`[RequestService] Calificación: Proveedor ${evaluatorId} ya calificó esta solicitud.`);
@@ -176,11 +218,11 @@ export const addServiceRatingAndReview = async (
     const providerIndex = mockProviders.findIndex(p => p.id === request.providerId);
     if (providerIndex !== -1) {
       const provider = mockProviders[providerIndex];
-      provider.ratingSum += rating;
-      provider.ratingCount += 1;
+      provider.ratingSum = (provider.ratingSum || 0) + rating;
+      provider.ratingCount = (provider.ratingCount || 0) + 1;
       provider.rating = parseFloat((provider.ratingSum / provider.ratingCount).toFixed(2)); // Mantener 2 decimales
       mockProviders[providerIndex] = provider;
-      console.log(`[RequestService] Calificación del proveedor ${provider.id} actualizada a ${provider.rating}`);
+      console.log(`[RequestService] Calificación del proveedor ${provider.id} actualizada a ${provider.rating} (${provider.ratingCount} reseñas)`);
     }
   } else { // evaluatorRole === 'provider'
     request.providerRating = newRatingDetail;
@@ -208,17 +250,16 @@ export const addServiceRatingAndReview = async (
 
 /**
  * SIMULACIÓN DE PROCESO DE BACKEND: Finalizar automáticamente una solicitud después de 7 días si no hay acción.
+ * Esta función solo se llamaría conceptualmente desde un proceso de backend.
  */
 const simulateAutoFinalizeServiceAfterGracePeriod = async (requestId: string): Promise<void> => {
-  console.log(`[RequestService - BACKEND SIM] Iniciando simulación de finalización automática para ${requestId} en 7 días.`);
-  
-  // En una app real, esto no sería un setTimeout en el cliente.
-  // Se usaría un cron job o función programada en el backend.
-  // Para la simulación, podemos simplemente llamar a la lógica de finalización si han pasado 7 días.
-  // Este método solo se llamaría conceptualmente desde un proceso de backend.
+  console.log(`[RequestService - BACKEND SIM] Iniciando simulación de finalización automática para ${requestId}.`);
   
   const requestIndex = mockServiceRequests.findIndex(req => req.id === requestId);
-  if (requestIndex === -1) return;
+  if (requestIndex === -1) {
+    console.warn(`[RequestService - BACKEND SIM] Solicitud ${requestId} no encontrada para auto-finalización.`);
+    return;
+  }
 
   let request = mockServiceRequests[requestIndex];
 
@@ -236,9 +277,20 @@ const simulateAutoFinalizeServiceAfterGracePeriod = async (requestId: string): P
     mockServiceRequests[requestIndex] = request;
     console.log(`[RequestService - BACKEND SIM] Solicitud ${requestId} finalizada automáticamente. Pago liberado.`, request);
   } else {
-    console.log(`[RequestService - BACKEND SIM] Solicitud ${requestId} no apta para finalización automática. Estado: ${request.status}, Pago: ${request.paymentStatus}`);
+    // console.log(`[RequestService - BACKEND SIM] Solicitud ${requestId} no apta para finalización automática. Estado: ${request.status}, Pago: ${request.paymentStatus}, Vence: ${new Date(request.ratingWindowExpiresAt || 0 ).toLocaleString()}`);
   }
 };
+
+// Simular la ejecución periódica de la finalización automática (esto es muy básico)
+// En una app real, un cron job en el backend haría esto.
+// setInterval(() => {
+//   console.log("[RequestService - BACKEND SIM] Ejecutando revisión de auto-finalización de solicitudes...");
+//   mockServiceRequests.forEach(req => {
+//     if (req.status === 'finalizado_usuario' && req.paymentStatus === 'retenido_para_liberacion') {
+//       simulateAutoFinalizeServiceAfterGracePeriod(req.id);
+//     }
+//   });
+// }, 60000); // Cada minuto para la demo
 
 /**
  * Obtiene todas las solicitudes de servicio para un usuario, filtradas y agrupadas por estado.
@@ -257,7 +309,8 @@ export const getUserServiceRequests = async (userId: string): Promise<Record<str
     'cerrado_automaticamente', 
     'cerrado_con_calificacion', 
     'cerrado_con_disputa_resuelta', 
-    'en_disputa'            
+    'en_disputa',
+    'agendado' // Añadido para ver solicitudes recién creadas           
   ];
 
   const filteredRequests = userRequests.filter(req => relevantStatuses.includes(req.status));
@@ -268,10 +321,12 @@ export const getUserServiceRequests = async (userId: string): Promise<Record<str
 
     if (req.serviceType === 'fixed') {
       fechaHoraDeseada = `${req.serviceDate} ${req.serviceTime}`;
-      totalEstimado = req.totalAmount || 0;
+      // totalEstimado = req.totalAmount || 0; // Si hubiera servicios seleccionados
+      totalEstimado = req.selectedFixedServices?.reduce((sum, s) => sum + s.price, 0) || 0;
+
     } else if (req.serviceType === 'hourly') {
       fechaHoraDeseada = `${req.serviceDate} ${req.startTime}`;
-      totalEstimado = req.estimatedTotal;
+      totalEstimado = req.estimatedTotal || 0;
     }
 
     return {
