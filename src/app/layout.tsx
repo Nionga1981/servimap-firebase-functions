@@ -1,5 +1,5 @@
 import type {Metadata} from 'next';
-// Font loading commented out to simplify
+// Font loading commented out to simplify and prevent 403 errors in user's environment
 // import { Inter } from 'next/font/google';
 import './globals.css';
 import { AppLayout } from '@/components/layout/AppLayout';
