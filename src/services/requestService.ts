@@ -1,6 +1,6 @@
 // src/services/requestService.ts
 "use client"; 
-import type { ServiceRequest, ServiceRequestStatus, PaymentStatus } from '@/types';
+import type { ServiceRequest, ServiceRequestStatus, PaymentStatus, FixedServiceRequest, HourlyServiceRequest } from '@/types';
 
 // Simulación de una "base de datos" en memoria para las solicitudes
 let mockServiceRequests: ServiceRequest[] = [];
@@ -16,7 +16,7 @@ const EXTENDED_WARRANTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000; // Para usuarios pre
 /**
  * Simula la creación de una solicitud de servicio.
  */
-export const createServiceRequest = async (requestDataInput: Omit<ServiceRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'>): Promise<ServiceRequest> => {
+export const createServiceRequest = async (requestDataInput: Omit<FixedServiceRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'> | Omit<HourlyServiceRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'>): Promise<ServiceRequest> => {
   console.log('[RequestService] Creando nueva solicitud de servicio (simulado):', requestDataInput);
   
   await new Promise(resolve => setTimeout(resolve, 300)); // Simular retraso
@@ -27,7 +27,7 @@ export const createServiceRequest = async (requestDataInput: Omit<ServiceRequest
     id: newId,
     status: 'agendado', // Estado inicial
     createdAt: Date.now(),
-  } as ServiceRequest; // Asersión de tipo necesaria por la estructura Omit
+  } as ServiceRequest; // Asersión de tipo
 
   mockServiceRequests.push(newRequest);
   console.log(`[RequestService] Solicitud simulada creada con ID: ${newId}`, newRequest);
@@ -35,52 +35,54 @@ export const createServiceRequest = async (requestDataInput: Omit<ServiceRequest
 };
 
 /**
- * Simula la confirmación de finalización de un servicio por parte del usuario.
+ * El usuario confirma que el servicio ha sido finalizado correctamente.
+ * Esto activa el sistema de calificación y el proceso de liberación de pago.
  */
 export const confirmServiceCompletionByUser = async (
   userId: string,
   requestId: string
 ): Promise<ServiceRequest | null> => {
-  console.log(`[RequestService] Usuario ${userId} intentando confirmar finalización para solicitud ${requestId}`);
+  console.log(`[RequestService] Usuario ${userId} confirmando finalización para solicitud ${requestId}`);
 
   const requestIndex = mockServiceRequests.findIndex(req => req.id === requestId);
   if (requestIndex === -1) {
     console.error(`[RequestService] Solicitud ${requestId} no encontrada.`);
-    // En una app real, podrías lanzar un error o devolver un código de estado
     return null; 
   }
 
   let request = mockServiceRequests[requestIndex];
 
-  // 1. Verificar propiedad y estado (simulado)
+  // 1. Verificar propiedad de la solicitud
   if (request.userId !== userId) {
-    console.error(`[RequestService] Usuario ${userId} no es propietario de la solicitud ${requestId}.`);
-    return null; // O lanzar error de autorización
+    console.error(`[RequestService] Usuario ${userId} no es propietario de la solicitud ${requestId}. Acceso denegado.`);
+    // En una app real, lanzarías un error o devolverías un código de estado HTTP apropiado.
+    return null; 
   }
-  // Asumimos que el proveedor ya marcó como completado, por lo que el estado sería 'completado_proveedor'
-  // O podría ser 'servicio_iniciado' o 'en_camino_proveedor' si el flujo es más flexible
-  const validPreviousStates: ServiceRequestStatus[] = ['completado_proveedor', 'servicio_iniciado', 'en_camino_proveedor'];
+
+  // 2. Verificar que el servicio esté en un estado previo válido para la confirmación del usuario
+  //    (ej. el proveedor ya lo marcó como completado, o estaba en curso)
+  const validPreviousStates: ServiceRequestStatus[] = ['completado_proveedor', 'servicio_iniciado', 'en_camino_proveedor', 'confirmado_proveedor'];
   if (!validPreviousStates.includes(request.status)) {
-    console.error(`[RequestService] La solicitud ${requestId} no está en un estado válido para confirmación por el usuario. Estado actual: ${request.status}`);
-    return null; // O lanzar error
+    console.error(`[RequestService] La solicitud ${requestId} no está en un estado válido (${request.status}) para confirmación por el usuario.`);
+    return null; 
   }
 
   // 3. Al confirmar:
   const now = Date.now();
-  request.status = 'finalizado_usuario';
-  request.userConfirmedCompletionAt = now;
+  request.status = 'finalizado_usuario'; // Cambiar el estado a "finalizado" por el usuario
+  request.userConfirmedCompletionAt = now; // Guardar la fecha de confirmación
   request.updatedAt = now;
   
-  // Activar sistema de calificación y cuenta regresiva (simulado)
+  // Activar sistema de calificación y cuenta regresiva de 7 días
   request.ratingWindowExpiresAt = now + SEVEN_DAYS_MS;
   console.log(`[RequestService] Sistema de calificación activado para solicitud ${requestId}. Ventana expira en 7 días.`);
 
-  // Iniciar proceso de pago/liberación (simulado)
+  // Retener el pago para liberación después del período de gracia
   request.paymentStatus = 'retenido_para_liberacion';
-  console.log(`[RequestService] Pago para solicitud ${requestId} ahora está 'retenido_para_liberacion'. Se liberará al proveedor después del período de gracia o acciones del usuario.`);
+  console.log(`[RequestService] Pago para solicitud ${requestId} ahora está '${request.paymentStatus}'.`);
 
   // Simular garantía extendida para premium
-  if (MOCK_IS_USER_PREMIUM) {
+  if (MOCK_IS_USER_PREMIUM) { // En una app real, verificarías el estado premium del usuario
     request.warrantyEndDate = new Date(now + EXTENDED_WARRANTY_DAYS_MS).toISOString().split('T')[0];
     console.log(`[RequestService] Usuario premium: Garantía extendida aplicada hasta ${request.warrantyEndDate}`);
   } else {
@@ -91,8 +93,8 @@ export const confirmServiceCompletionByUser = async (
   mockServiceRequests[requestIndex] = request; // Actualizar en nuestra "DB" simulada
   console.log(`[RequestService] Solicitud ${requestId} confirmada por el usuario y actualizada:`, request);
   
-  // En una app real, esto sería una llamada a una función de backend que gestiona los timers
-  // simulateAutoFinalization(requestId); 
+  // En una app real, esto se manejaría en el backend, no iniciando un timer en el cliente.
+  // simulateAutoFinalizationAfterGracePeriod(requestId); 
 
   return request;
 };
@@ -128,7 +130,7 @@ export const reportServiceIssue = async (
 
   const now = Date.now();
   request.status = 'en_disputa';
-  request.paymentStatus = 'congelado_por_disputa';
+  request.paymentStatus = 'congelado_por_disputa'; // Congelar el pago
   request.disputeDetails = {
     reportedAt: now,
     reason: issueDetails,
@@ -164,7 +166,6 @@ export const addServiceRating = async (
     return null;
   }
   
-  // Solo calificar si está en 'finalizado_usuario' y dentro de la ventana de calificación
   if (request.status !== 'finalizado_usuario' || (request.ratingWindowExpiresAt && Date.now() > request.ratingWindowExpiresAt)) {
      console.error(`[RequestService] No se puede calificar la solicitud ${requestId}. Estado: ${request.status}, Ventana de calificación expiró: ${request.ratingWindowExpiresAt && Date.now() > request.ratingWindowExpiresAt}`);
     return null;
@@ -176,15 +177,11 @@ export const addServiceRating = async (
     comment,
     ratedAt: now,
   };
-  // Si el usuario califica, y no hay disputa, el pago podría liberarse (dependiendo de la política de negocio)
-  // O simplemente se marca como calificado y se espera al final de los 7 días si no hay disputa.
-  // Por ahora, solo actualizamos el estado si no hay disputa.
+  
+  // Si el usuario califica y no hay disputa, se podría cambiar el estado general de la solicitud.
+  // La liberación del pago seguiría la lógica de los 7 días o resolución de disputa.
   if (request.status !== 'en_disputa') {
-    request.status = 'cerrado_con_calificacion';
-    // En un sistema real, si no hay disputa y califica, se podría liberar el pago aquí.
-    // request.paymentStatus = 'liberado_al_proveedor';
-    // request.paymentReleasedToProviderAt = now;
-    console.log(`[RequestService] Solicitud ${requestId} calificada. Pago podría liberarse ahora (simulado).`);
+    request.status = 'cerrado_con_calificacion'; 
   }
   request.updatedAt = now;
 
@@ -198,29 +195,101 @@ export const addServiceRating = async (
  * SIMULACIÓN DE PROCESO DE BACKEND: Finalizar automáticamente una solicitud después de 7 días si no hay acción.
  * En una app real, esto sería un cron job o función programada en el backend.
  */
-const simulateAutoFinalizeService = async (requestId: string): Promise<void> => {
-  await new Promise(resolve => setTimeout(resolve, SEVEN_DAYS_MS + 1000)); // Esperar 7 días + 1 segundo
+const simulateAutoFinalizeServiceAfterGracePeriod = async (requestId: string): Promise<void> => {
+  // Esta función es conceptual para un backend.
+  // En el frontend, no podemos garantizar su ejecución fiable a largo plazo.
+  console.log(`[RequestService - BACKEND SIM] Iniciando simulación de finalización automática para ${requestId} en 7 días.`);
+  
+  // Simular espera
+  // await new Promise(resolve => setTimeout(resolve, SEVEN_DAYS_MS + 1000)); // NO USAR ESTO EN CLIENTE REAL
 
   const requestIndex = mockServiceRequests.findIndex(req => req.id === requestId);
   if (requestIndex === -1) return;
 
   let request = mockServiceRequests[requestIndex];
 
-  // Si el usuario confirmó, no hay disputa, y la ventana de calificación expiró sin que calificara
+  // Solo finalizar si está 'finalizado_usuario', no hay disputa, y la ventana de calificación expiró
   if (request.status === 'finalizado_usuario' && 
-      (!request.ratingWindowExpiresAt || Date.now() > request.ratingWindowExpiresAt) &&
-      request.paymentStatus === 'retenido_para_liberacion') {
+      request.paymentStatus === 'retenido_para_liberacion' &&
+      (!request.ratingWindowExpiresAt || Date.now() > request.ratingWindowExpiresAt)) {
     
     const now = Date.now();
     request.status = 'cerrado_automaticamente';
-    request.paymentStatus = 'liberado_al_proveedor';
+    request.paymentStatus = 'liberado_al_proveedor'; // Liberar el pago
     request.paymentReleasedToProviderAt = now;
     request.updatedAt = now;
     
     mockServiceRequests[requestIndex] = request;
-    console.log(`[RequestService - AUTO] Solicitud ${requestId} finalizada automáticamente. Pago liberado.`, request);
+    console.log(`[RequestService - BACKEND SIM] Solicitud ${requestId} finalizada automáticamente. Pago liberado.`, request);
+  } else {
+    console.log(`[RequestService - BACKEND SIM] Solicitud ${requestId} no apta para finalización automática. Estado: ${request.status}, Pago: ${request.paymentStatus}`);
   }
 };
+
+/**
+ * Obtiene todas las solicitudes de servicio para un usuario, filtradas y agrupadas por estado.
+ */
+export const getUserServiceRequests = async (userId: string): Promise<Record<string, any[]>> => {
+  console.log(`[RequestService] Obteniendo solicitudes para usuario ${userId}`);
+
+  const userRequests = mockServiceRequests.filter(req => req.userId === userId);
+
+  const relevantStatuses: ServiceRequestStatus[] = [
+    'confirmado_proveedor', // Asignado
+    'en_camino_proveedor',  // Asignado
+    'servicio_iniciado',    // En curso
+    'completado_proveedor', // Finalizado (pendiente confirmación usuario)
+    'finalizado_usuario',   // Finalizado (confirmado por usuario)
+    'cerrado_automaticamente', // Cerrado
+    'cerrado_con_calificacion', // Cerrado
+    'cerrado_con_disputa_resuelta', // Cerrado
+    'en_disputa'            // En disputa
+  ];
+
+  const filteredRequests = userRequests.filter(req => relevantStatuses.includes(req.status));
+
+  const mappedRequests = filteredRequests.map(req => {
+    let fechaHoraDeseada = '';
+    let totalEstimado = 0;
+
+    if (req.serviceType === 'fixed') {
+      fechaHoraDeseada = `${req.serviceDate} ${req.serviceTime}`;
+      totalEstimado = req.totalAmount || 0;
+    } else if (req.serviceType === 'hourly') {
+      fechaHoraDeseada = `${req.serviceDate} ${req.startTime}`;
+      totalEstimado = req.estimatedTotal;
+    }
+
+    return {
+      id: req.id, // Útil para keys en listas de UI
+      estado: req.status,
+      prestadorId: req.providerId,
+      fechaHoraDeseada,
+      ubicacion: req.location,
+      totalEstimado,
+      yaCalificada: !!req.userRating,
+      createdAt: req.createdAt // Para ordenar
+    };
+  });
+
+  // Agrupar por estado
+  const groupedByStatus: Record<string, any[]> = {};
+  mappedRequests.forEach(req => {
+    if (!groupedByStatus[req.estado]) {
+      groupedByStatus[req.estado] = [];
+    }
+    groupedByStatus[req.estado].push(req);
+  });
+
+  // Ordenar dentro de cada grupo por fecha de creación descendente
+  for (const status in groupedByStatus) {
+    groupedByStatus[status].sort((a, b) => b.createdAt - a.createdAt);
+  }
+  
+  console.log('[RequestService] Solicitudes de usuario filtradas y agrupadas:', groupedByStatus);
+  return groupedByStatus;
+};
+
 
 // Para debug: obtener todas las solicitudes simuladas
 export const getMockServiceRequests = () => {
@@ -231,4 +300,3 @@ export const getMockServiceRequests = () => {
 export const clearMockServiceRequests = () => {
   mockServiceRequests = [];
 }
-
