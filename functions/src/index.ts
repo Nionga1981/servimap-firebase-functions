@@ -63,13 +63,6 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
 
         // 2. Verificar que el estado del servicio sea 'completado_por_prestador'
         if (solicitudData.estado !== "completado_por_prestador") {
-          // Nota: En nuestra simulación frontend, el proveedor no tiene un paso explícito
-          // para marcar como 'completado_por_prestador'. Para un flujo real, este estado
-          // sería importante. Por ahora, podríamos ser más flexibles o asumir que
-          // el estado 'servicio_iniciado' o 'confirmado_proveedor' es suficiente si el
-          // proveedor no tiene una acción de completar.
-          // Para cumplir estrictamente con el requisito, se mantendrá la verificación.
-          // Si necesitas flexibilidad, se podría ajustar la lista de estados previos válidos.
           throw new functions.https.HttpsError(
             "failed-precondition",
             `La solicitud no está en el estado correcto para ser confirmada por el usuario. Estado actual: ${solicitudData.estado}. Se esperaba: completado_por_prestador.`
@@ -86,12 +79,11 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
 
         // 4. Si las verificaciones se cumplen, actualizar el documento
         const updateData: { [key: string]: any } = {
-          estado: "finalizado_usuario", // Usamos el estado de nuestro tipo ServiceRequestStatus
-          userConfirmedCompletionAt: admin.firestore.FieldValue.serverTimestamp(), // Coincide con nuestro tipo
+          estado: "completado_por_usuario", // Cambiado según la solicitud
+          fechaConfirmacion: admin.firestore.FieldValue.serverTimestamp(), // Cambiado según la solicitud
           habilitarCalificacion: true,
           paymentStatus: "retenido_para_liberacion", // Estado de pago después de confirmación del usuario
           // Inicia la ventana de 7 días para calificación/reclamo.
-          // El backend (otra función/tarea programada) usaría este campo.
           ratingWindowExpiresAt: admin.firestore.Timestamp.fromMillis(
             Date.now() + 7 * 24 * 60 * 60 * 1000
           ),
@@ -99,11 +91,9 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
 
         // Aplicar garantía
         // Suponiendo que tenemos acceso a la información de si el usuario es premium.
-        // Esto podría obtenerse del token de autenticación (custom claims) o de otra consulta a Firestore.
-        // Para este ejemplo, simularemos con una variable.
         const isUserPremium = context.auth.token.premium === true; // Asumiendo un custom claim 'premium'
         const standardWarrantyDays = 3;
-        const premiumWarrantyDays = 7;
+        const premiumWarrantyDays = 7; // O 15/30 según lo requieras para garantía extendida
         const warrantyDurationDays = isUserPremium
           ? premiumWarrantyDays
           : standardWarrantyDays;
@@ -115,10 +105,7 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
         transaction.update(solicitudRef, updateData);
       });
 
-      // 5. Llamar a otra función que libere el pago retenido al prestador (Simulado)
-      // En un sistema real, esta lógica sería más compleja y podría estar en una función separada
-      // o gestionada por webhooks de la plataforma de pagos después de que expire el período de retención.
-      // Por ahora, solo registramos que el proceso se iniciaría.
+      // 5. Simulación de llamada a otra función que libere el pago retenido al prestador
       // La liberación real del pago se manejaría en la tarea programada que verifica
       // si han pasado los 7 días sin reclamos.
       console.log(
@@ -127,7 +114,7 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
 
       return {
         success: true,
-        message: "Finalización del servicio confirmada exitosamente. Sistema de calificación activado y pago retenido.",
+        message: "Finalización del servicio confirmada exitosamente. Sistema de calificación activado, pago retenido y garantía aplicada.",
       };
     } catch (error) {
       console.error("Error al confirmar la finalización del servicio:", error);
@@ -145,7 +132,9 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
 );
 
 // Podrías tener otras funciones aquí, por ejemplo:
-// export const releasePayment = functions.https.onCall(async (data, context) => { ... });
+// export const releasePaymentToProvider = functions.https.onCall(async (data, context) => { ... }); // Para liberación explícita
 // export const handleNewRating = functions.firestore.document('solicitudes/{solicitudId}/calificaciones/{calificacionId}').onCreate(async (snap, context) => { ... });
-// export const dailyAutomatedChecks = functions.pubsub.schedule('every 24 hours').onRun(async (context) => { ... });
+// export const dailyAutomatedChecks = functions.pubsub.schedule('every 24 hours').onRun(async (context) => { ... }); // Para la liberación automática de pagos
+    
+
     
