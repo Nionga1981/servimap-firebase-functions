@@ -6,7 +6,8 @@ import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { mockProviders, USER_FIXED_LOCATION } from '@/lib/mockData'; 
-import type { Provider, Service, ServiceRequest } from '@/types';
+import type { Provider, Service } from '@/types';
+import { ServiceRequest } from '@/types'; // Ensure ServiceRequest is imported
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createServiceRequest } from '@/services/requestService'; // Importar el servicio
+import { FormItem } from '@/components/ui/form'; // Added FormItem import
 
 // Función para calcular la distancia (Haversine)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -85,6 +87,7 @@ export default function ProviderProfilePage() {
         const dist = calculateDistance(USER_FIXED_LOCATION.lat, USER_FIXED_LOCATION.lng, foundProvider.location.lat, foundProvider.location.lng);
         setDistanceFromUser(dist.toFixed(1));
       }
+      // Generate random review count on mount
       setReviewCount(Math.floor(Math.random() * 200) + 10);
     }
   }, [providerId]);
@@ -93,7 +96,7 @@ export default function ProviderProfilePage() {
   useEffect(() => {
     if (provider) {
       const currentSubtotal = provider.services.reduce((acc, service) => {
-        if (selectedServices[service.id]) {
+        if (selectedServices[service.id] && !service.hourlyRate) { // Ensure it's not an hourly service item
           return acc + service.price;
         }
         return acc;
@@ -142,11 +145,11 @@ export default function ProviderProfilePage() {
     setIsSubmittingAppointment(true);
     
     const requestData: ServiceRequest = {
-      serviceType: 'fixed', // Asumiendo que esta sección es para servicios de precio fijo o generales
+      serviceType: 'fixed', 
       userId: 'currentUserDemoId', 
       providerId: provider.id,
-      serviceDate: selectedDate.toISOString().split('T')[0], // YYYY-MM-DD
-      serviceTime: selectedTime, // HH:mm
+      serviceDate: selectedDate.toISOString().split('T')[0], 
+      serviceTime: selectedTime, 
       location: locationType === 'current' ? USER_FIXED_LOCATION : { custom: customLocation },
       notes: serviceNotes,
       status: 'agendado',
@@ -154,7 +157,7 @@ export default function ProviderProfilePage() {
     };
 
     try {
-      await createServiceRequest(requestData); // Llama al servicio simulado
+      await createServiceRequest(requestData); 
       toast({
         title: "Solicitud de Cita Enviada",
         description: `Tu solicitud para ${provider.name} el ${selectedDate.toLocaleDateString('es-ES')} a las ${selectedTime} ha sido enviada. Está sujeta a la disponibilidad del prestador, quien deberá confirmar la fecha y hora.`,
@@ -222,7 +225,8 @@ export default function ProviderProfilePage() {
   };
 
   const handleConfirmImmediateServices = () => {
-    const chosenServices = provider?.services.filter(s => selectedServices[s.id]).map(s => s.title).join(', ');
+    if (!provider) return;
+    const chosenServices = provider.services.filter(s => selectedServices[s.id] && !s.hourlyRate).map(s => s.title).join(', ');
     if (!chosenServices || subtotal === 0) {
       toast({
         title: "Ningún servicio seleccionado",
@@ -434,14 +438,14 @@ export default function ProviderProfilePage() {
                 Contratar por Horas
               </h2>
               <div className="grid md:grid-cols-2 gap-x-8 gap-y-6 items-start">
-                <Card className="shadow-md w-full p-0">
-                    <CardContent className="p-2 sm:p-4 flex justify-center">
+                <Card className="shadow-md w-full p-0"> {/* Ensure Card takes full width */}
+                    <CardContent className="p-2 sm:p-4 flex justify-center"> {/* Center Calendar */}
                     <Calendar
                         mode="single"
                         selected={hourlyServiceDate}
                         onSelect={(date) => handleDateSelect(date, 'hourly')}
-                        className="rounded-md border"
-                        disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1))}
+                        className="rounded-md border" // Standard ShadCN calendar styling
+                        disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1))} // Disable past dates
                         footer={hourlyServiceDate ? <p className="text-sm p-2 text-center">Fecha seleccionada: {hourlyServiceDate.toLocaleDateString('es-ES')}.</p> : <p className="text-sm p-2 text-center">Elige una fecha.</p>}
                     />
                     </CardContent>
@@ -532,20 +536,20 @@ export default function ProviderProfilePage() {
               Agendar un Servicio (Precio Fijo/General)
             </h2>
             <div className="grid md:grid-cols-2 gap-x-8 gap-y-6 items-start">
-              <Card className="shadow-md w-full">
-                <CardContent className="p-2 sm:p-4 flex justify-center">
+              <Card className="shadow-md w-full"> {/* Ensure Card takes full width */}
+                <CardContent className="p-2 sm:p-4 flex justify-center"> {/* Center Calendar */}
                   <Calendar
                     mode="single"
                     selected={selectedDate}
                     onSelect={(date) => handleDateSelect(date, 'general')}
-                    className="rounded-md border"
-                    disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1))}
+                    className="rounded-md border" // Standard ShadCN calendar styling
+                    disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1))} // Disable past dates
                     footer={selectedDate ? <p className="text-sm p-2 text-center">Fecha seleccionada: {selectedDate.toLocaleDateString('es-ES')}.</p> : <p className="text-sm p-2 text-center">Elige una fecha.</p>}
                   />
                 </CardContent>
               </Card>
               <div className="space-y-4 mt-4 md:mt-0">
-                 <FormItem>
+                 <FormItem> {/* Assuming FormItem is available or needed */}
                     <Label htmlFor="general-time">Hora del Servicio</Label>
                     <Select value={selectedTime} onValueChange={setSelectedTime}>
                         <SelectTrigger id="general-time">
@@ -662,3 +666,8 @@ const Loader2 = ({ className, ...props }: React.SVGProps<SVGSVGElement>) => (
     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
   </svg>
 );
+
+// Helper component for FormItem styling if not using react-hook-form's FormField
+// const FormItem = ({ children, className }: { children: React.ReactNode, className?: string }) => (
+//   <div className={cn("space-y-1", className)}>{children}</div>
+// );
