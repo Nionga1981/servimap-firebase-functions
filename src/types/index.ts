@@ -18,8 +18,14 @@ export interface Provider {
   rating: number;
   services: Service[];
   isAvailable: boolean;
-  location?: { lat: number; lng: number }; // For map display
+  location?: { lat: number; lng: number }; // Base/Registered location for map display
   specialties?: string[]; // e.g., ['Residential Plumbing', 'Emergency Repairs']
+  currentLocation?: { // For real-time tracking
+    lat: number;
+    lng: number;
+    timestamp: number; 
+  } | null;
+  lastConnection?: number; // Timestamp of the last connection or status update
 }
 
 export interface ChatMessage {
