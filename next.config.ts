@@ -1,30 +1,27 @@
-import type {NextConfig} from 'next';
+import type { NextConfig } from 'next'
 
-// Ensuring this configuration is up-to-date for the build process
 const nextConfig: NextConfig = {
-  /* config options here */
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
+  experimental: {
+    allowedDevOrigins: [
+      'https://9000-firebase-studio-1747377755837.cluster-aj77uug3sjd4iut4ev6a4jbtf2.cloudworkstations.dev'
+    ]
   },
   images: {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'placehold.co',
-        port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
         hostname: 'www.mexicanada.com.mx',
         port: '',
         pathname: '/images/**',
-      }
+      },
+      {
+        protocol: 'https',
+        hostname: 'placehold.co',
+        port: '',
+        pathname: '/**', // Allows all paths from placehold.co
+      },
     ],
   },
-};
+}
 
-export default nextConfig;
+export default nextConfig
