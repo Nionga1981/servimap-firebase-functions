@@ -2,18 +2,18 @@
 // src/app/provider-profile/[id]/page.tsx
 "use client";
 
-import { useParams, useRouter } from 'next/navigation'; // Importar useRouter
+import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { mockProviders, USER_FIXED_LOCATION } from '@/lib/mockData'; 
-import type { Provider, Service } from '@/types';
+import type { Provider, Service, ServiceRequest } from '@/types';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Star, MapPin, MessageSquare, DollarSign, Tag, ArrowLeft, CheckCircle, ShieldCheck, CalendarDays, Loader2 as LoaderIcon, ShoppingBag } from 'lucide-react';
-import { SERVICE_CATEGORIES, DEFAULT_SERVICE_IMAGE, DEFAULT_USER_AVATAR } from '@/lib/constants';
+import { Star, MapPin, MessageSquare, DollarSign, Tag, ArrowLeft, CheckCircle, ShieldCheck, CalendarDays, Loader2 as LoaderIcon, ShoppingBag, Clock, Info } from 'lucide-react';
+import { SERVICE_CATEGORIES, DEFAULT_SERVICE_IMAGE, DEFAULT_USER_AVATAR, SERVICE_HOURS } from '@/lib/constants';
 import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Calendar } from "@/components/ui/calendar";
@@ -21,6 +21,11 @@ import { useToast } from "@/hooks/use-toast";
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { createServiceRequest } from '@/services/requestService'; // Importar el servicio
 
 // Función para calcular la distancia (Haversine)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -38,13 +43,12 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
 
 export default function ProviderProfilePage() {
   const params = useParams();
-  const router = useRouter(); // Inicializar useRouter
+  const router = useRouter();
   const providerId = params.id as string;
   
   const [provider, setProvider] = useState<Provider | undefined>(undefined);
   const [distanceFromUser, setDistanceFromUser] = useState<string | null>(null);
   const [reviewCount, setReviewCount] = useState<number>(0);
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const { toast } = useToast();
 
   // State for "Contratar Ahora" Popover
@@ -52,11 +56,30 @@ export default function ProviderProfilePage() {
   const [subtotal, setSubtotal] = useState(0);
   const [popoverOpen, setPopoverOpen] = useState(false);
 
+  // State for "Agendar Cita" (General)
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [selectedTime, setSelectedTime] = useState<string>("");
+  const [locationType, setLocationType] = useState<'current' | 'custom'>('current');
+  const [customLocation, setCustomLocation] = useState<string>('');
+  const [serviceNotes, setServiceNotes] = useState<string>('');
+  const [isSubmittingAppointment, setIsSubmittingAppointment] = useState(false);
+
+  // State for "Contratar por Horas"
+  const [hourlyServiceDate, setHourlyServiceDate] = useState<Date | undefined>(undefined);
+  const [hourlyServiceStartTime, setHourlyServiceStartTime] = useState<string>("");
+  const [hourlyServiceDuration, setHourlyServiceDuration] = useState<number>(1);
+  const [hourlyLocationType, setHourlyLocationType] = useState<'current' | 'custom'>('current');
+  const [hourlyCustomLocation, setHourlyCustomLocation] = useState<string>('');
+  const [hourlyServiceNotes, setHourlyServiceNotes] = useState<string>('');
+  const [isSubmittingHourly, setIsSubmittingHourly] = useState(false);
+  const [estimatedHourlyTotal, setEstimatedHourlyTotal] = useState<number>(0);
+
+
   useEffect(() => {
     if (providerId) {
       const foundProvider = mockProviders.find(p => p.id === providerId);
       setProvider(foundProvider);
-      // console.log('Provider data in useEffect:', foundProvider); 
+      console.log('[ProviderProfilePage] Provider data in useEffect:', foundProvider);
 
       if (foundProvider?.location && USER_FIXED_LOCATION) {
         const dist = calculateDistance(USER_FIXED_LOCATION.lat, USER_FIXED_LOCATION.lng, foundProvider.location.lat, foundProvider.location.lng);
@@ -79,7 +102,17 @@ export default function ProviderProfilePage() {
     }
   }, [selectedServices, provider]);
 
-  const handleDateSelect = (date: Date | undefined) => {
+  // Calculate estimated total for hourly services
+  useEffect(() => {
+    if (provider?.hourlyRate && hourlyServiceDuration > 0) {
+      setEstimatedHourlyTotal(provider.hourlyRate * hourlyServiceDuration);
+    } else {
+      setEstimatedHourlyTotal(0);
+    }
+  }, [provider?.hourlyRate, hourlyServiceDuration]);
+
+
+  const handleDateSelect = (date: Date | undefined, type: 'general' | 'hourly') => {
     if (date) {
       const today = new Date();
       today.setHours(0, 0, 0, 0); 
@@ -89,23 +122,100 @@ export default function ProviderProfilePage() {
           description: "No puedes seleccionar una fecha pasada.",
           variant: "destructive",
         });
-        setSelectedDate(undefined);
+        if (type === 'general') setSelectedDate(undefined);
+        if (type === 'hourly') setHourlyServiceDate(undefined);
       } else {
-        setSelectedDate(date);
+        if (type === 'general') setSelectedDate(date);
+        if (type === 'hourly') setHourlyServiceDate(date);
       }
     } else {
-      setSelectedDate(undefined);
+      if (type === 'general') setSelectedDate(undefined);
+      if (type === 'hourly') setHourlyServiceDate(undefined);
     }
   };
 
-  const handleRequestAppointment = () => {
-    if (selectedDate) {
+  const handleRequestAppointment = async () => {
+    if (!provider || !selectedDate || !selectedTime) {
+      toast({ title: "Faltan Datos", description: "Por favor, selecciona fecha y hora.", variant: "destructive" });
+      return;
+    }
+    setIsSubmittingAppointment(true);
+    
+    const requestData: ServiceRequest = {
+      serviceType: 'fixed', // Asumiendo que esta sección es para servicios de precio fijo o generales
+      userId: 'currentUserDemoId', 
+      providerId: provider.id,
+      serviceDate: selectedDate.toISOString().split('T')[0], // YYYY-MM-DD
+      serviceTime: selectedTime, // HH:mm
+      location: locationType === 'current' ? USER_FIXED_LOCATION : { custom: customLocation },
+      notes: serviceNotes,
+      status: 'agendado',
+      createdAt: Date.now(),
+    };
+
+    try {
+      await createServiceRequest(requestData); // Llama al servicio simulado
       toast({
-        title: "Cita Solicitada",
-        description: `Se ha enviado una solicitud de cita para el ${selectedDate.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}. El proveedor se pondrá en contacto.`,
+        title: "Solicitud de Cita Enviada",
+        description: `Tu solicitud para ${provider.name} el ${selectedDate.toLocaleDateString('es-ES')} a las ${selectedTime} ha sido enviada. Está sujeta a la disponibilidad del prestador, quien deberá confirmar la fecha y hora.`,
       });
+      // Reset form fields
+      setSelectedDate(undefined);
+      setSelectedTime("");
+      setLocationType('current');
+      setCustomLocation('');
+      setServiceNotes('');
+    } catch (error) {
+      toast({ title: "Error al Enviar Solicitud", description: "Hubo un problema. Intenta de nuevo.", variant: "destructive"});
+      console.error("Error creating service request:", error);
+    } finally {
+      setIsSubmittingAppointment(false);
     }
   };
+
+  const handleRequestHourlyService = async () => {
+    if (!provider || !hourlyServiceDate || !hourlyServiceStartTime || hourlyServiceDuration <= 0) {
+       toast({ title: "Faltan Datos", description: "Por favor, selecciona fecha, hora de inicio y duración válida.", variant: "destructive" });
+      return;
+    }
+    setIsSubmittingHourly(true);
+
+    const requestData: ServiceRequest = {
+      serviceType: 'hourly',
+      userId: 'currentUserDemoId',
+      providerId: provider.id,
+      serviceDate: hourlyServiceDate.toISOString().split('T')[0],
+      startTime: hourlyServiceStartTime,
+      durationHours: hourlyServiceDuration,
+      hourlyRate: provider.hourlyRate || 0,
+      estimatedTotal: estimatedHourlyTotal,
+      location: hourlyLocationType === 'current' ? USER_FIXED_LOCATION : { custom: hourlyCustomLocation },
+      notes: hourlyServiceNotes,
+      status: 'agendado',
+      createdAt: Date.now(),
+    };
+    
+    try {
+      await createServiceRequest(requestData);
+      toast({
+        title: "Solicitud de Servicio por Horas Enviada",
+        description: `Tu solicitud para ${provider.name} el ${hourlyServiceDate.toLocaleDateString('es-ES')} a las ${hourlyServiceStartTime} por ${hourlyServiceDuration}hr(s) ha sido enviada. Total Estimado: $${estimatedHourlyTotal.toFixed(2)}. Está sujeta a la disponibilidad del prestador, quien deberá confirmar.`,
+      });
+      // Reset form fields
+      setHourlyServiceDate(undefined);
+      setHourlyServiceStartTime("");
+      setHourlyServiceDuration(1);
+      setHourlyLocationType('current');
+      setHourlyCustomLocation('');
+      setHourlyServiceNotes('');
+    } catch (error) {
+      toast({ title: "Error al Enviar Solicitud", description: "Hubo un problema. Intenta de nuevo.", variant: "destructive"});
+      console.error("Error creating hourly service request:", error);
+    } finally {
+        setIsSubmittingHourly(false);
+    }
+  };
+
 
   const handleServiceSelection = (serviceId: string, checked: boolean) => {
     setSelectedServices(prev => ({ ...prev, [serviceId]: checked }));
@@ -125,10 +235,9 @@ export default function ProviderProfilePage() {
       title: "Procesando Solicitud Inmediata...",
       description: `Servicios: ${chosenServices}. Subtotal: $${subtotal.toFixed(2)}. (Simulación: el pago no se procesará).`,
     });
-    setPopoverOpen(false); // Cerrar el popover
-    setSelectedServices({}); // Resetear selección
+    setPopoverOpen(false); 
+    setSelectedServices({}); 
 
-    // Redirigir al mapa con el ID del proveedor contratado
     if (provider) {
       router.push(`/?hiredProviderId=${provider.id}`);
     }
@@ -158,7 +267,9 @@ export default function ProviderProfilePage() {
     return CategoryIcon ? <CategoryIcon className="h-4 w-4 text-muted-foreground" /> : <Tag className="h-4 w-4 text-muted-foreground" />;
   };
 
-  // console.log('Rendering Contratar Ahora button for provider:', provider?.name, 'isAvailable:', provider?.isAvailable);
+  console.log(`[ProviderProfilePage] Rendering for ${provider.name}. Allows Hourly: ${provider.allowsHourlyServices}, Hourly Rate: ${provider.hourlyRate}`);
+  const showHourlySection = provider.allowsHourlyServices && typeof provider.hourlyRate === 'number' && provider.hourlyRate > 0;
+  console.log(`[ProviderProfilePage] Show Hourly Section condition: ${showHourlySection}`);
 
   return (
     <div className="container mx-auto py-8 max-w-4xl">
@@ -182,7 +293,7 @@ export default function ProviderProfilePage() {
                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent"></div>
                  <div className="absolute bottom-4 left-4 flex items-end space-x-4">
                     <Avatar className="h-24 w-24 border-4 border-background shadow-lg">
-                      <AvatarImage src={provider.avatarUrl || DEFAULT_USER_AVATAR} alt={provider.name} data-ai-hint={provider.dataAiHint || "provider avatar"} />
+                      <AvatarImage src={provider.avatarUrl || DEFAULT_USER_AVATAR} alt={provider.name} style={{objectFit: 'cover'}} data-ai-hint={provider.dataAiHint || "provider avatar"} />
                       <AvatarFallback>{provider.name.substring(0, 2).toUpperCase()}</AvatarFallback>
                     </Avatar>
                     <div>
@@ -235,7 +346,6 @@ export default function ProviderProfilePage() {
                   </div>
                 </>
               )}
-
             </div>
             <div className="md:col-span-1 space-y-4">
                 <Button className="w-full bg-primary hover:bg-primary/80" size="lg" asChild>
@@ -244,7 +354,6 @@ export default function ProviderProfilePage() {
                     </Link>
                 </Button>
 
-                {/* --- START: Botón Contratar Ahora --- */}
                 {provider.isAvailable && (
                   <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
                     <PopoverTrigger asChild>
@@ -266,6 +375,7 @@ export default function ProviderProfilePage() {
                         <div className="grid gap-2 max-h-60 overflow-y-auto">
                           {provider.services.length > 0 ? (
                             provider.services.map((service) => (
+                              !service.hourlyRate && // Solo mostrar servicios no por hora aquí
                               <div key={service.id} className="flex items-center space-x-2 p-2 rounded-md hover:bg-secondary/50">
                                 <Checkbox
                                   id={`service-${service.id}`}
@@ -285,7 +395,7 @@ export default function ProviderProfilePage() {
                             <p className="text-sm text-muted-foreground">Este proveedor no tiene servicios detallados para contratación inmediata.</p>
                           )}
                         </div>
-                        {provider.services.length > 0 && (
+                        {provider.services.filter(s => !s.hourlyRate).length > 0 && (
                           <>
                             <Separator />
                             <div className="flex justify-between items-center">
@@ -301,8 +411,6 @@ export default function ProviderProfilePage() {
                     </PopoverContent>
                   </Popover>
                 )}
-                {/* --- END: Botón Contratar Ahora --- */}
-
                 <Card className="bg-secondary/20">
                     <CardHeader className="pb-2">
                         <CardTitle className="text-md flex items-center">
@@ -318,10 +426,110 @@ export default function ProviderProfilePage() {
 
           <Separator className="my-8" />
 
+          {/* --- START: Sección Contratar por Horas --- */}
+          {showHourlySection && (
+            <div className="mb-8">
+              <h2 className="text-xl font-semibold text-primary mb-4 flex items-center">
+                <Clock className="mr-2 h-5 w-5" />
+                Contratar por Horas
+              </h2>
+              <div className="grid md:grid-cols-2 gap-x-8 gap-y-6 items-start">
+                <Card className="shadow-md w-full p-0">
+                    <CardContent className="p-2 sm:p-4 flex justify-center">
+                    <Calendar
+                        mode="single"
+                        selected={hourlyServiceDate}
+                        onSelect={(date) => handleDateSelect(date, 'hourly')}
+                        className="rounded-md border"
+                        disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1))}
+                        footer={hourlyServiceDate ? <p className="text-sm p-2 text-center">Fecha seleccionada: {hourlyServiceDate.toLocaleDateString('es-ES')}.</p> : <p className="text-sm p-2 text-center">Elige una fecha.</p>}
+                    />
+                    </CardContent>
+                </Card>
+                <div className="space-y-4 mt-4 md:mt-0">
+                    <div className="grid grid-cols-2 gap-4">
+                        <FormItem>
+                            <Label htmlFor="hourly-start-time">Hora de Inicio</Label>
+                            <Select value={hourlyServiceStartTime} onValueChange={setHourlyServiceStartTime}>
+                                <SelectTrigger id="hourly-start-time">
+                                <SelectValue placeholder="HH:MM" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                {SERVICE_HOURS.map(hour => <SelectItem key={hour} value={hour}>{hour}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </FormItem>
+                        <FormItem>
+                            <Label htmlFor="hourly-duration">Duración (Horas)</Label>
+                            <Input 
+                                id="hourly-duration" 
+                                type="number" 
+                                value={hourlyServiceDuration} 
+                                onChange={(e) => setHourlyServiceDuration(parseFloat(e.target.value) || 0)}
+                                min="0.5"
+                                step="0.5"
+                                placeholder="Ej: 2.5"
+                            />
+                        </FormItem>
+                    </div>
+
+                    <Card className="bg-secondary/30 p-3 rounded-md">
+                        <p className="text-sm text-muted-foreground">Tarifa por Hora: <span className="font-semibold text-foreground">${provider.hourlyRate?.toFixed(2)}</span></p>
+                        <p className="text-md font-semibold text-primary">Total Estimado: <span className="font-bold">${estimatedHourlyTotal.toFixed(2)}</span></p>
+                    </Card>
+                  
+                    <RadioGroup value={hourlyLocationType} onValueChange={(value: 'current' | 'custom') => setHourlyLocationType(value)} className="space-y-2">
+                        <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="current" id="hourly-loc-current" />
+                            <Label htmlFor="hourly-loc-current" className="font-normal">Usar mi ubicación actual (simulada)</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="custom" id="hourly-loc-custom" />
+                            <Label htmlFor="hourly-loc-custom" className="font-normal">Ingresar otra ubicación</Label>
+                        </div>
+                    </RadioGroup>
+                    {hourlyLocationType === 'custom' && (
+                        <Input 
+                            type="text" 
+                            placeholder="Escribe la dirección o coordenadas" 
+                            value={hourlyCustomLocation}
+                            onChange={(e) => setHourlyCustomLocation(e.target.value)}
+                        />
+                    )}
+                    <Textarea 
+                        placeholder="Notas adicionales para el proveedor (opcional)..."
+                        value={hourlyServiceNotes}
+                        onChange={(e) => setHourlyServiceNotes(e.target.value)}
+                        rows={2}
+                    />
+                    <Button
+                        onClick={handleRequestHourlyService}
+                        disabled={!hourlyServiceDate || !hourlyServiceStartTime || hourlyServiceDuration <= 0 || isSubmittingHourly}
+                        className="w-full"
+                        size="lg"
+                    >
+                        {isSubmittingHourly ? <LoaderIcon className="mr-2 h-5 w-5 animate-spin" /> : <Clock className="mr-2 h-5 w-5" />}
+                        Solicitar Servicio por Horas
+                    </Button>
+                    <p className="text-xs text-muted-foreground flex items-start gap-1">
+                      <Info size={14} className="shrink-0 mt-0.5"/>
+                      <span>La solicitud está sujeta a la disponibilidad y confirmación del prestador para la fecha y hora indicadas.</span>
+                    </p>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* --- END: Sección Contratar por Horas --- */}
+
+
+          <Separator className="my-8" />
+          
+          {/* --- START: Sección Agendar Cita (General / Precio Fijo) --- */}
+          {/* Esta sección se mantiene por ahora, considerar si se fusiona o se especializa para servicios NO por hora */}
           <div className="mb-8">
             <h2 className="text-xl font-semibold text-primary mb-4 flex items-center">
               <CalendarDays className="mr-2 h-5 w-5" />
-              Agendar una Cita
+              Agendar un Servicio (Precio Fijo/General)
             </h2>
             <div className="grid md:grid-cols-2 gap-x-8 gap-y-6 items-start">
               <Card className="shadow-md w-full">
@@ -329,42 +537,74 @@ export default function ProviderProfilePage() {
                   <Calendar
                     mode="single"
                     selected={selectedDate}
-                    onSelect={handleDateSelect}
+                    onSelect={(date) => handleDateSelect(date, 'general')}
                     className="rounded-md border"
-                    disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1))} // No se pueden seleccionar fechas pasadas
+                    disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1))}
                     footer={selectedDate ? <p className="text-sm p-2 text-center">Fecha seleccionada: {selectedDate.toLocaleDateString('es-ES')}.</p> : <p className="text-sm p-2 text-center">Elige una fecha.</p>}
                   />
                 </CardContent>
               </Card>
               <div className="space-y-4 mt-4 md:mt-0">
-                {selectedDate ? (
-                  <p className="text-sm text-muted-foreground bg-secondary/30 p-3 rounded-md">
-                    Cita para: <span className="font-semibold text-foreground">{selectedDate.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                  </p>
-                ) : (
-                  <p className="text-sm text-muted-foreground bg-secondary/30 p-3 rounded-md">Por favor, selecciona una fecha en el calendario para continuar.</p>
+                 <FormItem>
+                    <Label htmlFor="general-time">Hora del Servicio</Label>
+                    <Select value={selectedTime} onValueChange={setSelectedTime}>
+                        <SelectTrigger id="general-time">
+                        <SelectValue placeholder="HH:MM" />
+                        </SelectTrigger>
+                        <SelectContent>
+                        {SERVICE_HOURS.map(hour => <SelectItem key={hour} value={hour}>{hour}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                 </FormItem>
+
+                <RadioGroup value={locationType} onValueChange={(value: 'current' | 'custom') => setLocationType(value)} className="space-y-2">
+                    <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="current" id="general-loc-current" />
+                        <Label htmlFor="general-loc-current" className="font-normal">Usar mi ubicación actual (simulada)</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="custom" id="general-loc-custom" />
+                        <Label htmlFor="general-loc-custom" className="font-normal">Ingresar otra ubicación</Label>
+                    </div>
+                </RadioGroup>
+                {locationType === 'custom' && (
+                    <Input 
+                        type="text" 
+                        placeholder="Escribe la dirección o coordenadas" 
+                        value={customLocation}
+                        onChange={(e) => setCustomLocation(e.target.value)}
+                    />
                 )}
+                <Textarea 
+                    placeholder="Notas adicionales para el proveedor (opcional)..."
+                    value={serviceNotes}
+                    onChange={(e) => setServiceNotes(e.target.value)}
+                    rows={2}
+                />
                 <Button
                   onClick={handleRequestAppointment}
-                  disabled={!selectedDate}
+                  disabled={!selectedDate || !selectedTime || isSubmittingAppointment}
                   className="w-full"
                   size="lg"
                 >
-                  Solicitar Cita para esta Fecha
+                  {isSubmittingAppointment ? <LoaderIcon className="mr-2 h-5 w-5 animate-spin" /> : <CalendarDays className="mr-2 h-5 w-5" />}
+                  Confirmar Solicitud de Cita
                 </Button>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Puedes solicitar una cita incluso si el proveedor no está disponible ahora. El proveedor confirmará la disponibilidad para la fecha seleccionada.
-                </p>
+                 <p className="text-xs text-muted-foreground flex items-start gap-1">
+                      <Info size={14} className="shrink-0 mt-0.5"/>
+                      <span>Para servicios con precio definido o consultas generales. La cita está sujeta a la disponibilidad del prestador, quien deberá confirmar la fecha y hora.</span>
+                  </p>
               </div>
             </div>
           </div>
+          {/* --- END: Sección Agendar Cita (General / Precio Fijo) --- */}
 
           <Separator className="my-8" />
 
-          <h2 className="text-xl font-semibold text-primary mb-4">Servicios Ofrecidos</h2>
-          {provider.services && provider.services.length > 0 ? (
+          <h2 className="text-xl font-semibold text-primary mb-4">Servicios Específicos Ofrecidos (Precio Fijo)</h2>
+          {provider.services && provider.services.filter(s => !s.hourlyRate).length > 0 ? (
             <div className="space-y-4">
-              {provider.services.map((service: Service) => (
+              {provider.services.filter(s => !s.hourlyRate).map((service: Service) => (
                 <Card key={service.id} className="shadow-md hover:shadow-lg transition-shadow">
                   <CardHeader>
                     <div className="flex justify-between items-start">
@@ -396,7 +636,7 @@ export default function ProviderProfilePage() {
               ))}
             </div>
           ) : (
-            <p className="text-muted-foreground">Este proveedor aún no ha listado servicios específicos.</p>
+            <p className="text-muted-foreground">Este proveedor no ha listado servicios específicos de precio fijo.</p>
           )}
         </CardContent>
       </Card>
@@ -404,6 +644,7 @@ export default function ProviderProfilePage() {
   );
 }
 
+// El componente Loader2 se mantiene igual, no necesita cambios.
 const Loader2 = ({ className, ...props }: React.SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -421,6 +662,3 @@ const Loader2 = ({ className, ...props }: React.SVGProps<SVGSVGElement>) => (
     <path d="M21 12a9 9 0 1 1-6.219-8.56" />
   </svg>
 );
-    
-
-    
