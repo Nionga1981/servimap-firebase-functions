@@ -21,6 +21,12 @@ interface ServiceData {
     comentario?: string;
     fecha: admin.firestore.Timestamp;
   };
+  calificacionPrestador?: { // Calificación del prestador hacia el usuario
+    calificacion: number;
+    comentario?: string;
+    fecha: admin.firestore.Timestamp;
+  };
+  mutualRatingCompleted?: boolean; // Se establece a true cuando ambas partes han calificado
   fechaConfirmacion?: admin.firestore.Timestamp;
   paymentStatus?: string;
   ratingWindowExpiresAt?: admin.firestore.Timestamp;
@@ -46,6 +52,17 @@ interface ProviderData {
   documentosVerificables?: DocumentoVerificable[];
   // ... otros campos del prestador
 }
+
+// Interfaz para los datos del documento del usuario (en colección 'usuarios')
+interface UserData {
+  displayName?: string;
+  email?: string;
+  ratingSumUsuario?: number;  // Suma de calificaciones recibidas como usuario por prestadores
+  ratingCountUsuario?: number; // Número de calificaciones recibidas como usuario
+  ratingUsuario?: number;     // Promedio de calificación como usuario (calculado)
+  // ... otros campos del perfil de usuario
+}
+
 
 // Interfaz para los datos de entrada de la función confirmServiceCompletionByUserService
 interface ConfirmServiceCompletionData {
@@ -106,9 +123,9 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
         }
 
         // 4. Si las verificaciones anteriores se cumplen:
-        const updateData: { [key: string]: any } = {
+        const updateData: Partial<ServiceData> = { // Usar Partial para mejor tipado
           estado: "completado_por_usuario", // Cambiar el campo `estado` a `completado_por_usuario`.
-          fechaConfirmacion: admin.firestore.FieldValue.serverTimestamp(), // Guardar la fecha y hora actual en `fechaConfirmacion`.
+          fechaConfirmacion: admin.firestore.FieldValue.serverTimestamp() as admin.firestore.Timestamp, // Guardar la fecha y hora actual en `fechaConfirmacion`.
           habilitarCalificacion: true, // Activar la bandera `habilitarCalificacion: true`.
           paymentStatus: "retenido_para_liberacion",
           ratingWindowExpiresAt: admin.firestore.Timestamp.fromMillis(
@@ -116,13 +133,12 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
           ),
         };
         
-        // Lógica de garantía (ejemplo, basada en custom claims)
-        const isUserPremium = context.auth?.token?.premium === true; // Asume que tienes un custom claim 'premium'
-        const standardWarrantyDays = 3;
-        const premiumWarrantyDays = 7; 
+        const isUserPremium = context.auth?.token?.premium === true;
+        const STANDARD_WARRANTY_DAYS = 3;
+        const PREMIUM_WARRANTY_DAYS = 7;
         const warrantyDurationDays = isUserPremium
-          ? premiumWarrantyDays
-          : standardWarrantyDays;
+          ? PREMIUM_WARRANTY_DAYS
+          : STANDARD_WARRANTY_DAYS;
         
         updateData.warrantyEndDate = admin.firestore.Timestamp.fromMillis(
             Date.now() + warrantyDurationDays * 24 * 60 * 60 * 1000
@@ -163,6 +179,7 @@ interface CalificarPrestadorData {
 
 /**
  * Firebase Function (onCall) para que un usuario califique a un prestador.
+ * Renombrada de rateProviderByUserService a calificarPrestador para consistencia.
  */
 export const calificarPrestador = functions.https.onCall(
   async (data: CalificarPrestadorData, context) => {
@@ -228,13 +245,13 @@ export const calificarPrestador = functions.https.onCall(
         }
 
         // 4. Guardar la calificación dentro del documento del servicio.
-        const nuevaCalificacionParaServicio: ServiceData['calificacionUsuario'] = {
+        const nuevaCalificacionParaServicio: NonNullable<ServiceData['calificacionUsuario']> = {
           calificacion: calificacion,
           comentario: comentario || "",
           fecha: admin.firestore.Timestamp.now(),
         };
         
-        const updateServicioData: { [key: string]: any } = {
+        const updateServicioData: Partial<ServiceData> = {
           calificacionUsuario: nuevaCalificacionParaServicio,
         };
 
@@ -248,8 +265,6 @@ export const calificarPrestador = functions.https.onCall(
 
         if (!prestadorDoc.exists) {
           console.error(`Error: No se encontró el prestador con ID ${servicioData.prestadorId}. No se puede actualizar su calificación.`);
-          // Podrías decidir si lanzar un error aquí o continuar solo guardando la calificación en el servicio.
-          // Por ahora, la transacción fallará si el prestador no existe, lo cual es un comportamiento razonable.
           throw new functions.https.HttpsError("not-found", `Prestador con ID ${servicioData.prestadorId} no encontrado.`);
         } else {
           const prestadorData = prestadorDoc.data() as ProviderData;
@@ -258,16 +273,20 @@ export const calificarPrestador = functions.https.onCall(
 
           const newRatingSum = currentRatingSum + calificacion;
           const newRatingCount = currentRatingCount + 1;
-          // Usar parseFloat y toFixed para asegurar que el promedio se guarde con máximo 2 decimales
           const newAverageRating = parseFloat((newRatingSum / newRatingCount).toFixed(2)); 
 
           transaction.update(prestadorRef, {
             ratingSum: newRatingSum,
             ratingCount: newRatingCount,
-            rating: newAverageRating, // Este es el promedioCalificaciones
+            rating: newAverageRating,
           });
         }
         
+        // Verificar si la otra parte ya calificó para marcar mutualRatingCompleted
+        if (servicioData.calificacionPrestador) {
+          updateServicioData.mutualRatingCompleted = true;
+        }
+
         transaction.update(servicioRef, updateServicioData);
       });
 
@@ -288,6 +307,158 @@ export const calificarPrestador = functions.https.onCall(
     }
   }
 );
+
+
+// Interfaz para los datos de entrada de la función calificarUsuario
+interface CalificarUsuarioData {
+  servicioId: string;
+  calificacion: number; // 1 a 5 estrellas
+  comentario?: string;
+}
+
+/**
+ * Firebase Function (onCall) para que un prestador califique a un usuario.
+ */
+export const calificarUsuario = functions.https.onCall(
+  async (data: CalificarUsuarioData, context) => {
+    // 1. Validar que el usuario (prestador) está autenticado.
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "La función debe ser llamada mientras el prestador está autenticado."
+      );
+    }
+    const prestadorIdAuth = context.auth.uid; // UID del prestador que califica
+    const { servicioId, calificacion, comentario } = data;
+
+    // Validar entrada
+    if (!servicioId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Se requiere el argumento 'servicioId'."
+      );
+    }
+    if (typeof calificacion !== 'number' || calificacion < 1 || calificacion > 5) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "La calificación debe ser un número entre 1 y 5."
+      );
+    }
+
+    const servicioRef = db.collection("servicios").doc(servicioId);
+
+    try {
+      await db.runTransaction(async (transaction) => {
+        // 2. Buscar el documento del servicio.
+        const servicioDoc = await transaction.get(servicioRef);
+        if (!servicioDoc.exists) {
+          throw new functions.https.HttpsError(
+            "not-found",
+            `El servicio con ID ${servicioId} no fue encontrado.`
+          );
+        }
+
+        const servicioData = servicioDoc.data() as ServiceData;
+
+        // 3. Verificar que el prestador autenticado es quien realizó el servicio.
+        if (servicioData.prestadorId !== prestadorIdAuth) {
+          throw new functions.https.HttpsError(
+            "permission-denied",
+            "No estás autorizado para calificar este servicio ya que no lo prestaste."
+          );
+        }
+        
+        // Verificar que el servicio esté en un estado que permita la calificación por parte del prestador.
+        // (Ej: el usuario ya confirmó la finalización).
+        // La bandera 'habilitarCalificacion' es establecida por el usuario al confirmar.
+        if (servicioData.habilitarCalificacion !== true) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "La calificación (mutua) no está habilitada para este servicio aún. El usuario debe confirmar primero."
+          );
+        }
+
+        // Verificar que no exista calificación previa del prestador para este servicio.
+        if (servicioData.calificacionPrestador) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "Ya has calificado a este usuario por este servicio previamente."
+          );
+        }
+
+        // 4. Guardar la calificación dentro del documento del servicio.
+        const nuevaCalificacionParaServicio: NonNullable<ServiceData['calificacionPrestador']> = {
+          calificacion: calificacion,
+          comentario: comentario || "",
+          fecha: admin.firestore.Timestamp.now(),
+        };
+        
+        const updateServicioData: Partial<ServiceData> = {
+          calificacionPrestador: nuevaCalificacionParaServicio,
+        };
+
+        // 5. Actualizar el promedio general del usuario en la colección `usuarios`.
+        if (!servicioData.usuarioId) {
+            console.error("Error: El servicio no tiene un usuarioId asociado.");
+            throw new functions.https.HttpsError("internal", "El servicio no tiene un ID de usuario asociado.");
+        }
+        const usuarioRef = db.collection("usuarios").doc(servicioData.usuarioId);
+        const usuarioDoc = await transaction.get(usuarioRef);
+
+        // Si el documento del usuario no existe, se puede crear con la primera calificación.
+        // O se puede optar por lanzar un error si se espera que el usuario ya exista.
+        // Por ahora, crearemos/actualizaremos.
+        const usuarioData = (usuarioDoc.exists ? usuarioDoc.data() : {}) as UserData;
+        const currentRatingSum = usuarioData.ratingSumUsuario || 0;
+        const currentRatingCount = usuarioData.ratingCountUsuario || 0;
+
+        const newRatingSum = currentRatingSum + calificacion;
+        const newRatingCount = currentRatingCount + 1;
+        const newAverageRating = parseFloat((newRatingSum / newRatingCount).toFixed(2)); 
+
+        if (usuarioDoc.exists) {
+          transaction.update(usuarioRef, {
+            ratingSumUsuario: newRatingSum,
+            ratingCountUsuario: newRatingCount,
+            ratingUsuario: newAverageRating,
+          });
+        } else {
+          // Si el usuario no existe, creamos el documento.
+          // Aquí podrías querer añadir otros campos iniciales para el perfil del usuario.
+          transaction.set(usuarioRef, {
+            ratingSumUsuario: newRatingSum,
+            ratingCountUsuario: newRatingCount,
+            ratingUsuario: newAverageRating,
+            // fechaCreacion: admin.firestore.FieldValue.serverTimestamp(), // Ejemplo
+          });
+        }
+        
+        // Verificar si la otra parte (usuario) ya calificó para marcar mutualRatingCompleted
+        if (servicioData.calificacionUsuario) {
+          updateServicioData.mutualRatingCompleted = true;
+        }
+
+        transaction.update(servicioRef, updateServicioData);
+      });
+
+      return {
+        success: true,
+        message: "Calificación de usuario guardada exitosamente.",
+      };
+    } catch (error: any) {
+      console.error("Error al guardar la calificación del usuario:", error);
+      if (error instanceof functions.https.HttpsError) {
+        throw error;
+      }
+      throw new functions.https.HttpsError(
+        "internal",
+        "Ocurrió un error interno al guardar la calificación del usuario.",
+        error.message
+      );
+    }
+  }
+);
+
 
 interface ReportarProblemaData {
   servicioId: string;
@@ -426,36 +597,29 @@ export const registrarDocumentoProfesional = functions.https.onCall(
     if (!tipoDocumento || !urlDocumento) {
       throw new functions.https.HttpsError("invalid-argument", "Se requieren los argumentos 'tipoDocumento' y 'urlDocumento'.");
     }
-    // Podrías añadir validaciones más específicas para tipoDocumento o formato de URL si es necesario.
 
     try {
       const prestadorRef = db.collection("prestadores").doc(prestadorId);
 
-      // 3. Crear el objeto del nuevo documento.
       const nuevoDocumento: DocumentoVerificable = {
         tipoDocumento: tipoDocumento,
         urlDocumento: urlDocumento,
         descripcion: descripcion || "",
-        fechaRegistro: admin.firestore.Timestamp.now(), // Timestamp del servidor
-        estadoVerificacion: "pendiente", // Estado inicial
+        fechaRegistro: admin.firestore.Timestamp.now(),
+        estadoVerificacion: "pendiente",
       };
 
-      // 4. Usar FieldValue.arrayUnion para añadir el nuevo documento al arreglo.
-      // Esto evita duplicados si se intentara añadir el mismo objeto exacto.
-      // Si el campo 'documentosVerificables' no existe, se creará.
       await prestadorRef.update({
         documentosVerificables: admin.firestore.FieldValue.arrayUnion(nuevoDocumento),
       });
 
-      // 5. Devolver un mensaje de confirmación.
       return {
         success: true,
         message: "Documento registrado exitosamente. Está pendiente de revisión.",
       };
     } catch (error: any) {
       console.error("Error al registrar el documento profesional:", error);
-      // Podrías verificar si el error es porque el documento del prestador no existe.
-      if (error.code === 5) { // Código para NOT_FOUND
+      if (error.code === 5) { 
          throw new functions.https.HttpsError("not-found", `No se encontró el perfil del prestador con ID ${prestadorId}.`);
       }
       if (error instanceof functions.https.HttpsError) {
@@ -470,13 +634,13 @@ export const registrarDocumentoProfesional = functions.https.onCall(
   }
 );
 
-// Interfaz para datos de entrada de la función de verificación de documentos
+
 interface VerificarDocumentoData {
   prestadorId: string;
-  documentoIndex: number; // Índice del documento en el array documentosVerificables
+  documentoIndex: number; 
 }
 
-// Palabras clave prohibidas para la simulación de IA
+
 const PALABRAS_CLAVE_PROHIBIDAS = [
   "teléfono", "telefono", "celular", "whatsapp", "contacto", "contactame", "llámame", "llamame",
   "email", "correo", "@", "facebook", "instagram", "twitter", "linkedin",
@@ -489,15 +653,9 @@ const PALABRAS_CLAVE_PROHIBIDAS = [
  */
 export const verificarDocumentoProfesional = functions.https.onCall(
   async (data: VerificarDocumentoData, context) => {
-    // Validar que quien llama es un admin (o una función interna con permisos)
-    // Para este ejemplo, se podría requerir un custom claim de admin
-    // if (!context.auth || !context.auth.token.admin) {
-    //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden verificar documentos.");
-    // }
-     if (!context.auth ) { // Por ahora, solo autenticado
+     if (!context.auth ) { 
        throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
      }
-
 
     const { prestadorId, documentoIndex } = data;
 
@@ -524,9 +682,6 @@ export const verificarDocumentoProfesional = functions.https.onCall(
         const documentosActuales = [...prestadorData.documentosVerificables];
         const documentoAVerificar = documentosActuales[documentoIndex];
 
-        // SIMULACIÓN DE ANÁLISIS CON IA
-        // En una app real, aquí llamarías a una API de IA (ej. Cloud Vision API para OCR y luego NLP, o Genkit)
-        // Para la simulación, solo revisamos la descripción y tipo por palabras clave.
         console.log(`Simulando análisis IA para documento: ${documentoAVerificar.urlDocumento}`);
         const textoAAnalizar = (`${documentoAVerificar.tipoDocumento} ${documentoAVerificar.descripcion || ""}`).toLowerCase();
         
@@ -546,7 +701,6 @@ export const verificarDocumentoProfesional = functions.https.onCall(
           console.log("IA no detectó datos de contacto. Documento aprobado por IA.");
         }
 
-        // Actualizar el documento específico en el array
         documentosActuales[documentoIndex] = {
           ...documentoAVerificar,
           estadoVerificacion: nuevoEstado,
@@ -555,8 +709,7 @@ export const verificarDocumentoProfesional = functions.https.onCall(
 
         transaction.update(prestadorRef, { documentosVerificables: documentosActuales });
 
-        // (Opcional) Registrar en la colección verificacionesIA
-        const verificacionLogRef = db.collection("verificacionesIA").doc(); // Generar ID automático
+        const verificacionLogRef = db.collection("verificacionesIA").doc(); 
         transaction.set(verificacionLogRef, {
           prestadorId: prestadorId,
           documentoUrl: documentoAVerificar.urlDocumento,
@@ -565,7 +718,7 @@ export const verificarDocumentoProfesional = functions.https.onCall(
           fechaVerificacion: admin.firestore.FieldValue.serverTimestamp(),
           resultadoIA: nuevoEstado,
           palabrasClaveDetectadas: palabrasDetectadas.length > 0 ? palabrasDetectadas : null,
-          revisadoManualmente: false, // Inicialmente no revisado manualmente
+          revisadoManualmente: false, 
         });
       });
 
@@ -589,5 +742,5 @@ export const verificarDocumentoProfesional = functions.https.onCall(
     }
   }
 );
-// Agrega otras funciones aquí si es necesario.
 
+    
