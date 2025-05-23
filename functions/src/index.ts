@@ -16,12 +16,12 @@ interface ServiceData {
   usuarioId?: string; // ID del usuario que solicitó el servicio
   prestadorId?: string; // ID del proveedor
   habilitarCalificacion?: boolean;
-  calificacionUsuario?: { // Calificación del usuario hacia el prestador
+  calificacionUsuario?: {
     calificacion: number;
     comentario?: string;
     fecha: admin.firestore.Timestamp;
   };
-  calificacionPrestador?: { // Calificación del prestador hacia el usuario
+  calificacionPrestador?: {
     calificacion: number;
     comentario?: string;
     fecha: admin.firestore.Timestamp;
@@ -31,6 +31,8 @@ interface ServiceData {
   paymentStatus?: string;
   ratingWindowExpiresAt?: admin.firestore.Timestamp;
   warrantyEndDate?: admin.firestore.Timestamp;
+  garantiaSolicitada?: boolean; // Nueva bandera para la garantía
+  idSolicitudGarantia?: string; // ID del documento en la colección 'garantias'
   // ... otros campos relevantes
 }
 
@@ -61,6 +63,18 @@ interface UserData {
   ratingCountUsuario?: number; // Número de calificaciones recibidas como usuario
   ratingUsuario?: number;     // Promedio de calificación como usuario (calculado)
   // ... otros campos del perfil de usuario
+}
+
+// Interfaz para una solicitud de garantía
+interface GarantiaData {
+  servicioId: string;
+  usuarioId: string;
+  prestadorId: string;
+  motivo: string;
+  fechaSolicitudGarantia: admin.firestore.Timestamp;
+  estadoGarantia: "pendiente" | "en_revision" | "resuelta_reparacion" | "resuelta_reembolso" | "rechazada";
+  fechaResolucionGarantia?: admin.firestore.Timestamp;
+  resolucionDetalles?: string;
 }
 
 
@@ -123,10 +137,10 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
         }
 
         // 4. Si las verificaciones anteriores se cumplen:
-        const updateData: Partial<ServiceData> = { // Usar Partial para mejor tipado
-          estado: "completado_por_usuario", // Cambiar el campo `estado` a `completado_por_usuario`.
-          fechaConfirmacion: admin.firestore.FieldValue.serverTimestamp() as admin.firestore.Timestamp, // Guardar la fecha y hora actual en `fechaConfirmacion`.
-          habilitarCalificacion: true, // Activar la bandera `habilitarCalificacion: true`.
+        const updateData: Partial<ServiceData> = { 
+          estado: "completado_por_usuario", 
+          fechaConfirmacion: admin.firestore.FieldValue.serverTimestamp() as admin.firestore.Timestamp, 
+          habilitarCalificacion: true, 
           paymentStatus: "retenido_para_liberacion",
           ratingWindowExpiresAt: admin.firestore.Timestamp.fromMillis(
             Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 días desde ahora
@@ -134,8 +148,10 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
         };
         
         const isUserPremium = context.auth?.token?.premium === true;
+        // Duraciones de garantía según el tipo de usuario
         const STANDARD_WARRANTY_DAYS = 3;
-        const PREMIUM_WARRANTY_DAYS = 7;
+        const PREMIUM_WARRANTY_DAYS = 7; // Anteriormente 30, ajustado a 7 para la función activarGarantiaPremium
+        
         const warrantyDurationDays = isUserPremium
           ? PREMIUM_WARRANTY_DAYS
           : STANDARD_WARRANTY_DAYS;
@@ -153,7 +169,7 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
 
       return {
         success: true,
-        message: "Finalización del servicio confirmada exitosamente. Sistema de calificación activado y pago retenido.",
+        message: "Finalización del servicio confirmada exitosamente. Sistema de calificación activado, pago retenido y garantía establecida.",
       };
     } catch (error: any) {
       console.error("Error al confirmar la finalización del servicio:", error);
@@ -179,21 +195,18 @@ interface CalificarPrestadorData {
 
 /**
  * Firebase Function (onCall) para que un usuario califique a un prestador.
- * Renombrada de rateProviderByUserService a calificarPrestador para consistencia.
  */
 export const calificarPrestador = functions.https.onCall(
   async (data: CalificarPrestadorData, context) => {
-    // 1. Validar que el usuario está autenticado.
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
         "La función debe ser llamada mientras el usuario está autenticado."
       );
     }
-    const userId = context.auth.uid; // UID del usuario que califica
+    const userId = context.auth.uid; 
     const { servicioId, calificacion, comentario } = data;
 
-    // Validar entrada
     if (!servicioId) {
       throw new functions.https.HttpsError(
         "invalid-argument",
@@ -211,7 +224,6 @@ export const calificarPrestador = functions.https.onCall(
 
     try {
       await db.runTransaction(async (transaction) => {
-        // 2. Buscar el documento del servicio.
         const servicioDoc = await transaction.get(servicioRef);
         if (!servicioDoc.exists) {
           throw new functions.https.HttpsError(
@@ -222,7 +234,6 @@ export const calificarPrestador = functions.https.onCall(
 
         const servicioData = servicioDoc.data() as ServiceData;
 
-        // Verificar que el usuario actual es quien solicitó el servicio
         if (servicioData.usuarioId !== userId) {
           throw new functions.https.HttpsError(
             "permission-denied",
@@ -230,7 +241,6 @@ export const calificarPrestador = functions.https.onCall(
           );
         }
         
-        // 3. Verificar que habilitarCalificacion sea true y que no exista calificación previa del usuario.
         if (servicioData.habilitarCalificacion !== true) {
           throw new functions.https.HttpsError(
             "failed-precondition",
@@ -244,7 +254,6 @@ export const calificarPrestador = functions.https.onCall(
           );
         }
 
-        // 4. Guardar la calificación dentro del documento del servicio.
         const nuevaCalificacionParaServicio: NonNullable<ServiceData['calificacionUsuario']> = {
           calificacion: calificacion,
           comentario: comentario || "",
@@ -255,7 +264,6 @@ export const calificarPrestador = functions.https.onCall(
           calificacionUsuario: nuevaCalificacionParaServicio,
         };
 
-        // 5. Actualizar el promedio general del prestador en la colección `prestadores`.
         if (!servicioData.prestadorId) {
             console.error("Error: El servicio no tiene un prestadorId asociado.");
             throw new functions.https.HttpsError("internal", "El servicio no tiene un ID de prestador asociado.");
@@ -282,7 +290,6 @@ export const calificarPrestador = functions.https.onCall(
           });
         }
         
-        // Verificar si la otra parte ya calificó para marcar mutualRatingCompleted
         if (servicioData.calificacionPrestador) {
           updateServicioData.mutualRatingCompleted = true;
         }
@@ -321,17 +328,15 @@ interface CalificarUsuarioData {
  */
 export const calificarUsuario = functions.https.onCall(
   async (data: CalificarUsuarioData, context) => {
-    // 1. Validar que el usuario (prestador) está autenticado.
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
         "La función debe ser llamada mientras el prestador está autenticado."
       );
     }
-    const prestadorIdAuth = context.auth.uid; // UID del prestador que califica
+    const prestadorIdAuth = context.auth.uid; 
     const { servicioId, calificacion, comentario } = data;
 
-    // Validar entrada
     if (!servicioId) {
       throw new functions.https.HttpsError(
         "invalid-argument",
@@ -349,7 +354,6 @@ export const calificarUsuario = functions.https.onCall(
 
     try {
       await db.runTransaction(async (transaction) => {
-        // 2. Buscar el documento del servicio.
         const servicioDoc = await transaction.get(servicioRef);
         if (!servicioDoc.exists) {
           throw new functions.https.HttpsError(
@@ -360,7 +364,6 @@ export const calificarUsuario = functions.https.onCall(
 
         const servicioData = servicioDoc.data() as ServiceData;
 
-        // 3. Verificar que el prestador autenticado es quien realizó el servicio.
         if (servicioData.prestadorId !== prestadorIdAuth) {
           throw new functions.https.HttpsError(
             "permission-denied",
@@ -368,9 +371,6 @@ export const calificarUsuario = functions.https.onCall(
           );
         }
         
-        // Verificar que el servicio esté en un estado que permita la calificación por parte del prestador.
-        // (Ej: el usuario ya confirmó la finalización).
-        // La bandera 'habilitarCalificacion' es establecida por el usuario al confirmar.
         if (servicioData.habilitarCalificacion !== true) {
           throw new functions.https.HttpsError(
             "failed-precondition",
@@ -378,7 +378,6 @@ export const calificarUsuario = functions.https.onCall(
           );
         }
 
-        // Verificar que no exista calificación previa del prestador para este servicio.
         if (servicioData.calificacionPrestador) {
           throw new functions.https.HttpsError(
             "failed-precondition",
@@ -386,7 +385,6 @@ export const calificarUsuario = functions.https.onCall(
           );
         }
 
-        // 4. Guardar la calificación dentro del documento del servicio.
         const nuevaCalificacionParaServicio: NonNullable<ServiceData['calificacionPrestador']> = {
           calificacion: calificacion,
           comentario: comentario || "",
@@ -397,7 +395,6 @@ export const calificarUsuario = functions.https.onCall(
           calificacionPrestador: nuevaCalificacionParaServicio,
         };
 
-        // 5. Actualizar el promedio general del usuario en la colección `usuarios`.
         if (!servicioData.usuarioId) {
             console.error("Error: El servicio no tiene un usuarioId asociado.");
             throw new functions.https.HttpsError("internal", "El servicio no tiene un ID de usuario asociado.");
@@ -405,9 +402,6 @@ export const calificarUsuario = functions.https.onCall(
         const usuarioRef = db.collection("usuarios").doc(servicioData.usuarioId);
         const usuarioDoc = await transaction.get(usuarioRef);
 
-        // Si el documento del usuario no existe, se puede crear con la primera calificación.
-        // O se puede optar por lanzar un error si se espera que el usuario ya exista.
-        // Por ahora, crearemos/actualizaremos.
         const usuarioData = (usuarioDoc.exists ? usuarioDoc.data() : {}) as UserData;
         const currentRatingSum = usuarioData.ratingSumUsuario || 0;
         const currentRatingCount = usuarioData.ratingCountUsuario || 0;
@@ -423,17 +417,13 @@ export const calificarUsuario = functions.https.onCall(
             ratingUsuario: newAverageRating,
           });
         } else {
-          // Si el usuario no existe, creamos el documento.
-          // Aquí podrías querer añadir otros campos iniciales para el perfil del usuario.
           transaction.set(usuarioRef, {
             ratingSumUsuario: newRatingSum,
             ratingCountUsuario: newRatingCount,
             ratingUsuario: newAverageRating,
-            // fechaCreacion: admin.firestore.FieldValue.serverTimestamp(), // Ejemplo
           });
         }
         
-        // Verificar si la otra parte (usuario) ya calificó para marcar mutualRatingCompleted
         if (servicioData.calificacionUsuario) {
           updateServicioData.mutualRatingCompleted = true;
         }
@@ -471,20 +461,17 @@ interface ReportarProblemaData {
  */
 export const reportarProblemaServicio = functions.https.onCall(
   async (data: ReportarProblemaData, context) => {
-    // 1. Validar que el usuario está autenticado.
     if (!context.auth) {
       throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
     }
     const usuarioId = context.auth.uid;
     const { servicioId, motivo, urlEvidencia } = data;
 
-    // 2. Validar parámetros recibidos.
     if (!servicioId || !motivo) {
       throw new functions.https.HttpsError("invalid-argument", "Se requieren los argumentos 'servicioId' y 'motivo'.");
     }
 
     try {
-      // 3. Verificar que el servicio exista.
       const servicioRef = db.collection("servicios").doc(servicioId);
       const servicioDoc = await servicioRef.get();
 
@@ -492,13 +479,6 @@ export const reportarProblemaServicio = functions.https.onCall(
         throw new functions.https.HttpsError("not-found", `El servicio con ID ${servicioId} no fue encontrado.`);
       }
       
-      // Opcional: Verificar que el usuario que reporta es el 'usuarioId' del servicio.
-      // const servicioData = servicioDoc.data() as ServiceData;
-      // if (servicioData.usuarioId !== usuarioId) {
-      //   throw new functions.https.HttpsError("permission-denied", "No estás autorizado para reportar un problema sobre este servicio.");
-      // }
-
-      // 4. Crear un nuevo documento en la colección `reportes`.
       const reporteData: { [key: string]: any } = {
         servicioId: servicioId,
         usuarioId: usuarioId, 
@@ -586,14 +566,12 @@ interface RegistrarDocumentoData {
  */
 export const registrarDocumentoProfesional = functions.https.onCall(
   async (data: RegistrarDocumentoData, context) => {
-    // 1. Validar que el usuario (prestador) está autenticado.
     if (!context.auth) {
       throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un prestador autenticado.");
     }
-    const prestadorId = context.auth.uid; // El UID del prestador autenticado
+    const prestadorId = context.auth.uid; 
     const { tipoDocumento, urlDocumento, descripcion } = data;
 
-    // 2. Validar parámetros recibidos.
     if (!tipoDocumento || !urlDocumento) {
       throw new functions.https.HttpsError("invalid-argument", "Se requieren los argumentos 'tipoDocumento' y 'urlDocumento'.");
     }
@@ -609,9 +587,12 @@ export const registrarDocumentoProfesional = functions.https.onCall(
         estadoVerificacion: "pendiente",
       };
 
-      await prestadorRef.update({
+      // Usar set con merge: true para crear el documento si no existe, o actualizar si existe.
+      // Esto es más seguro si no estás seguro de que el perfil del prestador ya existe.
+      await prestadorRef.set({
         documentosVerificables: admin.firestore.FieldValue.arrayUnion(nuevoDocumento),
-      });
+      }, { merge: true });
+
 
       return {
         success: true,
@@ -619,8 +600,10 @@ export const registrarDocumentoProfesional = functions.https.onCall(
       };
     } catch (error: any) {
       console.error("Error al registrar el documento profesional:", error);
+      // El error 'NOT_FOUND' (código 5) ya no debería ocurrir tan fácilmente con set y merge:true
+      // pero lo mantenemos por si acaso o si se cambia la lógica.
       if (error.code === 5) { 
-         throw new functions.https.HttpsError("not-found", `No se encontró el perfil del prestador con ID ${prestadorId}.`);
+         throw new functions.https.HttpsError("not-found", `No se encontró el perfil del prestador con ID ${prestadorId}. Asegúrate de que el perfil exista.`);
       }
       if (error instanceof functions.https.HttpsError) {
         throw error;
@@ -654,7 +637,8 @@ const PALABRAS_CLAVE_PROHIBIDAS = [
 export const verificarDocumentoProfesional = functions.https.onCall(
   async (data: VerificarDocumentoData, context) => {
      if (!context.auth ) { 
-       throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
+       throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado con permisos de administrador.");
+       // En un caso real, verificarías si context.auth.token.admin === true
      }
 
     const { prestadorId, documentoIndex } = data;
@@ -743,4 +727,110 @@ export const verificarDocumentoProfesional = functions.https.onCall(
   }
 );
 
-    
+
+interface ActivarGarantiaData {
+  servicioId: string;
+  motivo: string;
+}
+
+/**
+ * Firebase Function (onCall) para que un usuario premium active la garantía de un servicio.
+ */
+export const activarGarantiaPremium = functions.https.onCall(
+  async (data: ActivarGarantiaData, context) => {
+    // 1. Verificar que el usuario esté autenticado.
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
+    }
+    const usuarioId = context.auth.uid;
+
+    // Verificar que el usuario sea premium (usando custom claims).
+    // En un entorno real, establecerías este custom claim al momento de la suscripción del usuario.
+    if (context.auth.token.premium !== true) {
+      throw new functions.https.HttpsError("permission-denied", "Esta función solo está disponible para usuarios premium.");
+    }
+
+    // 2. Recibir parámetros.
+    const { servicioId, motivo } = data;
+    if (!servicioId || !motivo) {
+      throw new functions.https.HttpsError("invalid-argument", "Se requieren 'servicioId' y 'motivo'.");
+    }
+
+    const servicioRef = db.collection("servicios").doc(servicioId);
+    const garantiasCollectionRef = db.collection("garantias");
+
+    try {
+      const resultadoTransaccion = await db.runTransaction(async (transaction) => {
+        // 3. Verificar que el servicio existe, pertenece al usuario y está en estado 'completado_por_usuario'.
+        const servicioDoc = await transaction.get(servicioRef);
+        if (!servicioDoc.exists) {
+          throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
+        }
+
+        const servicioData = servicioDoc.data() as ServiceData;
+
+        if (servicioData.usuarioId !== usuarioId) {
+          throw new functions.https.HttpsError("permission-denied", "No estás autorizado para solicitar garantía sobre este servicio.");
+        }
+
+        if (servicioData.estado !== "completado_por_usuario") {
+          throw new functions.https.HttpsError("failed-precondition", `El servicio no está en estado 'completado_por_usuario' (estado actual: ${servicioData.estado}).`);
+        }
+
+        // Verificar que no se haya solicitado garantía previamente.
+        if (servicioData.garantiaSolicitada === true) {
+          throw new functions.https.HttpsError("failed-precondition", "Ya se ha solicitado una garantía para este servicio.");
+        }
+
+        // 5. Comprobar que la fecha actual está dentro del período de garantía.
+        if (!servicioData.warrantyEndDate || !servicioData.warrantyEndDate.toMillis) {
+             throw new functions.https.HttpsError("internal", "No se pudo determinar la fecha de fin de garantía para esta solicitud.");
+        }
+        const now = admin.firestore.Timestamp.now();
+        if (now.toMillis() > servicioData.warrantyEndDate.toMillis()) {
+          const fechaFinGarantiaStr = new Date(servicioData.warrantyEndDate.toMillis()).toLocaleDateString('es-ES');
+          throw new functions.https.HttpsError("failed-precondition", `El período de garantía para este servicio finalizó el ${fechaFinGarantiaStr}.`);
+        }
+        
+        // 6. Si todo es correcto:
+        // Crear un nuevo documento en la colección `garantias`.
+        const nuevaSolicitudGarantiaRef = garantiasCollectionRef.doc(); // Genera un nuevo ID
+        const nuevaGarantiaData: GarantiaData = {
+          servicioId: servicioId,
+          usuarioId: usuarioId,
+          prestadorId: servicioData.prestadorId || "desconocido", // Tomar del servicio si existe
+          motivo: motivo,
+          fechaSolicitudGarantia: now,
+          estadoGarantia: "pendiente",
+        };
+        transaction.set(nuevaSolicitudGarantiaRef, nuevaGarantiaData);
+
+        // Actualizar el documento del servicio.
+        transaction.update(servicioRef, {
+          garantiaSolicitada: true,
+          idSolicitudGarantia: nuevaSolicitudGarantiaRef.id,
+          // Opcionalmente, podrías cambiar el estado del servicio principal aquí también si es necesario.
+          // estado: "en_revision_garantia" 
+        });
+
+        return {
+          success: true,
+          message: "Solicitud de garantía registrada exitosamente. Estado: pendiente.",
+          garantiaId: nuevaSolicitudGarantiaRef.id,
+          estadoGarantia: "pendiente",
+        };
+      });
+      return resultadoTransaccion;
+    } catch (error: any) {
+      console.error("Error al activar la garantía:", error);
+      if (error instanceof functions.https.HttpsError) {
+        throw error;
+      }
+      throw new functions.https.HttpsError(
+        "internal",
+        "Ocurrió un error interno al procesar la solicitud de garantía.",
+        error.message
+      );
+    }
+  }
+);
