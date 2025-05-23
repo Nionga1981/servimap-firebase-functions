@@ -32,17 +32,28 @@ interface RatingData {
   userId: string;
 }
 
+// Interfaz para los datos de un documento verificable
+interface DocumentoVerificable {
+  tipoDocumento: string;
+  urlDocumento: string;
+  descripcion?: string;
+  fechaRegistro: admin.firestore.Timestamp;
+  estadoVerificacion: "pendiente" | "verificado" | "rechazado";
+}
+
 // Interfaz para los datos del documento del prestador
 interface ProviderData {
   ratingSum?: number;
   ratingCount?: number;
   rating?: number;
+  documentosVerificables?: DocumentoVerificable[];
   // ... otros campos del prestador
 }
 
+
 // Interfaz para los datos de entrada de la función confirmServiceCompletionByUserService
 interface ConfirmServiceCompletionData {
-  servicioId: string; // Renombrado desde solicitudId para consistencia
+  servicioId: string;
 }
 
 /**
@@ -124,8 +135,6 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
         transaction.update(servicioRef, updateData);
       });
 
-      // Simulación de llamada a otra función para liberar el pago (o marcar para liberación)
-      // Esta lógica sería más compleja en un sistema real y podría involucrar una tarea programada.
       console.log(
         `Proceso de retención de pago iniciado para el servicio ${servicioId}. El pago se liberará después del período de gracia si no hay reclamos.`
       );
@@ -227,13 +236,11 @@ export const rateProviderByUserService = functions.https.onCall(
           rating: calificacion,
           comment: comentario || "",
           date: admin.firestore.Timestamp.now(),
-          userId: userId, // Opcional: redundante si el campo es calificacionUsuario
+          userId: userId, 
         };
         
         const updateServicioData: { [key: string]: any } = {
           calificacionUsuario: nuevaCalificacionUsuario,
-          // Opcional: deshabilitar más calificaciones para este servicio por este usuario
-          // habilitarCalificacion: false, 
         };
 
 
@@ -247,8 +254,6 @@ export const rateProviderByUserService = functions.https.onCall(
 
         if (!prestadorDoc.exists) {
           console.error(`Error: No se encontró el prestador con ID ${servicioData.prestadorId}. No se puede actualizar su calificación.`);
-          // Decidir si esto debe ser un error fatal para la calificación o solo un warning.
-          // Por ahora, permitiremos que la calificación se guarde en el servicio, pero no se actualizará el prestador.
         } else {
           const prestadorData = prestadorDoc.data() as ProviderData;
           const currentRatingSum = prestadorData.ratingSum || 0;
@@ -256,7 +261,7 @@ export const rateProviderByUserService = functions.https.onCall(
 
           const newRatingSum = currentRatingSum + calificacion;
           const newRatingCount = currentRatingCount + 1;
-          const newAverageRating = parseFloat((newRatingSum / newRatingCount).toFixed(2)); // Asegurar 2 decimales
+          const newAverageRating = parseFloat((newRatingSum / newRatingCount).toFixed(2)); 
 
           transaction.update(prestadorRef, {
             ratingSum: newRatingSum,
@@ -265,9 +270,7 @@ export const rateProviderByUserService = functions.https.onCall(
           });
         }
         
-        // Actualizar el documento del servicio
         transaction.update(servicioRef, updateServicioData);
-
       });
 
       return {
@@ -329,24 +332,18 @@ export const reportarProblemaServicio = functions.https.onCall(
       // 4. Crear un nuevo documento en la colección `reportes`.
       const reporteData: { [key: string]: any } = {
         servicioId: servicioId,
-        usuarioId: usuarioId, // UID del usuario autenticado
+        usuarioId: usuarioId, 
         motivo: motivo,
-        fechaReporte: admin.firestore.FieldValue.serverTimestamp(), // Timestamp del servidor
-        estado: "pendiente", // Estado inicial del reporte
+        fechaReporte: admin.firestore.FieldValue.serverTimestamp(), 
+        estado: "pendiente", 
       };
 
       if (urlEvidencia) {
-        // Validar que urlEvidencia sea una URL válida si es necesario.
-        // Por simplicidad, aquí solo la añadimos si existe.
         reporteData.urlEvidencia = urlEvidencia;
       }
 
       const reporteRef = await db.collection("reportes").add(reporteData);
 
-      // Opcional: podrías actualizar el estado del servicio a "en_disputa" aquí también.
-      // await servicioRef.update({ estado: "en_disputa", paymentStatus: "congelado_por_disputa" });
-
-      // 5. Devolver un mensaje de confirmación con el ID del reporte creado.
       return {
         success: true,
         message: "Problema reportado exitosamente.",
@@ -370,7 +367,6 @@ export const reportarProblemaServicio = functions.https.onCall(
  * Firebase Function (onCall) para obtener los servicios completados por el usuario.
  */
 export const obtenerServiciosCompletados = functions.https.onCall(async (data, context) => {
-  // 1. Validar que el usuario esté autenticado.
   if (!context.auth) {
     throw new functions.https.HttpsError(
       "unauthenticated",
@@ -380,14 +376,11 @@ export const obtenerServiciosCompletados = functions.https.onCall(async (data, c
   const usuarioId = context.auth.uid;
 
   try {
-    // 2. Hacer una consulta a la colección `servicios` en Firestore.
-    // 3. Recuperar todos los documentos cuyo campo `estado` sea igual a "completado_por_usuario"
-    //    Y que pertenezcan al usuario autenticado.
     const querySnapshot = await db
       .collection("servicios")
       .where("usuarioId", "==", usuarioId)
       .where("estado", "==", "completado_por_usuario")
-      .orderBy("fechaConfirmacion", "desc") // Opcional: ordenar por fecha de confirmación
+      .orderBy("fechaConfirmacion", "desc") 
       .get();
 
     const serviciosCompletados: any[] = [];
@@ -395,12 +388,9 @@ export const obtenerServiciosCompletados = functions.https.onCall(async (data, c
       serviciosCompletados.push({
         id: doc.id,
         ...doc.data(),
-        // Puedes transformar las fechas de Timestamp a string si es necesario para el cliente.
-        // fechaConfirmacion: doc.data().fechaConfirmacion?.toDate().toISOString(), 
       });
     });
 
-    // 4. Devolver un arreglo JSON con los datos de cada documento.
     return serviciosCompletados;
   } catch (error: any) {
     console.error("Error al obtener servicios completados:", error);
@@ -415,4 +405,72 @@ export const obtenerServiciosCompletados = functions.https.onCall(async (data, c
   }
 });
 
-```
+
+interface RegistrarDocumentoData {
+  tipoDocumento: string;
+  urlDocumento: string;
+  descripcion?: string;
+}
+
+/**
+ * Firebase Function (onCall) para que un prestador registre un documento profesional.
+ */
+export const registrarDocumentoProfesional = functions.https.onCall(
+  async (data: RegistrarDocumentoData, context) => {
+    // 1. Validar que el usuario (prestador) está autenticado.
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un prestador autenticado.");
+    }
+    const prestadorId = context.auth.uid; // El UID del prestador autenticado
+    const { tipoDocumento, urlDocumento, descripcion } = data;
+
+    // 2. Validar parámetros recibidos.
+    if (!tipoDocumento || !urlDocumento) {
+      throw new functions.https.HttpsError("invalid-argument", "Se requieren los argumentos 'tipoDocumento' y 'urlDocumento'.");
+    }
+    // Podrías añadir validaciones más específicas para tipoDocumento o formato de URL si es necesario.
+
+    try {
+      const prestadorRef = db.collection("prestadores").doc(prestadorId);
+
+      // 3. Crear el objeto del nuevo documento.
+      const nuevoDocumento: DocumentoVerificable = {
+        tipoDocumento: tipoDocumento,
+        urlDocumento: urlDocumento,
+        descripcion: descripcion || "",
+        fechaRegistro: admin.firestore.Timestamp.now(), // Timestamp del servidor
+        estadoVerificacion: "pendiente", // Estado inicial
+      };
+
+      // 4. Usar FieldValue.arrayUnion para añadir el nuevo documento al arreglo.
+      // Esto evita duplicados si se intentara añadir el mismo objeto exacto.
+      // Si el campo 'documentosVerificables' no existe, se creará.
+      await prestadorRef.update({
+        documentosVerificables: admin.firestore.FieldValue.arrayUnion(nuevoDocumento),
+      });
+
+      // 5. Devolver un mensaje de confirmación.
+      return {
+        success: true,
+        message: "Documento registrado exitosamente. Está pendiente de revisión.",
+      };
+    } catch (error: any) {
+      console.error("Error al registrar el documento profesional:", error);
+      // Podrías verificar si el error es porque el documento del prestador no existe.
+      if (error.code === 5) { // Código para NOT_FOUND
+         throw new functions.https.HttpsError("not-found", `No se encontró el perfil del prestador con ID ${prestadorId}.`);
+      }
+      if (error instanceof functions.https.HttpsError) {
+        throw error;
+      }
+      throw new functions.https.HttpsError(
+        "internal",
+        "Ocurrió un error interno al registrar el documento.",
+        error.message
+      );
+    }
+  }
+);
+
+// Agrega otras funciones aquí si es necesario.
+
