@@ -4,23 +4,23 @@ import * as admin from "firebase-admin";
 
 // Inicializa Firebase Admin SDK.
 // Es importante que esto se haga solo una vez.
-// Si tienes otras funciones, esta inicialización puede estar en un archivo compartido.
 if (admin.apps.length === 0) {
   admin.initializeApp();
 }
 
 const db = admin.firestore();
 
-interface ServiceRequestData {
+// Interfaz para los datos del documento de servicio/solicitud
+interface ServiceData {
   estado?: string;
   usuarioId?: string;
   prestadorId?: string; // ID del proveedor
-  monto?: number; // Monto del servicio para el pago
-  // ... otros campos de la solicitud
+  // ... otros campos relevantes del documento de servicio/solicitud
 }
 
+// Interfaz para los datos de entrada de la función
 interface ConfirmServiceCompletionData {
-  solicitudId: string;
+  servicioId: string; // ID del documento en la colección "servicios"
 }
 
 /**
@@ -36,52 +36,54 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
       );
     }
     const userId = context.auth.uid;
-    const { solicitudId } = data;
+    const { servicioId } = data;
 
-    if (!solicitudId) {
+    if (!servicioId) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Se requiere el argumento 'solicitudId'."
+        "Se requiere el argumento 'servicioId'."
       );
     }
 
-    const solicitudRef = db.collection("solicitudes").doc(solicitudId);
+    // Usamos el servicioId para referenciar el documento en la colección "servicios"
+    const servicioRef = db.collection("servicios").doc(servicioId);
 
     try {
       // Usar una transacción para asegurar la atomicidad de las operaciones
       await db.runTransaction(async (transaction) => {
-        const solicitudDoc = await transaction.get(solicitudRef);
+        const servicioDoc = await transaction.get(servicioRef);
 
-        if (!solicitudDoc.exists) {
+        // Verificar que el documento del servicio existe
+        if (!servicioDoc.exists) {
           throw new functions.https.HttpsError(
             "not-found",
-            `La solicitud con ID ${solicitudId} no fue encontrada.`
+            `El servicio con ID ${servicioId} no fue encontrado.`
           );
         }
 
-        const solicitudData = solicitudDoc.data() as ServiceRequestData;
+        const servicioData = servicioDoc.data() as ServiceData;
 
-        // 2. Verificar que el estado del servicio sea 'completado_por_prestador'
-        if (solicitudData.estado !== "completado_por_prestador") {
+        // Comprobar que el estado actual del servicio sea "completado_por_prestador"
+        if (servicioData.estado !== "completado_por_prestador") {
           throw new functions.https.HttpsError(
             "failed-precondition",
-            `La solicitud no está en el estado correcto para ser confirmada por el usuario. Estado actual: ${solicitudData.estado}. Se esperaba: completado_por_prestador.`
+            `El servicio no está en el estado correcto para ser confirmado por el usuario. Estado actual: ${servicioData.estado}. Se esperaba: completado_por_prestador.`
           );
         }
 
-        // 3. Verificar que el ID del usuario coincida con el 'usuarioId' de la solicitud
-        if (solicitudData.usuarioId !== userId) {
+        // Validar que quien confirma es el mismo usuario que solicitó el servicio
+        if (servicioData.usuarioId !== userId) {
           throw new functions.https.HttpsError(
             "permission-denied",
-            "El usuario no está autorizado para confirmar esta solicitud."
+            "El usuario no está autorizado para confirmar este servicio."
           );
         }
 
-        // 4. Si las verificaciones se cumplen, actualizar el documento
+        // Si las verificaciones se cumplen, actualizar el documento
         const updateData: { [key: string]: any } = {
           estado: "completado_por_usuario", // Cambiado según la solicitud
-          fechaConfirmacion: admin.firestore.FieldValue.serverTimestamp(), // Cambiado según la solicitud
-          habilitarCalificacion: true,
+          fechaConfirmacion: admin.firestore.FieldValue.serverTimestamp(), // Registrar fecha de confirmación
+          habilitarCalificacion: true, // Activar bandera para calificación
           paymentStatus: "retenido_para_liberacion", // Estado de pago después de confirmación del usuario
           // Inicia la ventana de 7 días para calificación/reclamo.
           ratingWindowExpiresAt: admin.firestore.Timestamp.fromMillis(
@@ -89,11 +91,10 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
           ),
         };
 
-        // Aplicar garantía
-        // Suponiendo que tenemos acceso a la información de si el usuario es premium.
+        // Aplicar lógica de garantía (se mantiene la simulación de premium)
         const isUserPremium = context.auth.token.premium === true; // Asumiendo un custom claim 'premium'
         const standardWarrantyDays = 3;
-        const premiumWarrantyDays = 7; // O 15/30 según lo requieras para garantía extendida
+        const premiumWarrantyDays = 7; 
         const warrantyDurationDays = isUserPremium
           ? premiumWarrantyDays
           : standardWarrantyDays;
@@ -102,21 +103,21 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
             Date.now() + warrantyDurationDays * 24 * 60 * 60 * 1000
         );
 
-        transaction.update(solicitudRef, updateData);
+        transaction.update(servicioRef, updateData);
       });
 
-      // 5. Simulación de llamada a otra función que libere el pago retenido al prestador
+      // Simulación de llamada a otra función que libere el pago retenido al prestador
       // La liberación real del pago se manejaría en la tarea programada que verifica
       // si han pasado los 7 días sin reclamos.
       console.log(
-        `Proceso de retención de pago iniciado para la solicitud ${solicitudId}. El pago se liberará después del período de gracia si no hay reclamos.`
+        `Proceso de retención de pago iniciado para el servicio ${servicioId}. El pago se liberará después del período de gracia si no hay reclamos.`
       );
 
       return {
         success: true,
         message: "Finalización del servicio confirmada exitosamente. Sistema de calificación activado, pago retenido y garantía aplicada.",
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error al confirmar la finalización del servicio:", error);
       if (error instanceof functions.https.HttpsError) {
         throw error; // Re-lanzar errores HttpsError para que el cliente los reciba correctamente
@@ -125,7 +126,7 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
       throw new functions.https.HttpsError(
         "internal",
         "Ocurrió un error interno al procesar la solicitud.",
-        (error as Error).message // Incluir mensaje original para depuración en logs
+        error.message 
       );
     }
   }
@@ -133,8 +134,6 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
 
 // Podrías tener otras funciones aquí, por ejemplo:
 // export const releasePaymentToProvider = functions.https.onCall(async (data, context) => { ... }); // Para liberación explícita
-// export const handleNewRating = functions.firestore.document('solicitudes/{solicitudId}/calificaciones/{calificacionId}').onCreate(async (snap, context) => { ... });
+// export const handleNewRating = functions.firestore.document('servicios/{servicioId}/calificaciones/{calificacionId}').onCreate(async (snap, context) => { ... });
 // export const dailyAutomatedChecks = functions.pubsub.schedule('every 24 hours').onRun(async (context) => { ... }); // Para la liberación automática de pagos
-    
-
     
