@@ -10,17 +10,35 @@ if (admin.apps.length === 0) {
 
 const db = admin.firestore();
 
-// Interfaz para los datos del documento de servicio/solicitud
+// Interfaz para los datos del documento de servicio
 interface ServiceData {
   estado?: string;
-  usuarioId?: string;
+  usuarioId?: string; // ID del usuario que solicitó el servicio
   prestadorId?: string; // ID del proveedor
-  // ... otros campos relevantes del documento de servicio/solicitud
+  habilitarCalificacion?: boolean;
+  calificacionUsuario?: RatingData; // Para verificar si ya calificó
+  // ... otros campos relevantes
 }
 
-// Interfaz para los datos de entrada de la función
+// Interfaz para los datos de una calificación
+interface RatingData {
+  rating: number;
+  comment?: string;
+  date: admin.firestore.Timestamp;
+  userId: string;
+}
+
+// Interfaz para los datos del documento del prestador
+interface ProviderData {
+  ratingSum?: number;
+  ratingCount?: number;
+  rating?: number;
+  // ... otros campos del prestador
+}
+
+// Interfaz para los datos de entrada de la función confirmServiceCompletionByUserService
 interface ConfirmServiceCompletionData {
-  servicioId: string; // ID del documento en la colección "servicios"
+  servicioId: string;
 }
 
 /**
@@ -45,15 +63,12 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
       );
     }
 
-    // Usamos el servicioId para referenciar el documento en la colección "servicios"
     const servicioRef = db.collection("servicios").doc(servicioId);
 
     try {
-      // Usar una transacción para asegurar la atomicidad de las operaciones
       await db.runTransaction(async (transaction) => {
         const servicioDoc = await transaction.get(servicioRef);
 
-        // Verificar que el documento del servicio existe
         if (!servicioDoc.exists) {
           throw new functions.https.HttpsError(
             "not-found",
@@ -63,7 +78,6 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
 
         const servicioData = servicioDoc.data() as ServiceData;
 
-        // Comprobar que el estado actual del servicio sea "completado_por_prestador"
         if (servicioData.estado !== "completado_por_prestador") {
           throw new functions.https.HttpsError(
             "failed-precondition",
@@ -71,7 +85,6 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
           );
         }
 
-        // Validar que quien confirma es el mismo usuario que solicitó el servicio
         if (servicioData.usuarioId !== userId) {
           throw new functions.https.HttpsError(
             "permission-denied",
@@ -79,22 +92,20 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
           );
         }
 
-        // Si las verificaciones se cumplen, actualizar el documento
         const updateData: { [key: string]: any } = {
-          estado: "completado_por_usuario", // Cambiado según la solicitud
-          fechaConfirmacion: admin.firestore.FieldValue.serverTimestamp(), // Registrar fecha de confirmación
-          habilitarCalificacion: true, // Activar bandera para calificación
-          paymentStatus: "retenido_para_liberacion", // Estado de pago después de confirmación del usuario
-          // Inicia la ventana de 7 días para calificación/reclamo.
+          estado: "completado_por_usuario",
+          fechaConfirmacion: admin.firestore.FieldValue.serverTimestamp(),
+          habilitarCalificacion: true,
+          paymentStatus: "retenido_para_liberacion",
           ratingWindowExpiresAt: admin.firestore.Timestamp.fromMillis(
-            Date.now() + 7 * 24 * 60 * 60 * 1000
+            Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 días desde ahora
           ),
         };
 
-        // Aplicar lógica de garantía (se mantiene la simulación de premium)
-        const isUserPremium = context.auth.token.premium === true; // Asumiendo un custom claim 'premium'
+        // Lógica de garantía
+        const isUserPremium = context.auth?.token?.premium === true;
         const standardWarrantyDays = 3;
-        const premiumWarrantyDays = 7; 
+        const premiumWarrantyDays = 7;
         const warrantyDurationDays = isUserPremium
           ? premiumWarrantyDays
           : standardWarrantyDays;
@@ -106,9 +117,6 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
         transaction.update(servicioRef, updateData);
       });
 
-      // Simulación de llamada a otra función que libere el pago retenido al prestador
-      // La liberación real del pago se manejaría en la tarea programada que verifica
-      // si han pasado los 7 días sin reclamos.
       console.log(
         `Proceso de retención de pago iniciado para el servicio ${servicioId}. El pago se liberará después del período de gracia si no hay reclamos.`
       );
@@ -120,9 +128,8 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
     } catch (error: any) {
       console.error("Error al confirmar la finalización del servicio:", error);
       if (error instanceof functions.https.HttpsError) {
-        throw error; // Re-lanzar errores HttpsError para que el cliente los reciba correctamente
+        throw error;
       }
-      // Para otros errores, devolver un error genérico
       throw new functions.https.HttpsError(
         "internal",
         "Ocurrió un error interno al procesar la solicitud.",
@@ -132,8 +139,155 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(
   }
 );
 
-// Podrías tener otras funciones aquí, por ejemplo:
-// export const releasePaymentToProvider = functions.https.onCall(async (data, context) => { ... }); // Para liberación explícita
-// export const handleNewRating = functions.firestore.document('servicios/{servicioId}/calificaciones/{calificacionId}').onCreate(async (snap, context) => { ... });
-// export const dailyAutomatedChecks = functions.pubsub.schedule('every 24 hours').onRun(async (context) => { ... }); // Para la liberación automática de pagos
-    
+
+// Interfaz para los datos de entrada de la función rateProviderByUserService
+interface RateProviderData {
+  servicioId: string;
+  calificacion: number; // 1 a 5 estrellas
+  comentario?: string;
+}
+
+/**
+ * Firebase Function (onCall) para que un usuario califique a un prestador.
+ */
+export const rateProviderByUserService = functions.https.onCall(
+  async (data: RateProviderData, context) => {
+    // 1. Validar que el usuario está autenticado.
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "La función debe ser llamada mientras el usuario está autenticado."
+      );
+    }
+    const userId = context.auth.uid;
+    const { servicioId, calificacion, comentario } = data;
+
+    // Validar entrada
+    if (!servicioId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Se requiere el argumento 'servicioId'."
+      );
+    }
+    if (typeof calificacion !== 'number' || calificacion < 1 || calificacion > 5) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "La calificación debe ser un número entre 1 y 5."
+      );
+    }
+
+    const servicioRef = db.collection("servicios").doc(servicioId);
+
+    try {
+      await db.runTransaction(async (transaction) => {
+        // 2. Buscar el documento del servicio.
+        const servicioDoc = await transaction.get(servicioRef);
+        if (!servicioDoc.exists) {
+          throw new functions.https.HttpsError(
+            "not-found",
+            `El servicio con ID ${servicioId} no fue encontrado.`
+          );
+        }
+
+        const servicioData = servicioDoc.data() as ServiceData;
+
+        // Verificar que el usuario actual es quien solicitó el servicio
+        if (servicioData.usuarioId !== userId) {
+          throw new functions.https.HttpsError(
+            "permission-denied",
+            "No estás autorizado para calificar este servicio."
+          );
+        }
+        
+        // 3. Verificar que habilitarCalificacion sea true y que no exista calificación previa.
+        if (servicioData.habilitarCalificacion !== true) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "La calificación no está habilitada para este servicio."
+          );
+        }
+        if (servicioData.calificacionUsuario) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "Ya has calificado este servicio previamente."
+          );
+        }
+
+        // Validar que la ventana de calificación no haya expirado (si aplica)
+        // Este chequeo es importante si el flag habilitarCalificacion se maneja por separado
+        // o si puede haber un desfase. Si confirmServiceCompletionByUserService lo maneja bien,
+        // este chequeo podría ser redundante.
+        // if (servicioData.ratingWindowExpiresAt && admin.firestore.Timestamp.now() > servicioData.ratingWindowExpiresAt) {
+        //   throw new functions.https.HttpsError(
+        //     "failed-precondition",
+        //     "La ventana para calificar este servicio ha expirado."
+        //   );
+        // }
+
+
+        // 4. Guardar la calificación dentro del documento del servicio.
+        const nuevaCalificacionUsuario: RatingData = {
+          rating: calificacion,
+          comment: comentario || "",
+          date: admin.firestore.Timestamp.now(),
+          userId: userId,
+        };
+        
+        const updateServicioData: { [key: string]: any } = {
+          calificacionUsuario: nuevaCalificacionUsuario,
+          // Opcional: deshabilitar más calificaciones para este servicio por este usuario
+          // habilitarCalificacion: false, // o un campo como 'calificacionUsuarioRealizada: true'
+        };
+
+
+        // 5. Actualizar el promedio general del prestador en la colección `prestadores`.
+        if (!servicioData.prestadorId) {
+            console.error("Error: El servicio no tiene un prestadorId asociado.");
+            throw new functions.https.HttpsError("internal", "El servicio no tiene un ID de prestador asociado.");
+        }
+        const prestadorRef = db.collection("prestadores").doc(servicioData.prestadorId);
+        const prestadorDoc = await transaction.get(prestadorRef);
+
+        if (!prestadorDoc.exists) {
+          console.error(`Error: No se encontró el prestador con ID ${servicioData.prestadorId}. No se puede actualizar su calificación.`);
+          // Decidir si esto debe ser un error fatal para la calificación o solo un warning.
+          // Por ahora, permitiremos que la calificación se guarde en el servicio, pero no se actualizará el prestador.
+        } else {
+          const prestadorData = prestadorDoc.data() as ProviderData;
+          const currentRatingSum = prestadorData.ratingSum || 0;
+          const currentRatingCount = prestadorData.ratingCount || 0;
+
+          const newRatingSum = currentRatingSum + calificacion;
+          const newRatingCount = currentRatingCount + 1;
+          const newAverageRating = parseFloat((newRatingSum / newRatingCount).toFixed(2)); // Asegurar 2 decimales
+
+          transaction.update(prestadorRef, {
+            ratingSum: newRatingSum,
+            ratingCount: newRatingCount,
+            rating: newAverageRating,
+          });
+        }
+        
+        // Actualizar el documento del servicio
+        transaction.update(servicioRef, updateServicioData);
+
+      });
+
+      return {
+        success: true,
+        message: "Calificación guardada exitosamente.",
+      };
+    } catch (error: any) {
+      console.error("Error al guardar la calificación:", error);
+      if (error instanceof functions.https.HttpsError) {
+        throw error;
+      }
+      throw new functions.https.HttpsError(
+        "internal",
+        "Ocurrió un error interno al guardar la calificación.",
+        error.message
+      );
+    }
+  }
+);
+
