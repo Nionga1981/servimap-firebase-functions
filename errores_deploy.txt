@@ -1,0 +1,26 @@
+
+=== Deploying to 'servimap-nyniz'...
+
+i  deploying functions
+Running command: npm --prefix "$RESOURCE_DIR" run lint
+
+> lint
+> eslint --ext .js,.ts .
+
+
+/home/user/studio/functions/src/index.ts
+   1:9   error  There should be no space after '{'                         object-curly-spacing
+   1:19  error  There should be no space before '}'                        object-curly-spacing
+   3:9   error  There should be no space after '{'                         object-curly-spacing
+   3:27  error  There should be no space before '}'                        object-curly-spacing
+   6:1   error  Expected indentation of 2 spaces but found 4               indent
+   6:33  error  There should be no space after '{'                         object-curly-spacing
+   6:54  error  There should be no space before '}'                        object-curly-spacing
+   7:1   error  Expected indentation of 2 spaces but found 4               indent
+  11:1   error  Too many blank lines at the end of file. Max of 2 allowed  no-multiple-empty-lines
+
+✖ 9 problems (9 errors, 0 warnings)
+  9 errors and 0 warnings potentially fixable with the `--fix` option.
+
+
+Error: functions predeploy error: Command terminated with non-zero exit code 1

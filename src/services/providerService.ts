@@ -1,10 +1,19 @@
-
 // src/services/providerService.ts
 "use client"; // Necesario si usamos hooks o interactuamos con APIs de navegador
 
 // En una aplicación real, importarías tu instancia de Firestore y funciones de Firebase:
 // import { db } from '@/lib/firebase'; // Asumiendo que tienes firebase.ts configurado
 // import { doc, updateDoc, serverTimestamp, deleteField } from 'firebase/firestore';
+
+interface ProviderUpdatePayload {
+  isAvailable: boolean;
+  lastConnection: number;
+  currentLocation?: {
+    lat: number;
+    lng: number;
+    timestamp: number;
+  } | null;
+}
 
 /**
  * Actualiza la disponibilidad y la ubicación en tiempo real de un proveedor.
@@ -17,8 +26,8 @@ export const updateProviderRealtimeStatus = async (
 ): Promise<void> => {
   console.log(`[ProviderService] Actualizando estado para ${providerId}:`);
   console.log(`  Disponible: ${isAvailable}`);
-  
-  const updates: any = {
+
+  const updates: ProviderUpdatePayload = {
     isAvailable: isAvailable,
     lastConnection: Date.now(), // Usar serverTimestamp() de Firestore en una app real
   };
@@ -31,7 +40,6 @@ export const updateProviderRealtimeStatus = async (
     };
     console.log(`  Ubicación Actual: Lat ${location.lat}, Lng ${location.lng}`);
   } else if (!isAvailable) {
-    // Si se desconecta, eliminamos la ubicación actual o la establecemos a null
     updates.currentLocation = null; // En Firestore real, usarías deleteField() o null
     console.log(`  Ubicación Actual: Borrada/Nula`);
   }
@@ -41,8 +49,6 @@ export const updateProviderRealtimeStatus = async (
   // await updateDoc(providerRef, updates);
 
   console.log(`[ProviderService] Estado de ${providerId} actualizado (simulado).`);
-  // Aquí podrías devolver algo o simplemente confirmar que se completó.
-  // Por ahora, no hay interacción real con la base de datos.
 };
 
 /**
@@ -50,11 +56,11 @@ export const updateProviderRealtimeStatus = async (
  */
 export const disconnectProvider = async (providerId: string): Promise<void> => {
   console.log(`[ProviderService] Desconectando a ${providerId}...`);
-  
-  const updates = {
+
+  const updates: ProviderUpdatePayload = {
     isAvailable: false,
-    currentLocation: null, // O deleteField() en Firestore real
-    lastConnection: Date.now(), // serverTimestamp() en Firestore real
+    currentLocation: null,
+    lastConnection: Date.now(),
   };
 
   // Simulación de la llamada a Firestore:
