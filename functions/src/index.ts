@@ -216,7 +216,7 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(asyn
     throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
   }
   const userId = context.auth.uid;
-  const { servicioId } = data; // Se espera que 'servicioId' venga en 'data'
+  const { servicioId } = data; 
 
   if (!servicioId || typeof servicioId !== "string") {
     functions.logger.error("servicioId no proporcionado o inválido.", { servicioId });
@@ -239,8 +239,7 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(asyn
         functions.logger.error(`Usuario ${userId} no autorizado para confirmar servicio ${servicioId}.`);
         throw new functions.https.HttpsError("permission-denied", "No estás autorizado para confirmar este servicio.");
       }
-
-      // Estados válidos desde los cuales el usuario puede confirmar
+      
       const validPreviousStates: ServiceRequestStatus[] = ["completado_por_prestador", "en_camino_proveedor", "servicio_iniciado", "confirmada_prestador", "pagada"];
       if (!validPreviousStates.includes(servicioData.estado)) {
         functions.logger.warn(`Intento de confirmar servicio ${servicioId} en estado inválido. Estado actual: ${servicioData.estado}`);
@@ -251,9 +250,7 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(asyn
       const ratingAndDisputeWindowEndDate = new Date(now.toDate().getTime() + RATING_AND_DISPUTE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
       const ratingWindowExpiresTimestamp = admin.firestore.Timestamp.fromDate(ratingAndDisputeWindowEndDate);
 
-      // Simular obtener el perfil del usuario para saber si es premium
-      // En una app real, podrías usar context.auth.token.premium si configuras custom claims
-      const userProfileRef = db.collection("usuarios").doc(userId); // Asumiendo una colección 'usuarios'
+      const userProfileRef = db.collection("usuarios").doc(userId);
       const userProfileDoc = await transaction.get(userProfileRef);
       const userIsPremium = userProfileDoc.exists ? (userProfileDoc.data() as UserData)?.isPremium === true : false;
       
@@ -263,15 +260,14 @@ export const confirmServiceCompletionByUserService = functions.https.onCall(asyn
       }
       const warrantyEndDateDt = new Date(now.toDate().getTime() + warrantyDays * 24 * 60 * 60 * 1000);
 
-
       transaction.update(servicioRef, {
         estado: "completado_por_usuario",
-        fechaConfirmacion: now, // Campo correcto según tu nueva solicitud
-        userConfirmedCompletionAt: now, // Alias para consistencia con otras lógicas
+        fechaConfirmacion: now,
+        userConfirmedCompletionAt: now, 
         habilitarCalificacion: true,
         paymentStatus: "retenido_para_liberacion",
-        ratingWindowExpiresAt: ratingWindowExpiresTimestamp, // Para la ventana de 3 días
-        warrantyEndDate: warrantyEndDateDt.toISOString().split("T")[0], // Formato YYYY-MM-DD
+        ratingWindowExpiresAt: ratingWindowExpiresTimestamp,
+        warrantyEndDate: warrantyEndDateDt.toISOString().split("T")[0], 
         updatedAt: now,
       });
       functions.logger.info(`Servicio ${servicioId} confirmado por usuario ${userId}. Calificación habilitada, pago retenido, ventana de calificación/disputa y garantía establecidas.`);
@@ -325,14 +321,12 @@ export const calificarPrestador = functions.https.onCall(async (data, context) =
       if (!servicioData.habilitarCalificacion) {
         throw new functions.https.HttpsError("failed-precondition", "La calificación para este servicio no está habilitada.");
       }
-      if (servicioData.calificacionUsuario) { // Verifica si ya existe una calificación del usuario
+      if (servicioData.calificacionUsuario) { 
         throw new functions.https.HttpsError("already-exists", "Ya has calificado este servicio.");
       }
-      // Opcional: verificar si la ventana de calificación aún está abierta
       if (servicioData.ratingWindowExpiresAt && servicioData.ratingWindowExpiresAt.toDate() < new Date()) {
          throw new functions.https.HttpsError("failed-precondition", "El período para calificar este servicio ha expirado.");
       }
-
 
       const nuevaCalificacionUsuario: RatingData = {
         calificacion: calificacion,
@@ -344,22 +338,22 @@ export const calificarPrestador = functions.https.onCall(async (data, context) =
       const prestadorDoc = await transaction.get(prestadorDocRef);
       let newRatingSum = calificacion;
       let newRatingCount = 1;
-      let prestadorName = `Prestador ${servicioData.prestadorId.substring(0,5)}`; // Nombre por defecto
+      let prestadorName = `Prestador ${servicioData.prestadorId.substring(0,5)}`; 
 
       if (prestadorDoc.exists) {
         const prestadorData = prestadorDoc.data() as ProviderData;
         newRatingSum = (prestadorData.ratingSum || 0) + calificacion;
         newRatingCount = (prestadorData.ratingCount || 0) + 1;
-        prestadorName = prestadorData.name || prestadorName; // Usa el nombre existente si está
+        prestadorName = prestadorData.name || prestadorName; 
       }
       const currentRating = newRatingCount > 0 ? parseFloat((newRatingSum / newRatingCount).toFixed(2)) : 0;
 
-      transaction.set(prestadorDocRef, { // Usar set con merge:true para crear si no existe
+      transaction.set(prestadorDocRef, { 
         ratingSum: newRatingSum,
         ratingCount: newRatingCount,
-        rating: currentRating, // Este es el promedioCalificaciones
-        name: prestadorName, // Asegura que el nombre se guarde/actualice
-        uid: servicioData.prestadorId, // Guarda el UID por consistencia
+        rating: currentRating, 
+        name: prestadorName, 
+        uid: servicioData.prestadorId, 
       }, { merge: true });
 
 
@@ -370,16 +364,15 @@ export const calificarPrestador = functions.https.onCall(async (data, context) =
       if (servicioData.calificacionPrestador) {
         servicioUpdate.mutualRatingCompleted = true;
       }
-      // Lógica para liberar pago si califica sin disputa y dentro de la ventana
+      
       if (servicioData.estado !== "en_disputa" && servicioData.paymentStatus === "retenido_para_liberacion") {
         functions.logger.info(`[calificarPrestador] Usuario ${userId} calificó servicio ${servicioId}. Liberando pago.`);
         servicioUpdate.paymentStatus = "liberado_al_proveedor";
         servicioUpdate.fechaLiberacionPago = admin.firestore.Timestamp.now();
         servicioUpdate.estado = "cerrado_con_calificacion";
       } else if (servicioData.estado !== "en_disputa") {
-        servicioUpdate.estado = "cerrado_con_calificacion"; // Si el pago ya fue liberado o no aplica
+        servicioUpdate.estado = "cerrado_con_calificacion"; 
       }
-
 
       transaction.update(servicioRef, servicioUpdate);
 
@@ -407,7 +400,7 @@ export const calificarUsuario = functions.https.onCall(async (data, context) => 
   }
 
   const servicioRef = db.collection("servicios").doc(servicioId);
-  const usuarioCollectionRef = db.collection("usuarios"); // Asumiendo colección 'usuarios'
+  const usuarioCollectionRef = db.collection("usuarios"); 
 
   try {
     return await db.runTransaction(async (transaction) => {
@@ -420,13 +413,12 @@ export const calificarUsuario = functions.https.onCall(async (data, context) => 
       if (servicioData.prestadorId !== prestadorId) {
         throw new functions.https.HttpsError("permission-denied", "No puedes calificar a este usuario para este servicio como prestador.");
       }
-      if (!servicioData.habilitarCalificacion) { // El usuario debe haber confirmado la finalización primero
+      if (!servicioData.habilitarCalificacion) { 
         throw new functions.https.HttpsError("failed-precondition", "La calificación mutua no está habilitada (el usuario debe confirmar el servicio primero).");
       }
-      if (servicioData.calificacionPrestador) { // Verifica si ya existe una calificación del prestador
+      if (servicioData.calificacionPrestador) { 
         throw new functions.https.HttpsError("already-exists", "Ya has calificado a este usuario para este servicio.");
       }
-       // Opcional: verificar si la ventana de calificación aún está abierta
       if (servicioData.ratingWindowExpiresAt && servicioData.ratingWindowExpiresAt.toDate() < new Date()) {
          throw new functions.https.HttpsError("failed-precondition", "El período para calificar a este usuario ha expirado.");
       }
@@ -441,7 +433,7 @@ export const calificarUsuario = functions.https.onCall(async (data, context) => 
       const usuarioDoc = await transaction.get(usuarioDocRef);
       let newRatingSum = calificacion;
       let newRatingCount = 1;
-      let userName = `Usuario ${servicioData.usuarioId.substring(0,5)}`; // Nombre por defecto
+      let userName = `Usuario ${servicioData.usuarioId.substring(0,5)}`; 
 
       if (usuarioDoc.exists) {
         const usuarioData = usuarioDoc.data() as UserData;
@@ -451,31 +443,22 @@ export const calificarUsuario = functions.https.onCall(async (data, context) => 
       }
       const currentRating = newRatingCount > 0 ? parseFloat((newRatingSum / newRatingCount).toFixed(2)) : 0;
 
-      transaction.set(usuarioDocRef, { // Usar set con merge:true para crear si no existe
-        uid: servicioData.usuarioId, // Guarda el UID por consistencia
+      transaction.set(usuarioDocRef, { 
+        uid: servicioData.usuarioId, 
         ratingSumUsuario: newRatingSum,
         ratingCountUsuario: newRatingCount,
-        ratingUsuario: currentRating, // Este es el promedioCalificacionesUsuario
-        name: userName, // Asegura que el nombre se guarde/actualice
-        lastRatedByProviderAt: admin.firestore.Timestamp.now(), // Campo opcional para rastreo
+        ratingUsuario: currentRating, 
+        name: userName, 
+        lastRatedByProviderAt: admin.firestore.Timestamp.now(), 
       }, { merge: true });
 
       const servicioUpdate: Partial<ServiceData> = {
         calificacionPrestador: nuevaCalificacionPrestador,
         updatedAt: admin.firestore.Timestamp.now(),
       };
-      if (servicioData.calificacionUsuario) { // Si el usuario ya calificó al prestador
+      if (servicioData.calificacionUsuario) { 
         servicioUpdate.mutualRatingCompleted = true;
-        // Si el servicio no está en disputa, y el pago está retenido, podría liberarse aquí.
-        // Sin embargo, la lógica de liberación de pago es más compleja y usualmente se maneja
-        // después de la ventana de disputas o por una acción de admin.
-        // Por ahora, solo marcamos la calificación mutua y actualizamos el estado si no está en disputa.
         if (servicioData.estado !== "en_disputa" && servicioData.paymentStatus === "retenido_para_liberacion") {
-           // Similar a calificarPrestador, si hay calificación mutua y no disputa, se podría liberar pago
-           // y cambiar estado a cerrado_con_calificacion.
-           // Pero esto se vuelve complejo, es mejor que simulateDailyAutomatedChecks lo maneje
-           // o una función de resolución de disputas.
-           // Solo actualizamos estado si no está en disputa.
            servicioUpdate.estado = "cerrado_con_calificacion";
         } else if (servicioData.estado !== "en_disputa") {
             servicioUpdate.estado = "cerrado_con_calificacion";
@@ -500,15 +483,14 @@ export const reportServiceIssue = functions.https.onCall(async (data, context) =
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
   }
-  const usuarioId = context.auth.uid; // El usuario autenticado es quien reporta
-  const { servicioId, detalleProblema } = data; // 'detalleProblema' es el motivo/comentario
+  const usuarioId = context.auth.uid; 
+  const { servicioId, detalleProblema } = data; 
 
   if (!servicioId || typeof servicioId !== "string" || !detalleProblema || typeof detalleProblema !== "string") {
     throw new functions.https.HttpsError("invalid-argument", "Se requieren 'servicioId' y 'detalleProblema' válidos.");
   }
 
   const servicioRef = db.collection("servicios").doc(servicioId);
-  // const reporteCollectionRef = db.collection("reportes"); // Colección de reclamos como pediste
 
   try {
     return await db.runTransaction(async (transaction) => {
@@ -521,7 +503,6 @@ export const reportServiceIssue = functions.https.onCall(async (data, context) =
       if (servicioData.usuarioId !== usuarioId) {
         throw new functions.https.HttpsError("permission-denied", "No estás autorizado para reportar un problema sobre este servicio (no eres el solicitante).");
       }
-      // Permitir reporte si el servicio está 'completado_por_usuario' y dentro de la ventana
       if (servicioData.estado !== "completado_por_usuario") {
         throw new functions.https.HttpsError("failed-precondition", `Solo se pueden reportar problemas de servicios que hayas confirmado ('completado_por_usuario'). Estado actual: ${servicioData.estado}`);
       }
@@ -533,27 +514,26 @@ export const reportServiceIssue = functions.https.onCall(async (data, context) =
       }
 
       const now = admin.firestore.Timestamp.now();
-      const reporteId = db.collection("reportes").doc().id; // Generar ID para el reporte
+      const reporteId = db.collection("reportes").doc().id; 
 
       transaction.update(servicioRef, {
         estado: "en_disputa",
-        paymentStatus: "congelado_por_disputa", // Congelar el pago
+        paymentStatus: "congelado_por_disputa", 
         detallesDisputa: {
           reportadoEn: now,
           detalle: detalleProblema,
-          reporteId: reporteId, // Guardar ID del documento en "reportes"
+          reporteId: reporteId, 
         },
         updatedAt: now,
       });
 
-      // Crear el documento en la colección 'reportes'
       const datosReporte = {
         servicioId: servicioId,
         usuarioId: usuarioId,
         prestadorId: servicioData.prestadorId,
-        motivo: detalleProblema, // Puedes tener campos más específicos si lo necesitas
+        motivo: detalleProblema, 
         fechaReporte: now,
-        estado: "pendiente", // Estado inicial del reporte en la colección 'reportes'
+        estado: "pendiente", 
       };
       transaction.set(db.collection("reportes").doc(reporteId), datosReporte);
 
@@ -586,21 +566,20 @@ export const obtenerServiciosCompletados = functions.https.onCall(async (data, c
   try {
     const querySnapshot = await db
       .collection("servicios")
-      .where("usuarioId", "==", usuarioId) // Solo servicios del usuario autenticado
-      .where("estado", "==", "completado_por_usuario") // Solo los que el usuario marcó como completados
-      .orderBy("fechaConfirmacion", "desc") // Opcional: ordenar por fecha de confirmación
+      .where("usuarioId", "==", usuarioId) 
+      .where("estado", "==", "completado_por_usuario") 
+      .orderBy("fechaConfirmacion", "desc") 
       .get();
 
-    const serviciosCompletados: Partial<ServiceData>[] = []; // Usar Partial para flexibilidad
+    const serviciosCompletados: Partial<ServiceData>[] = []; 
     querySnapshot.forEach((doc) => {
       const servicio = doc.data() as ServiceData;
       serviciosCompletados.push({
         id: doc.id,
         estado: servicio.estado,
         prestadorId: servicio.prestadorId,
-        fechaConfirmacion: servicio.fechaConfirmacion, // O userConfirmedCompletionAt
+        fechaConfirmacion: servicio.fechaConfirmacion, 
         detallesServicio: servicio.detallesServicio,
-        // Puedes añadir más campos según necesites en el frontend
       });
     });
     functions.logger.info(`Encontrados ${serviciosCompletados.length} servicios completados por usuario ${usuarioId}.`);
@@ -631,16 +610,13 @@ export const registrarDocumentoProfesional = functions.https.onCall(async (data,
     urlDocumento: urlDocumento,
     ...(descripcion && { descripcion: descripcion }),
     fechaRegistro: admin.firestore.Timestamp.now(),
-    estadoVerificacion: "pendiente", // Estado inicial
+    estadoVerificacion: "pendiente", 
   };
 
   try {
-    // Usar una transacción para asegurar atomicidad si el documento del prestador no existe
     await db.runTransaction(async (transaction) => {
       const prestadorDoc = await transaction.get(prestadorRef);
       if (!prestadorDoc.exists) {
-        // Si el prestador no existe, se puede crear aquí o lanzar un error.
-        // Por ahora, lo crearemos con el documento.
         functions.logger.info(`Documento del prestador ${prestadorId} no encontrado, creando uno nuevo con el documento.`);
         transaction.set(prestadorRef, { documentosVerificables: [nuevoDocumento], uid: prestadorId, name: `Prestador ${prestadorId.substring(0,5)}` });
       } else {
@@ -664,9 +640,7 @@ export const registrarDocumentoProfesional = functions.https.onCall(async (data,
 export const verificarDocumentoProfesional = functions.https.onCall(async (data, context) => {
   functions.logger.info("Iniciando verificarDocumentoProfesional (antes validateDocumentAndRemoveContactInfo)", { structuredData: true, data });
 
-  // En un sistema real, esta función debería ser llamada por un admin o un proceso automatizado.
-  // Por ahora, la dejamos callable pero podrías restringirla a roles específicos.
-  if (!context.auth || (!context.auth.token.admin && !context.auth.token.moderador)) { // Ejemplo de restricción de rol
+  if (!context.auth || (!context.auth.token.admin && !context.auth.token.moderador)) { 
      throw new functions.https.HttpsError("permission-denied", "Solo administradores o moderadores pueden ejecutar esta función.");
   }
 
@@ -692,27 +666,21 @@ export const verificarDocumentoProfesional = functions.https.onCall(async (data,
       }
 
       const documentoAVerificar = documentos[documentoIndex];
-      // Permitir reprocesar si fue rechazado por IA o está pendiente.
       const validPreviousStatesForIA: DocumentoVerificable["estadoVerificacion"][] = ["pendiente", "rechazado_ia", "Rechazado por datos sensibles detectados"];
       if (!validPreviousStatesForIA.includes(documentoAVerificar.estadoVerificacion) ) {
          functions.logger.warn(`Documento ${documentoIndex} para ${prestadorId} no está en estado procesable por IA. Estado actual: ${documentoAVerificar.estadoVerificacion}`);
-         // No es un error, simplemente no se procesa. Se podría devolver un mensaje.
          return { success: false, message: `El documento ya fue procesado manualmente o validado por IA. Estado actual: ${documentoAVerificar.estadoVerificacion}` };
       }
-
 
       const urlDocumento = documentoAVerificar.urlDocumento;
       functions.logger.info(`Iniciando análisis de Vision API para documento: ${urlDocumento}`);
       let textoExtraido = "";
       try {
-        // Asegúrate de que la URL sea accesible públicamente o una gs:// URL
-        // y que la cuenta de servicio de la función tenga permisos para leerla.
         const [result] = await visionClient.documentTextDetection(urlDocumento);
         textoExtraido = result.fullTextAnnotation?.text?.toLowerCase() || "";
         functions.logger.info(`Texto extraído (primeros 500 chars): ${textoExtraido.substring(0, 500)}`);
       } catch (visionError: any) {
         functions.logger.error("Error de Vision API al procesar el documento:", visionError);
-        // Marcar como rechazado por IA si Vision falla
         documentos[documentoIndex].estadoVerificacion = "rechazado_ia";
         documentos[documentoIndex].motivoRechazoIA = `Error de Vision API: ${visionError.message || "Desconocido"}`;
         documentos[documentoIndex].fechaVerificacion = admin.firestore.Timestamp.now();
@@ -720,20 +688,17 @@ export const verificarDocumentoProfesional = functions.https.onCall(async (data,
         throw new functions.https.HttpsError("internal", "Error al analizar el documento con Vision API.", visionError.message);
       }
 
-      // Combinar descripción, tipo de documento y texto extraído para el análisis
       const textoParaAnalizar = `${documentoAVerificar.descripcion?.toLowerCase() || ""} ${documentoAVerificar.tipoDocumento?.toLowerCase() || ""} ${textoExtraido}`;
       let datosSensiblesEncontrados = false;
       const palabrasDetectadas: string[] = [];
 
-      // Regex para teléfonos de 10 dígitos (México), opcionalmente con +52 o LADA entre paréntesis
-      const phoneRegex = /(?:(?:\+|00)52\s?)?(?:\(\d{2,3}\)\s?)?(?:[ -]?\d){7,10}/g; // Ajustada para números de 10 dígitos, opcionalmente con +52
+      const phoneRegex = /(?:(?:\+|00)52\s?)?(?:\(\d{2,3}\)\s?)?(?:[ -]?\d){7,10}/g; 
       const phoneMatches = textoParaAnalizar.match(phoneRegex);
       if (phoneMatches) {
         datosSensiblesEncontrados = true;
         palabrasDetectadas.push(...phoneMatches.map((m) => `Teléfono: ${m.trim()}`));
       }
 
-      // Regex para emails
       const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
       const emailMatches = textoParaAnalizar.match(emailRegex);
       if (emailMatches) {
@@ -741,20 +706,15 @@ export const verificarDocumentoProfesional = functions.https.onCall(async (data,
         palabrasDetectadas.push(...emailMatches.map((m) => `Email: ${m.trim()}`));
       }
       
-      // Búsqueda de palabras clave prohibidas (para direcciones, etc.)
       for (const palabra of PALABRAS_CLAVE_PROHIBIDAS_CONTACTO) {
-          // Usar una expresión regular para buscar la palabra completa y evitar subcadenas
-          // \b asegura que sea una palabra completa
           const palabraRegex = new RegExp(`\\b${palabra.toLowerCase()}\\b`, "g");
           if (palabraRegex.test(textoParaAnalizar)) {
-            // Asegurarse de no añadir duplicados si ya fue detectado por regex de email/teléfono
             if (!palabrasDetectadas.some(pd => pd.toLowerCase().includes(palabra.toLowerCase()))) {
                 datosSensiblesEncontrados = true;
                 palabrasDetectadas.push(`Palabra clave: ${palabra}`);
             }
           }
       }
-
 
       documentos[documentoIndex].fechaVerificacion = admin.firestore.Timestamp.now();
       let nuevoEstado: DocumentoVerificable["estadoVerificacion"];
@@ -767,9 +727,9 @@ export const verificarDocumentoProfesional = functions.https.onCall(async (data,
         mensajeRespuesta = "Rechazado: Se detectaron datos de contacto en el documento.";
         functions.logger.info(`Documento ${documentoIndex} para prestador ${prestadorId} RECHAZADO. Palabras: ${palabrasDetectadas.join(", ")}`);
       } else {
-        nuevoEstado = "Validado"; // Anteriormente "verificado_ia"
-        documentos[documentoIndex].motivoRechazoIA = undefined; // Limpiar motivo si es validado
-        documentos[documentoIndex].palabrasClaveDetectadasIA = undefined; // Limpiar palabras
+        nuevoEstado = "Validado"; 
+        documentos[documentoIndex].motivoRechazoIA = undefined; 
+        documentos[documentoIndex].palabrasClaveDetectadasIA = undefined; 
         mensajeRespuesta = "Validado correctamente: No se detectaron datos de contacto.";
         functions.logger.info(`Documento ${documentoIndex} para prestador ${prestadorId} VALIDADO.`);
       }
@@ -777,7 +737,6 @@ export const verificarDocumentoProfesional = functions.https.onCall(async (data,
 
       transaction.update(prestadorRef, { documentosVerificables: documentos });
 
-      // Guardar un log de la verificación
       await db.collection("verificacionesIA").add({
         prestadorId,
         documentoUrl: urlDocumento,
@@ -787,9 +746,8 @@ export const verificarDocumentoProfesional = functions.https.onCall(async (data,
         resultadoIA: nuevoEstado,
         textoAnalizadoLength: textoParaAnalizar.length,
         palabrasClaveDetectadas: datosSensiblesEncontrados ? palabrasDetectadas : [],
-        agenteVerificador: context.auth?.uid || "sistema_ia_callable", // Quién llamó la función
+        agenteVerificador: context.auth?.uid || "sistema_ia_callable", 
       });
-
 
       functions.logger.info(`Documento ${documentoIndex} para prestador ${prestadorId} actualizado a estado: ${nuevoEstado}.`);
       return { success: true, message: mensajeRespuesta, newState: nuevoEstado, palabrasDetectadas: datosSensiblesEncontrados ? palabrasDetectadas : [] };
@@ -809,7 +767,6 @@ export const activarGarantiaPremium = functions.https.onCall(async (data, contex
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
   }
-  // Asumiendo que el custom claim 'premium' se propaga al token
   if (context.auth.token.premium !== true) { 
     throw new functions.https.HttpsError("permission-denied", "Esta función es solo para usuarios premium.");
   }
@@ -821,7 +778,7 @@ export const activarGarantiaPremium = functions.https.onCall(async (data, contex
   }
 
   const servicioRef = db.collection("servicios").doc(servicioId);
-  const garantiasRef = db.collection("garantias"); // Nueva colección para las solicitudes de garantía
+  const garantiasRef = db.collection("garantias"); 
 
   try {
     return await db.runTransaction(async (transaction) => {
@@ -837,45 +794,40 @@ export const activarGarantiaPremium = functions.https.onCall(async (data, contex
       if (servicioData.estado !== "completado_por_usuario") {
         throw new functions.https.HttpsError("failed-precondition", "La garantía solo puede activarse para servicios confirmados por el usuario.");
       }
-      if (servicioData.garantiaSolicitada === true) { // Evitar múltiples solicitudes
+      if (servicioData.garantiaSolicitada === true) { 
         throw new functions.https.HttpsError("already-exists", "Ya se ha solicitado una garantía para este servicio.");
       }
       
-      // Verificar si la garantía está dentro del período
-      const warrantyEndDateString = servicioData.warrantyEndDate; // YYYY-MM-DD
+      const warrantyEndDateString = servicioData.warrantyEndDate; 
       if (!warrantyEndDateString) {
         throw new functions.https.HttpsError("failed-precondition", "No se encontró fecha de fin de garantía para este servicio.");
       }
       const warrantyEndDate = new Date(warrantyEndDateString);
       const currentDate = new Date();
-      warrantyEndDate.setHours(23, 59, 59, 999); // Asegurar que cubra todo el día
+      warrantyEndDate.setHours(23, 59, 59, 999); 
       if (currentDate > warrantyEndDate) {
         throw new functions.https.HttpsError("failed-precondition", `El período de garantía ha expirado. Finalizó el ${warrantyEndDateString}.`);
       }
 
-
-      // Crear el nuevo documento en la colección 'garantias'
-      const nuevaSolicitudGarantiaRef = garantiasRef.doc(); // Firestore genera un ID automático
+      const nuevaSolicitudGarantiaRef = garantiasRef.doc(); 
       const nuevaGarantiaData: GarantiaData = {
         servicioId: servicioId,
         usuarioId: usuarioId,
-        prestadorId: servicioData.prestadorId, // Guardar ID del prestador para referencia
+        prestadorId: servicioData.prestadorId, 
         motivo: motivo,
         fechaSolicitudGarantia: admin.firestore.FieldValue.serverTimestamp() as admin.firestore.Timestamp,
-        estadoGarantia: "pendiente", // Estado inicial
+        estadoGarantia: "pendiente", 
       };
       transaction.set(nuevaSolicitudGarantiaRef, nuevaGarantiaData);
 
-      // Actualizar el documento del servicio para marcar que se solicitó la garantía
       transaction.update(servicioRef, {
         garantiaSolicitada: true,
-        idSolicitudGarantia: nuevaSolicitudGarantiaRef.id, // Guardar el ID de la solicitud de garantía
+        idSolicitudGarantia: nuevaSolicitudGarantiaRef.id, 
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
       functions.logger.info(`Garantía premium activada para servicio ${servicioId}. Garantía ID: ${nuevaSolicitudGarantiaRef.id}`);
-      // SIMULACIÓN: Notificar al admin/equipo de soporte sobre la nueva solicitud de garantía.
-
+      
       return {
         success: true,
         message: "Solicitud de garantía premium activada exitosamente.",
@@ -893,12 +845,11 @@ export const activarGarantiaPremium = functions.https.onCall(async (data, contex
 
 export const resolverGarantiaPremium = functions.https.onCall(async (data, context) => {
   functions.logger.info("Iniciando resolverGarantiaPremium", { structuredData: true, data });
-  // Verificar rol de admin/moderador
-  if (!context.auth || (!context.auth.token.admin && !context.auth.token.moderador)) { // Ajusta los nombres de los claims si son diferentes
+  if (!context.auth || (!context.auth.token.admin && !context.auth.token.moderador)) { 
     throw new functions.https.HttpsError("permission-denied", "No tienes permisos para resolver garantías.");
   }
 
-  const { garantiaId, decision, comentarioResolucion } = data; // decision: "aprobada" o "rechazada"
+  const { garantiaId, decision, comentarioResolucion } = data; 
   if (!garantiaId || typeof garantiaId !== "string" || !decision || (decision !== "aprobada" && decision !== "rechazada")) {
     throw new functions.https.HttpsError("invalid-argument", "Se requieren 'garantiaId' y una 'decision' válida ('aprobada' o 'rechazada').");
   }
@@ -913,7 +864,6 @@ export const resolverGarantiaPremium = functions.https.onCall(async (data, conte
       }
       const garantiaData = garantiaDoc.data() as GarantiaData;
 
-      // Verificar que la garantía esté en un estado resoluble
       const validPreviousStates: GarantiaData["estadoGarantia"][] = ["pendiente", "en_revision"];
       if (!validPreviousStates.includes(garantiaData.estadoGarantia)) {
         throw new functions.https.HttpsError("failed-precondition", `La garantía ya ha sido resuelta o está en un estado inválido (${garantiaData.estadoGarantia}).`);
@@ -923,26 +873,23 @@ export const resolverGarantiaPremium = functions.https.onCall(async (data, conte
         estadoGarantia: decision,
         fechaResolucionGarantia: admin.firestore.Timestamp.now(),
         resolucionDetalles: comentarioResolucion || "",
-        resueltaPor: context.auth?.uid, // UID del admin/moderador
+        resueltaPor: context.auth?.uid, 
       };
       transaction.update(garantiaRef, updateGarantiaData);
 
-      // Actualizar el servicio relacionado
       const servicioRef = db.collection("servicios").doc(garantiaData.servicioId);
       const servicioUpdateData: Partial<ServiceData> = {
         garantiaResultado: decision,
         updatedAt: admin.firestore.Timestamp.now(),
       };
       if (decision === "aprobada") {
-        servicioUpdateData.compensacionAutorizada = true; // O la lógica que decidas para compensación
-        // SIMULACIÓN: Aquí podrías iniciar un proceso de reembolso, crédito, etc.
+        servicioUpdateData.compensacionAutorizada = true; 
         functions.logger.info(`Garantía ${garantiaId} aprobada. SIMULACIÓN: Iniciar proceso de compensación/reembolso para servicio ${garantiaData.servicioId}.`);
-      } else { // rechazada
+      } else { 
          servicioUpdateData.compensacionAutorizada = false;
       }
       transaction.update(servicioRef, servicioUpdateData);
 
-      // SIMULACIÓN: Notificar al usuario y al prestador sobre la resolución de la garantía.
       functions.logger.info(`Garantía ${garantiaId} resuelta como '${decision}' por admin ${context.auth?.uid}.`);
       return { success: true, message: `Solicitud de garantía ${decision} exitosamente.` };
     });
@@ -955,41 +902,39 @@ export const resolverGarantiaPremium = functions.https.onCall(async (data, conte
 
 
 export const simulateDailyAutomatedChecks = functions.pubsub
-  .schedule("every 24 hours") // Puedes ajustar la frecuencia
-  // .timeZone("America/Mexico_City") // Opcional: Especifica tu zona horaria
+  .schedule("every 24 hours") 
   .onRun(async (context) => {
     functions.logger.info("Ejecutando simulateDailyAutomatedChecks", { timestamp: context.timestamp });
     const now = admin.firestore.Timestamp.now();
-    const threeDaysAgoDate = new Date(now.toDate().getTime() - RATING_AND_DISPUTE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-    const threeDaysAgoTimestamp = admin.firestore.Timestamp.fromDate(threeDaysAgoDate);
+    const windowDays = RATING_AND_DISPUTE_WINDOW_DAYS; // Ahora 3 días
+    const windowLimitDate = new Date(now.toDate().getTime() - windowDays * 24 * 60 * 60 * 1000);
+    const windowLimitTimestamp = admin.firestore.Timestamp.fromDate(windowLimitDate);
 
     const serviciosRef = db.collection("servicios");
     const batch = db.batch();
     let processedCount = 0;
 
-    // Caso 1: Liberar pagos de servicios completados por usuario sin reclamo ni calificación después de 3 días
-    functions.logger.info(`[DailyCheck] Buscando servicios para cierre automático (ventana de ${RATING_AND_DISPUTE_WINDOW_DAYS} días). Límite de fecha: ${threeDaysAgoDate.toISOString()}`);
+    functions.logger.info(`[DailyCheck] Buscando servicios para cierre automático (ventana de ${windowDays} días). Límite de fecha: ${windowLimitDate.toISOString()}`);
 
     const queryPagosPendientes = serviciosRef
       .where("estado", "==", "completado_por_usuario")
       .where("paymentStatus", "==", "retenido_para_liberacion")
-      // Comparamos con userConfirmedCompletionAt, que debe ser establecido por confirmServiceCompletionByUserService
-      .where("userConfirmedCompletionAt", "<=", threeDaysAgoTimestamp); 
+      .where("userConfirmedCompletionAt", "<=", windowLimitTimestamp); 
 
     try {
       const snapshotPagos = await queryPagosPendientes.get();
-      functions.logger.info(`[DailyCheck] Encontrados ${snapshotPagos.size} servicios 'completado_por_usuario' con pago 'retenido_para_liberacion' y confirmados hace más de ${RATING_AND_DISPUTE_WINDOW_DAYS} días.`);
+      functions.logger.info(`[DailyCheck] Encontrados ${snapshotPagos.size} servicios 'completado_por_usuario' con pago 'retenido_para_liberacion' y confirmados hace más de ${windowDays} días.`);
       
       snapshotPagos.forEach((doc) => {
         const servicio = doc.data() as ServiceData;
         functions.logger.log(`[DailyCheck] Procesando servicio para cierre automático: ${doc.id}. Estado: ${servicio.estado}, userConfirmedCompletionAt: ${servicio.userConfirmedCompletionAt?.toDate().toISOString()}`);
         
-        // Doble chequeo por seguridad y lógica explícita
         if (
-          servicio.estado === "completado_por_usuario" &&
+          servicio.estado === "completado_por_usuario" && // Doble chequeo
           servicio.paymentStatus === "retenido_para_liberacion" &&
-          !servicio.calificacionUsuario && // El usuario no ha calificado
-          servicio.userConfirmedCompletionAt && servicio.userConfirmedCompletionAt.toDate() <= threeDaysAgoDate
+          !servicio.calificacionUsuario && 
+          !servicio.detallesDisputa && // Asegurarse que no haya una disputa activa
+          servicio.userConfirmedCompletionAt && servicio.userConfirmedCompletionAt.toDate() <= windowLimitDate
         ) {
           functions.logger.info(`[DailyCheck] CERRANDO AUTOMÁTICAMENTE Y LIBERANDO PAGO para servicio ${doc.id}. Proveedor: ${servicio.prestadorId}.`);
           batch.update(doc.ref, {
@@ -999,22 +944,17 @@ export const simulateDailyAutomatedChecks = functions.pubsub
             updatedAt: now,
           });
           processedCount++;
-          // SIMULACIÓN: Notificar al prestador sobre la liberación del pago.
-          // SIMULACIÓN: Notificar al usuario que el servicio se cerró automáticamente.
         } else {
-           functions.logger.log(`[DailyCheck] Servicio ${doc.id} no cumple todas las condiciones para cierre automático (p.ej. ya calificado o fecha no coincide). calificacionUsuario: ${!!servicio.calificacionUsuario}`);
+           functions.logger.log(`[DailyCheck] Servicio ${doc.id} no cumple todas las condiciones para cierre automático (ya calificado, en disputa o fecha no coincide). calificacionUsuario: ${!!servicio.calificacionUsuario}, detallesDisputa: ${!!servicio.detallesDisputa}`);
         }
       });
     } catch (error) {
       functions.logger.error("[DailyCheck] Error consultando servicios para liberación de pago automática:", error);
     }
     
-    // Caso 2: Liberar pagos para servicios que ya fueron calificados por el usuario pero el pago aún está retenido
-    // (Fallback por si la liberación no ocurrió inmediatamente al calificar)
     const queryCalificadosPagoRetenido = serviciosRef
-        .where("estado", "==", "cerrado_con_calificacion") // Ya fue calificado por el usuario
+        .where("estado", "==", "cerrado_con_calificacion") 
         .where("paymentStatus", "==", "retenido_para_liberacion");
-        // No necesitamos un filtro de tiempo aquí, si está calificado y el pago retenido, intentamos liberar.
 
     try {
         const snapshotCalificados = await queryCalificadosPagoRetenido.get();
@@ -1022,8 +962,7 @@ export const simulateDailyAutomatedChecks = functions.pubsub
 
         snapshotCalificados.forEach(doc => {
             const servicio = doc.data() as ServiceData;
-            // Asegurarse de que no esté en disputa, aunque el estado 'cerrado_con_calificacion' ya debería implicarlo.
-            if (servicio.estado !== "en_disputa") {
+            if (servicio.estado !== "en_disputa") { // Asegurarse de que no esté en disputa
                 functions.logger.info(`[DailyCheck] LIBERANDO PAGO (fallback) para servicio calificado ${doc.id}. Proveedor: ${servicio.prestadorId}.`);
                 batch.update(doc.ref, {
                     paymentStatus: "liberado_al_proveedor",
@@ -1031,13 +970,11 @@ export const simulateDailyAutomatedChecks = functions.pubsub
                     updatedAt: now,
                 });
                 processedCount++;
-                // SIMULACIÓN: Notificar al prestador.
             }
         });
     } catch (error) {
         functions.logger.error("[DailyCheck] Error consultando servicios calificados con pago retenido:", error);
     }
-
 
     if (processedCount > 0) {
       try {
@@ -1059,9 +996,9 @@ export const updateProviderRealtimeStatus = functions.https.onCall(async (data, 
     functions.logger.error("Usuario no autenticado intentando actualizar estado.");
     throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado (prestador).");
   }
-  const providerId = context.auth.uid; // El ID del proveedor es el UID del usuario autenticado
+  const providerId = context.auth.uid; 
 
-  const { isAvailable, location } = data; // location es { lat: number, lng: number }
+  const { isAvailable, location } = data; 
 
   if (typeof isAvailable !== "boolean") {
     functions.logger.error("El parámetro 'isAvailable' debe ser un booleano.", { isAvailable });
@@ -1070,7 +1007,7 @@ export const updateProviderRealtimeStatus = functions.https.onCall(async (data, 
 
   const providerRef = db.collection("prestadores").doc(providerId);
   const now = admin.firestore.Timestamp.now();
-  const updates: Partial<ProviderData> = { // Usar Partial para construir el objeto de actualización
+  const updates: Partial<ProviderData> = { 
     isAvailable: isAvailable,
     lastConnection: now,
   };
@@ -1083,14 +1020,14 @@ export const updateProviderRealtimeStatus = functions.https.onCall(async (data, 
     updates.currentLocation = {
       lat: location.lat,
       lng: location.lng,
-      timestamp: now, // Guardar timestamp de la ubicación
+      timestamp: now, 
     };
   } else {
-    updates.currentLocation = null; // O admin.firestore.FieldValue.delete() para borrar el campo
+    updates.currentLocation = null; 
   }
 
   try {
-    await providerRef.set(updates, { merge: true }); // Usar set con merge:true para crear/actualizar
+    await providerRef.set(updates, { merge: true }); 
     functions.logger.info(`Estado de prestador ${providerId} actualizado exitosamente a ${isAvailable ? "disponible" : "no disponible"}.`);
     return { success: true, message: `Estado actualizado a ${isAvailable ? "disponible" : "no disponible"}.` };
   } catch (error: any) {
@@ -1106,34 +1043,31 @@ export const disconnectProvider = functions.https.onCall(async (data, context) =
     functions.logger.error("Usuario no autenticado intentando desconectarse.");
     throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado (prestador).");
   }
-  const providerId = context.auth.uid; // El ID del proveedor es el UID del usuario autenticado
+  const providerId = context.auth.uid; 
 
   const providerRef = db.collection("prestadores").doc(providerId);
   const now = admin.firestore.Timestamp.now();
 
   const updates: Partial<ProviderData> = {
     isAvailable: false,
-    currentLocation: null, // Borrar la ubicación actual
+    currentLocation: null, 
     lastConnection: now,
   };
 
   try {
-    // Es buena práctica verificar si el documento existe antes de actualizar,
-    // o usar set con merge:true si queremos crearlo si no existe.
     const providerDoc = await providerRef.get();
     if (!providerDoc.exists) {
-      // Podrías crear un perfil básico si no existe, o simplemente registrar un log/error.
       functions.logger.warn(`Prestador ${providerId} no encontrado. Se creará perfil básico y se desconectará.`);
       await providerRef.set({ 
         uid: providerId,
-        name: context.auth.token.name || `Prestador ${providerId.substring(0,5)}`, // Nombre de ejemplo
+        name: context.auth.token.name || `Prestador ${providerId.substring(0,5)}`, 
         isAvailable: false,
         currentLocation: null,
         lastConnection: now,
-        rating: 0, // Valores iniciales
+        rating: 0, 
         ratingCount: 0,
         ratingSum: 0,
-        allowsHourlyServices: false, // Valor por defecto
+        allowsHourlyServices: false, 
       });
       return { success: true, message: "Perfil no encontrado, se creó y desconectó." };
     }
@@ -1150,28 +1084,28 @@ export const disconnectProvider = functions.https.onCall(async (data, context) =
 export const verificarEstadoFunciones = functions.https.onCall(async (data, context) => {
   functions.logger.info("Iniciando verificarEstadoFunciones", { structuredData: true });
 
-  // Lista de los nombres de las funciones exportadas que se espera verificar
   const NOMBRES_FUNCIONES_ESPERADAS = [
-    "confirmServiceCompletionByUserService", // Callable
-    "calificarPrestador",                  // Callable
-    "calificarUsuario",                    // Callable
-    "reportServiceIssue",                  // Callable (Alias de reportarProblemaServicio)
-    "obtenerServiciosCompletados",         // Callable
-    "registrarDocumentoProfesional",       // Callable
-    "verificarDocumentoProfesional",       // Callable (antes validateDocumentAndRemoveContactInfo)
-    "activarGarantiaPremium",              // Callable
-    "resolverGarantiaPremium",             // Callable
-    "simulateDailyAutomatedChecks",        // PubSub (Programada)
-    "updateProviderRealtimeStatus",        // Callable
-    "disconnectProvider",                  // Callable
-    "agendarCita",                         // Callable
-    "cancelarCita",                        // Callable (Reemplazó a cancelarCitaAgendada)
-    "confirmarCitaPorPrestador",           // Callable
-    "procesarCobroTrasConfirmacion",       // Callable
-    "reportarProblemaServicio",            // Callable
-    "crearNotificacion",                   // Callable
-    "enviarNotificacionInAppTrigger",      // Firestore Trigger
-    "verificarEstadoFunciones",            // Callable (esta misma función)
+    "confirmServiceCompletionByUserService", 
+    "calificarPrestador",                  
+    "calificarUsuario",                    
+    "reportServiceIssue",                  
+    "obtenerServiciosCompletados",         
+    "registrarDocumentoProfesional",       
+    "verificarDocumentoProfesional",       
+    "activarGarantiaPremium",              
+    "resolverGarantiaPremium",             
+    "simulateDailyAutomatedChecks",        
+    "updateProviderRealtimeStatus",        
+    "disconnectProvider",                  
+    "agendarCita",                         
+    "cancelarCita",                       
+    "confirmarCitaPorPrestador",           
+    "procesarCobroTrasConfirmacion",       
+    "reportarProblemaServicio",            
+    "crearNotificacion",                   
+    "enviarNotificacionInAppTrigger",      
+    "notificarLiberacionPagoAutomatica",   // Función recién añadida
+    "verificarEstadoFunciones",            
   ];
 
   const estadoFunciones: any[] = [];
@@ -1181,11 +1115,10 @@ export const verificarEstadoFunciones = functions.https.onCall(async (data, cont
     const funcionExportada = (exports as any)[nombreFuncion];
     const presenteEnCodigo = typeof funcionExportada === "function";
     
-    // Considerar críticas todas las funciones callable y el trigger de notificación
-    // La función programada (simulateDailyAutomatedChecks) y esta misma (verificarEstadoFunciones)
-    // podrían ser menos críticas para el "funcionamiento básico" si así lo decides.
     if (!presenteEnCodigo && 
         nombreFuncion !== "simulateDailyAutomatedChecks" && 
+        nombreFuncion !== "enviarNotificacionInAppTrigger" && 
+        nombreFuncion !== "notificarLiberacionPagoAutomatica" && 
         nombreFuncion !== "verificarEstadoFunciones") {
       todasLasFuncionesCriticasPresentes = false;
     }
@@ -1193,10 +1126,9 @@ export const verificarEstadoFunciones = functions.https.onCall(async (data, cont
     estadoFunciones.push({
       nombre: nombreFuncion,
       presenteEnCodigo: presenteEnCodigo,
-      tipo: (typeof funcionExportada), // "function"
+      tipo: (typeof funcionExportada), 
       esPubSub: nombreFuncion === "simulateDailyAutomatedChecks",
-      esFirestoreTrigger: nombreFuncion === "enviarNotificacionInAppTrigger",
-      // Los siguientes son datos simulados ya que no podemos obtenerlos programáticamente desde otra función
+      esFirestoreTrigger: nombreFuncion === "enviarNotificacionInAppTrigger" || nombreFuncion === "notificarLiberacionPagoAutomatica",
       estadoDespliegueSimulado: presenteEnCodigo ? "Asumido Habilitada si Presente en código y desplegada" : "Ausente en Código",
       ultimaActualizacionSimulada: "N/D (Consultar en GCP Console)",
       erroresDetectadosSimulado: "N/D (Revisar Cloud Logging y GCP Console)",
@@ -1224,15 +1156,15 @@ export const agendarCita = functions.https.onCall(async (data, context) => {
   const usuarioId = context.auth.uid;
   const {
     prestadorId,
-    fechaSolicitada, // YYYY-MM-DD
-    horaSolicitada,   // HH:MM
+    fechaSolicitada, 
+    horaSolicitada,   
     detallesServicio,
-    ubicacion, // { tipo: "actual" | "personalizada"; direccion?: string; lat?: number; lng?: number }
+    ubicacion, 
     notasAdicionales,
-    serviceType, // "fixed" o "hourly"
-    precioServicio, // para fixed
-    tarifaPorHora, // para hourly
-    duracionHoras, // para hourly
+    serviceType, 
+    precioServicio, 
+    tarifaPorHora, 
+    duracionHoras, 
   } = data;
 
   if (!prestadorId || !fechaSolicitada || !horaSolicitada || !detallesServicio || !serviceType) {
@@ -1245,8 +1177,6 @@ export const agendarCita = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError("invalid-argument", "Se requieren 'tarifaPorHora' y 'duracionHoras' válidas para citas de tipo 'hourly'.");
   }
 
-
-  // Validación robusta de fecha y hora
   const regexFecha = /^\d{4}-\d{2}-\d{2}$/;
   const regexHora = /^\d{2}:\d{2}$/;
 
@@ -1256,18 +1186,13 @@ export const agendarCita = functions.https.onCall(async (data, context) => {
 
   let fechaHoraSolicitadaConvertida: admin.firestore.Timestamp;
   try {
-    // Asumimos que fechaSolicitada y horaSolicitada están en la zona horaria local del servidor/usuario.
-    // Para consistencia, es mejor manejar todo en UTC o con una librería de fechas robusta.
-    // Por ahora, creamos el Date object directamente.
     const [year, month, day] = fechaSolicitada.split("-").map(Number);
     const [hour, minute] = horaSolicitada.split(":").map(Number);
-    // OJO: Los meses en JS Date son 0-indexados (0=Enero, 11=Diciembre)
     const dateObject = new Date(Date.UTC(year, month - 1, day, hour, minute)); 
     if (isNaN(dateObject.getTime())) {
       throw new Error("Fecha u hora inválida después de la conversión.");
     }
-    // Verificar que la fecha no sea en el pasado (comparando con la hora actual en UTC)
-    const nowUtc = new Date(new Date().toISOString().slice(0,-1)); // Obtener UTC actual sin milisegundos para comparación más simple
+    const nowUtc = new Date(new Date().toISOString().slice(0,-1)); 
     if (dateObject < nowUtc) {
       throw new functions.https.HttpsError("invalid-argument", "No puedes agendar una cita en una fecha u hora pasada.");
     }
@@ -1277,15 +1202,13 @@ export const agendarCita = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError("invalid-argument", `Error procesando fecha y hora: ${e.message}`);
   }
 
-
   const citasRef = db.collection("citas");
 
   try {
-    // Verificar conflicto de horario para el prestador
     const conflictoQuery = citasRef
       .where("prestadorId", "==", prestadorId)
       .where("fechaHoraSolicitada", "==", fechaHoraSolicitadaConvertida)
-      .where("estado", "in", ["pendiente_confirmacion", "confirmada_prestador", "pagada", "servicio_iniciado", "en_camino_proveedor"]); // Estados que implican ocupado
+      .where("estado", "in", ["pendiente_confirmacion", "confirmada_prestador", "pagada", "servicio_iniciado", "en_camino_proveedor"]); 
 
     const conflictoSnapshot = await conflictoQuery.get();
     if (!conflictoSnapshot.empty) {
@@ -1293,7 +1216,6 @@ export const agendarCita = functions.https.onCall(async (data, context) => {
       throw new functions.https.HttpsError("failed-precondition", "El prestador ya tiene una cita agendada o confirmada en este horario. Por favor, elige otro.");
     }
 
-    // Calcular montoTotalEstimado
     let montoTotalEstimado = 0;
     if (serviceType === "fixed") {
       montoTotalEstimado = precioServicio as number;
@@ -1301,8 +1223,7 @@ export const agendarCita = functions.https.onCall(async (data, context) => {
       montoTotalEstimado = (tarifaPorHora as number) * (duracionHoras as number);
     }
 
-
-    const nuevaCitaData: Partial<CitaData> = { // Usar Partial para construir el objeto gradualmente
+    const nuevaCitaData: Partial<CitaData> = { 
       usuarioId: usuarioId,
       prestadorId: prestadorId,
       fechaHoraSolicitada: fechaHoraSolicitadaConvertida,
@@ -1316,7 +1237,7 @@ export const agendarCita = functions.https.onCall(async (data, context) => {
 
     if (serviceType === "fixed") {
       nuevaCitaData.precioServicio = precioServicio;
-    } else { // hourly
+    } else { 
       nuevaCitaData.tarifaPorHora = tarifaPorHora;
       nuevaCitaData.duracionHoras = duracionHoras;
     }
@@ -1326,8 +1247,6 @@ export const agendarCita = functions.https.onCall(async (data, context) => {
 
     const citaRef = await citasRef.add(nuevaCitaData);
     functions.logger.info(`Cita agendada con ID: ${citaRef.id} por usuario ${usuarioId} para prestador ${prestadorId}.`);
-    // SIMULACIÓN: Notificar al prestador sobre la nueva cita.
-    // Aquí podrías llamar a crearNotificacion
     functions.logger.warn(`SIMULACIÓN: Notificar al prestador ${prestadorId} sobre la nueva cita ${citaRef.id}.`);
 
     return { success: true, message: "Cita agendada exitosamente. Esperando confirmación del prestador.", citaId: citaRef.id };
@@ -1344,8 +1263,8 @@ export const cancelarCita = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para cancelar una cita.");
   }
-  const canceladorId = context.auth.uid; // ID de quien está autenticado
-  const { citaId, rol } = data; // rol: "usuario" o "prestador"
+  const canceladorId = context.auth.uid; 
+  const { citaId, rol } = data; 
 
   if (!citaId || typeof citaId !== "string") {
     throw new functions.https.HttpsError("invalid-argument", "Se requiere 'citaId'.");
@@ -1364,7 +1283,6 @@ export const cancelarCita = functions.https.onCall(async (data, context) => {
       }
       const citaData = citaDoc.data() as CitaData;
 
-      // Solo se pueden cancelar citas en estado 'pendiente_confirmacion'
       if (citaData.estado !== "pendiente_confirmacion") {
         throw new functions.https.HttpsError("failed-precondition", `Solo se pueden cancelar citas en estado 'pendiente_confirmacion'. Estado actual: ${citaData.estado}`);
       }
@@ -1389,14 +1307,12 @@ export const cancelarCita = functions.https.onCall(async (data, context) => {
         estado: nuevoEstado,
         fechaCancelacion: admin.firestore.FieldValue.serverTimestamp(),
         canceladaPor: canceladorId,
-        rolCancelador: rol, // Guardar el rol de quien canceló
+        rolCancelador: rol, 
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
       functions.logger.info(`Cita ${citaId} cancelada por ${rol} ${canceladorId}.`);
-      // SIMULACIÓN: Notificar a la otra parte.
       functions.logger.warn(`SIMULACIÓN: Notificar al ${notificarA} ${idNotificado} sobre la cancelación de la cita ${citaId} por el ${rol}.`);
-      // Aquí podrías llamar a crearNotificacion
     });
     return { success: true, message: "Cita cancelada exitosamente." };
   } catch (error: any) {
@@ -1430,31 +1346,26 @@ export const confirmarCitaPorPrestador = functions.https.onCall(async (data, con
       }
       const citaData = citaDoc.data() as CitaData;
 
-      // Verificar que el prestador autenticado sea el asignado a la cita
       if (citaData.prestadorId !== prestadorIdAutenticado) {
         throw new functions.https.HttpsError("permission-denied", "No tienes permiso para confirmar esta cita. No corresponde a tu ID de prestador.");
       }
 
-      // Verificar que la cita esté en estado 'pendiente_confirmacion'
       if (citaData.estado !== "pendiente_confirmacion") {
         throw new functions.https.HttpsError("failed-precondition", `Solo se pueden confirmar citas en estado 'pendiente_confirmacion'. Estado actual: ${citaData.estado}.`);
       }
 
-      // Simular la generación de una orden de cobro
       const ordenCobroIdSimulada = `orden_${citaId}_${Date.now()}`;
       functions.logger.info(`SIMULACIÓN: Generando orden de cobro para cita ${citaId}. ID Orden: ${ordenCobroIdSimulada}. Usuario a cobrar: ${citaData.usuarioId}. Monto estimado: ${citaData.montoTotalEstimado}`);
       
       transaction.update(citaRef, {
         estado: "confirmada_prestador",
-        paymentStatus: "pendiente_cobro", // El siguiente paso sería procesar el cobro
+        paymentStatus: "pendiente_cobro", 
         fechaConfirmacionPrestador: admin.firestore.FieldValue.serverTimestamp(),
-        ordenCobroId: ordenCobroIdSimulada, // Guardar el ID de la orden simulada
+        ordenCobroId: ordenCobroIdSimulada, 
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
       functions.logger.info(`Cita ${citaId} confirmada por prestador ${prestadorIdAutenticado}. Usuario a notificar: ${citaData.usuarioId}. PaymentStatus: pendiente_cobro.`);
-      // SIMULACIÓN: Notificar al usuario sobre la confirmación y el cobro pendiente.
-      // Aquí podrías llamar a crearNotificacion
       functions.logger.warn(`SIMULACIÓN: Notificar al usuario ${citaData.usuarioId} sobre la confirmación de la cita ${citaId} y que el cobro se procesará.`);
     });
 
@@ -1469,10 +1380,7 @@ export const confirmarCitaPorPrestador = functions.https.onCall(async (data, con
 export const procesarCobroTrasConfirmacion = functions.https.onCall(async (data, context) => {
   functions.logger.info("Iniciando procesarCobroTrasConfirmacion", { structuredData: true, data });
 
-  // Esta función podría ser llamada por el sistema después de confirmarCitaPorPrestador,
-  // o por un trigger si se quiere desacoplar. Por ahora, la dejamos callable.
-  // Idealmente, se necesita autenticación de sistema o un rol específico.
-  if (!context.auth) { // Podría ser un sistema autenticado, no necesariamente un usuario/prestador
+  if (!context.auth) { 
       throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado (o sistema).");
   }
 
@@ -1491,7 +1399,6 @@ export const procesarCobroTrasConfirmacion = functions.https.onCall(async (data,
       }
       const citaData = citaDoc.data() as CitaData;
 
-      // Verificar que la cita esté en estado 'confirmada_prestador' y pago 'pendiente_cobro'
       if (citaData.estado !== "confirmada_prestador") {
         throw new functions.https.HttpsError("failed-precondition", `La cita no está en estado 'confirmada_prestador'. Estado actual: ${citaData.estado}.`);
       }
@@ -1499,42 +1406,32 @@ export const procesarCobroTrasConfirmacion = functions.https.onCall(async (data,
         throw new functions.https.HttpsError("failed-precondition", `El estado del pago no es 'pendiente_cobro'. Estado actual: ${citaData.paymentStatus}.`);
       }
 
-      // Validar que haya un monto a cobrar
       if (typeof citaData.montoTotalEstimado !== "number" || citaData.montoTotalEstimado <= 0) {
         functions.logger.error(`Monto total estimado inválido para cita ${citaId}: ${citaData.montoTotalEstimado}`);
         throw new functions.https.HttpsError("internal", "Monto total estimado inválido para la cita.");
       }
 
-      // --- SIMULACIÓN DE INTERACCIÓN CON PASARELA DE PAGO ---
       functions.logger.info(`[ProcesarCobro] SIMULACIÓN: Iniciando cobro para cita ${citaId}, Usuario: ${citaData.usuarioId}, Orden ID: ${citaData.ordenCobroId}, Monto: ${citaData.montoTotalEstimado}.`);
-      // En una implementación real:
-      // 1. Obtener el método de pago del usuario (ej. Stripe customer ID, token de tarjeta).
-      // 2. Llamar a la API de Stripe/MercadoPago para crear un Cargo o confirmar un PaymentIntent.
-      // const paymentIntent = await stripe.paymentIntents.create({ amount: citaData.montoTotalEstimado * 100, currency: 'mxn', customer: 'stripe_customer_id' ... });
-      // if (paymentIntent.status === 'succeeded') { ... } else { ... }
-      const pagoExitosoSimulado = true; // Simular que el pago fue exitoso
-      // --- FIN DE SIMULACIÓN DE PASARELA DE PAGO ---
-
+      const pagoExitosoSimulado = true; 
+      
       if (pagoExitosoSimulado) {
         transaction.update(citaRef, {
-          estado: "pagada", // Estado de la cita cambia a pagada
+          estado: "pagada", 
           paymentStatus: "procesado_exitosamente",
           fechaCobro: admin.firestore.Timestamp.now(),
           montoCobrado: citaData.montoTotalEstimado,
           updatedAt: admin.firestore.Timestamp.now(),
         });
         functions.logger.info(`[ProcesarCobro] SIMULACIÓN: Cobro para cita ${citaId} procesado exitosamente.`);
-        // SIMULACIÓN: Notificar al usuario y al prestador sobre el pago exitoso.
         functions.logger.warn(`[ProcesarCobro] SIMULACIÓN: Notificar a usuario ${citaData.usuarioId} y prestador ${citaData.prestadorId} sobre pago exitoso para cita ${citaId}.`);
         return { success: true, message: `Cobro para la cita ${citaId} procesado exitosamente. El servicio está ahora en estado 'pagada'.` };
       } else {
         functions.logger.error(`[ProcesarCobro] SIMULACIÓN: Cobro para cita ${citaId} FALLIDO.`);
         transaction.update(citaRef, {
           paymentStatus: "fallido",
-          fechaCobro: admin.firestore.Timestamp.now(), // Registrar intento de cobro
+          fechaCobro: admin.firestore.Timestamp.now(), 
           updatedAt: admin.firestore.Timestamp.now(),
         });
-        // SIMULACIÓN: Notificar al usuario sobre el fallo del pago.
         throw new functions.https.HttpsError("aborted", "El procesamiento del pago falló (simulado).");
       }
     });
@@ -1555,7 +1452,7 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
     throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
   }
   const usuarioId = context.auth.uid;
-  const { servicioId, motivo, urlEvidencia } = data; // motivo es el detalleProblema
+  const { servicioId, motivo, urlEvidencia } = data; 
 
   if (!servicioId || typeof servicioId !== "string" || !motivo || typeof motivo !== "string") {
     throw new functions.https.HttpsError("invalid-argument", "Se requieren 'servicioId' y 'motivo' válidos.");
@@ -1571,12 +1468,10 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
       }
       const servicioData = servicioDoc.data() as ServiceData;
 
-      // Validar que el usuario que reporta sea el dueño del servicio
       if (servicioData.usuarioId !== usuarioId) {
         throw new functions.https.HttpsError("permission-denied", "No estás autorizado para reportar un problema sobre este servicio.");
       }
 
-      // Validar estado y ventana de tiempo
       if (servicioData.estado !== "completado_por_usuario") {
          throw new functions.https.HttpsError("failed-precondition", `Solo se pueden reportar problemas de servicios que hayas confirmado ('completado_por_usuario'). Estado actual: ${servicioData.estado}`);
       }
@@ -1588,28 +1483,26 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
       }
 
       const now = admin.firestore.Timestamp.now();
-      const reporteId = db.collection("reportes").doc().id; // Generar ID para el documento en "reportes"
+      const reporteId = db.collection("reportes").doc().id; 
 
-      // Actualizar el documento del servicio
       transaction.update(servicioRef, {
         estado: "en_disputa",
         paymentStatus: "congelado_por_disputa",
         detallesDisputa: {
           reportadoEn: now,
-          detalle: motivo, // Usamos 'motivo' como el 'detalleProblema'
-          reporteId: reporteId, // Enlazar con el ID del documento en "reportes"
+          detalle: motivo, 
+          reporteId: reporteId, 
         },
         updatedAt: now,
       });
 
-      // Crear el nuevo documento en la colección "reportes"
-      const datosReporte: any = { // Usar 'any' temporalmente para flexibilidad o definir una interfaz ReporteData
+      const datosReporte: any = { 
         servicioId: servicioId,
         usuarioId: usuarioId,
-        prestadorId: servicioData.prestadorId, // Importante para notificar al prestador
+        prestadorId: servicioData.prestadorId, 
         motivo: motivo,
         fechaReporte: now,
-        estado: "pendiente", // Estado inicial del reporte
+        estado: "pendiente", 
       };
       if (urlEvidencia) {
         datosReporte.urlEvidencia = urlEvidencia;
@@ -1617,10 +1510,8 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
       transaction.set(db.collection("reportes").doc(reporteId), datosReporte);
 
       functions.logger.info(`Usuario ${usuarioId} reportó problema para servicio ${servicioId}. Reporte ID: ${reporteId}. Pago congelado.`);
-      // SIMULACIÓN: Notificar al prestador y al admin sobre la disputa.
       functions.logger.warn(`SIMULACIÓN: Notificar al prestador ${servicioData.prestadorId} y al admin sobre la disputa del servicio ${servicioId}.`);
-      // Aquí podrías llamar a crearNotificacion
-
+      
       return {
         success: true,
         message: "Problema reportado exitosamente. El servicio está ahora en disputa y el pago ha sido congelado.",
@@ -1640,20 +1531,14 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
 export const crearNotificacion = functions.https.onCall(async (data, context) => {
   functions.logger.info("Iniciando crearNotificacion", { structuredData: true, data });
 
-  // Opcional: Validar si el llamador tiene permisos para crear notificaciones,
-  // o si es una función interna del backend, esta validación podría ser diferente.
-  // if (!context.auth && !data.llamadaInterna) { // Ejemplo si se permite llamada interna sin auth
-  //   throw new functions.https.HttpsError("unauthenticated", "Se requiere autenticación para crear una notificación.");
-  // }
-
   const {
     destinatarioId,
-    rolDestinatario, // 'usuario' o 'prestador'
+    rolDestinatario, 
     titulo,
     cuerpo,
     tipoNotificacion,
-    prioridad, // Opcional, default a 'normal'
-    datosAdicionales, // Opcional
+    prioridad, 
+    datosAdicionales, 
   } = data;
 
   if (!destinatarioId || !rolDestinatario || !titulo || !cuerpo || !tipoNotificacion) {
@@ -1677,7 +1562,7 @@ export const crearNotificacion = functions.https.onCall(async (data, context) =>
     rolDestinatario: rolDestinatario,
     titulo: titulo,
     cuerpo: cuerpo,
-    estadoNotificacion: "pendiente", // Estado inicial
+    estadoNotificacion: "pendiente", 
     tipoNotificacion: tipoNotificacion,
     prioridad: prioridadValida,
     ...(datosAdicionales && { datosAdicionales: datosAdicionales }),
@@ -1686,14 +1571,10 @@ export const crearNotificacion = functions.https.onCall(async (data, context) =>
   try {
     const notificacionRef = await db.collection("notificaciones").add({
       ...nuevaNotificacionData,
-      fechaCreacion: admin.firestore.FieldValue.serverTimestamp(), // Timestamp del servidor
+      fechaCreacion: admin.firestore.FieldValue.serverTimestamp(), 
     });
     functions.logger.info(`Notificación creada con ID: ${notificacionRef.id} para ${rolDestinatario} ${destinatarioId}`);
     
-    // En un futuro, si esta función es llamada por otras funciones de backend,
-    // no se necesitaría enviar FCM desde aquí si el trigger de 'notificaciones' ya lo hace.
-    // Si es llamada desde el cliente para notificar a OTRO usuario, aquí se podría enviar FCM.
-
     return {
       success: true,
       message: "Notificación registrada exitosamente.",
@@ -1718,78 +1599,82 @@ export const enviarNotificacionInAppTrigger = functions.firestore
         return null;
       }
 
-      // SIMULACIÓN: Lógica de envío
-      // En un sistema real, aquí se enviaría un mensaje FCM o un correo electrónico.
-      // Para FCM, necesitarías el token de dispositivo del destinatario.
-      // const payload = {
-      //   notification: {
-      //     title: notificacionData.titulo,
-      //     body: notificacionData.cuerpo,
-      //   },
-      //   data: {
-      //     tipoNotificacion: notificacionData.tipoNotificacion,
-      //     ...(notificacionData.datosAdicionales || {}),
-      //     notificacionId: notificacionId,
-      //   },
-      // };
-      // await admin.messaging().sendToDevice(destinatarioDeviceToken, payload);
       functions.logger.log(`[Trigger] SIMULACIÓN: Enviando notificación (ej. FCM) para ${notificacionId} a ${notificacionData.destinatarioId}. Título: ${notificacionData.titulo}`);
 
-
-      // Actualizar el estado de la notificación para indicar que el trigger la procesó
       try {
         await snapshot.ref.update({
-          estadoNotificacion: "procesada_por_trigger", // O 'fcm_enviado', 'email_enviado', etc.
+          estadoNotificacion: "procesada_por_trigger", 
           triggerProcesadoEn: admin.firestore.FieldValue.serverTimestamp(),
         });
         functions.logger.info(`[Trigger] Notificación ${notificacionId} marcada como 'procesada_por_trigger'.`);
       } catch (error) {
         functions.logger.error(`[Trigger] Error al actualizar estado de notificación ${notificacionId}:`, error);
-        // Considerar reintentos o manejo de errores más robusto.
       }
       return null;
     });
 
-// ... (resto de las funciones existentes sin cambios)
+export const notificarLiberacionPagoAutomatica = functions.firestore
+  .document("servicios/{servicioId}")
+  .onUpdate(async (change, context) => {
+    const beforeData = change.before.data() as ServiceData | undefined;
+    const afterData = change.after.data() as ServiceData | undefined;
+    const servicioId = context.params.servicioId;
 
-```
-He añadido la nueva función `procesarCobroTrasConfirmacion` a `functions/src/index.ts`. También he actualizado la interfaz `CitaData` para incluir campos relacionados con el pago (`paymentStatus`, `fechaCobro`, `montoCobrado`) y un nuevo estado de cita `pagada`.
+    functions.logger.info(`[notificarLiberacionPagoAutomatica] Servicio ${servicioId} actualizado.`);
 
-**Puntos Clave de la Función `procesarCobroTrasConfirmacion`:**
+    if (!beforeData || !afterData) {
+      functions.logger.warn("[notificarLiberacionPagoAutomatica] Datos antes o después no disponibles.");
+      return null;
+    }
 
-1.  **Callable y Autenticación:**
-    *   Es una función `onCall`. Se ha mantenido una verificación de autenticación básica, pero en un escenario real, esta función podría ser llamada por un sistema interno o requerir un rol específico (como un rol de sistema o administrador) si no es el usuario quien la dispara directamente tras la confirmación del prestador.
-2.  **Parámetros:** Recibe `citaId`.
-3.  **Validaciones (dentro de una transacción de Firestore):**
-    *   Asegura que la cita exista.
-    *   Verifica que el `estado` de la cita sea `"confirmada_prestador"` (o un estado equivalente donde el cobro esté pendiente).
-    *   Verifica que `paymentStatus` sea `"pendiente_cobro"`.
-    *   Valida que exista un `montoTotalEstimado` válido en la cita.
-4.  **Simulación de Procesamiento de Pago:**
-    *   Incluye `console.log` para indicar el inicio del proceso de cobro.
-    *   **En una implementación real:** Aquí es donde te integrarías con una pasarela de pagos como Stripe o MercadoPago.
-        *   Obtendrías el método de pago del usuario (por ejemplo, un ID de cliente de Stripe o un token de tarjeta).
-        *   Llamarías a la API de la pasarela para crear un cargo o confirmar un `PaymentIntent` previamente creado, usando el `montoTotalEstimado`.
-    *   Se simula un `pagoExitosoSimulado = true`.
-5.  **Actualización de la Cita tras el Pago (Simulado):**
-    *   Si el pago simulado es exitoso:
-        *   El `estado` de la cita se cambia a `"pagada"`.
-        *   El `paymentStatus` se cambia a `"procesado_exitosamente"`.
-        *   Se registra `fechaCobro` y `montoCobrado`.
-    *   Si el pago simulado falla:
-        *   El `paymentStatus` se cambia a `"fallido"`.
-6.  **Respuesta y Logs:** Devuelve un mensaje de éxito o un error, y usa `functions.logger` para el seguimiento.
+    // Verificar la transición específica de estado y paymentStatus
+    const esLiberacionAutomatica =
+      beforeData.estado === "completado_por_usuario" &&
+      afterData.estado === "cerrado_automaticamente" &&
+      beforeData.paymentStatus === "retenido_para_liberacion" &&
+      afterData.paymentStatus === "liberado_al_proveedor" &&
+      !afterData.calificacionUsuario; // Asegura que no hubo calificación del usuario
 
-**Cómo se usaría esta función:**
+    if (esLiberacionAutomatica) {
+      functions.logger.info(`[notificarLiberacionPagoAutomatica] Detectada liberación automática de pago para servicio ${servicioId}.`);
 
-*   **Opción A (Llamada desde el Frontend tras confirmación del prestador):**
-    1.  El prestador confirma la cita usando `confirmarCitaPorPrestador`. Esta función establece `paymentStatus` a `pendiente_cobro`.
-    2.  El frontend (del usuario, o un flujo automático) podría entonces llamar a `procesarCobroTrasConfirmacion` inmediatamente para intentar el cobro.
-*   **Opción B (Tarea Programada):**
-    Podrías tener una tarea programada que busque citas con `estado: "confirmada_prestador"` y `paymentStatus: "pendiente_cobro"` e intente procesar el cobro. Esto podría ser útil si quieres reintentar cobros o procesarlos en lotes.
-*   **Opción C (Trigger de Firestore):**
-    Un trigger de Firestore podría escuchar cambios en las citas. Cuando una cita cambia a `estado: "confirmada_prestador"` y `paymentStatus: "pendiente_cobro"`, el trigger podría invocar la lógica de procesamiento de pago.
+      const servicioDetalles = afterData.detallesServicio || "Servicio sin descripción";
+      const fechaServicio = afterData.fechaServicio?.toDate().toLocaleDateString("es-MX") || "Fecha no especificada";
+      const montoLiberado = afterData.montoCobrado || afterData.montoTotalEstimado || 0;
 
-Para tu solicitud de "ser llamada automáticamente tras la confirmación del prestador o bien ejecutarse por un proceso programado", la **Opción A** es la más directa para un flujo inmediato. Las opciones B y C ofrecen más desacoplamiento y resiliencia.
+      // Notificación al Usuario
+      try {
+        await crearNotificacion({
+          destinatarioId: afterData.usuarioId,
+          rolDestinatario: 'usuario',
+          titulo: "Pago Liberado Automáticamente",
+          cuerpo: `El pago para tu servicio "${servicioDetalles}" del ${fechaServicio} ha sido liberado automáticamente al prestador tras 3 días sin reclamos. Monto: $${montoLiberado.toFixed(2)}.`,
+          tipoNotificacion: 'pago_liberado_auto_usuario',
+          prioridad: 'normal',
+          datosAdicionales: { servicioId: servicioId }
+        });
+        functions.logger.info(`[notificarLiberacionPagoAutomatica] Notificación de liberación automática enviada al usuario ${afterData.usuarioId} para servicio ${servicioId}.`);
+      } catch (error) {
+        functions.logger.error(`[notificarLiberacionPagoAutomatica] Error al enviar notificación al usuario ${afterData.usuarioId}:`, error);
+      }
 
-Recuerda desplegar tus funciones (`firebase deploy --only functions`) después de añadir esta nueva lógica.
+      // Notificación al Prestador
+      try {
+        await crearNotificacion({
+          destinatarioId: afterData.prestadorId,
+          rolDestinatario: 'prestador',
+          titulo: "¡Pago Recibido!",
+          cuerpo: `El pago por el servicio "${servicioDetalles}" del ${fechaServicio} ha sido liberado a tu cuenta. Monto: $${montoLiberado.toFixed(2)}.`,
+          tipoNotificacion: 'pago_recibido_auto_prestador',
+          prioridad: 'normal',
+          datosAdicionales: { servicioId: servicioId }
+        });
+        functions.logger.info(`[notificarLiberacionPagoAutomatica] Notificación de pago recibido enviada al prestador ${afterData.prestadorId} para servicio ${servicioId}.`);
+      } catch (error) {
+        functions.logger.error(`[notificarLiberacionPagoAutomatica] Error al enviar notificación al prestador ${afterData.prestadorId}:`, error);
+      }
+    } else {
+      functions.logger.log(`[notificarLiberacionPagoAutomatica] La actualización del servicio ${servicioId} no coincide con los criterios de liberación automática de pago. After.estado: ${afterData.estado}, After.paymentStatus: ${afterData.paymentStatus}`);
+    }
+    return null;
+  });
