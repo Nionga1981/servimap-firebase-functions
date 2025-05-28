@@ -9,7 +9,7 @@ const visionClient = new ImageAnnotatorClient();
 
 // --- CONSTANTES ---
 // Ajustado a 3 días según la solicitud más reciente para la ventana de calificación/disputa
-const RATING_AND_DISPUTE_WINDOW_DAYS = 3; 
+const RATING_AND_DISPUTE_WINDOW_DAYS = 3;
 const STANDARD_WARRANTY_DAYS = 3; // Para la función isServiceRequestUnderWarranty
 const PREMIUM_WARRANTY_DAYS = 7;  // Para la función isServiceRequestUnderWarranty
 
@@ -59,15 +59,15 @@ type CitaEstado = ServiceRequestStatus;
 
 type PaymentStatus =
   | "pendiente_confirmacion_usuario"
-  | "retenido_para_liberacion"    
-  | "liberado_al_proveedor"       
-  | "congelado_por_disputa"       
+  | "retenido_para_liberacion"
+  | "liberado_al_proveedor"
+  | "congelado_por_disputa"
   | "reembolsado_parcial"
   | "reembolsado_total"
-  | "no_aplica"                   
-  | "pendiente_cobro"             
-  | "procesado_exitosamente"      
-  | "fallido";                    
+  | "no_aplica"
+  | "pendiente_cobro"
+  | "procesado_exitosamente"
+  | "fallido";
 
 interface RatingData {
   calificacion: number;
@@ -102,12 +102,12 @@ interface ServiceData {
   notasAdicionales?: string;
 
   fechaConfirmacionPrestador?: admin.firestore.Timestamp;
-  fechaConfirmacion?: admin.firestore.Timestamp; 
-  userConfirmedCompletionAt?: admin.firestore.Timestamp; 
+  fechaConfirmacion?: admin.firestore.Timestamp;
+  userConfirmedCompletionAt?: admin.firestore.Timestamp;
   habilitarCalificacion?: boolean;
-  ratingWindowExpiresAt?: admin.firestore.Timestamp; 
+  ratingWindowExpiresAt?: admin.firestore.Timestamp;
   calificacionUsuario?: RatingData;
-  calificacionPrestador?: RatingData; // Calificación del prestador al usuario
+  calificacionPrestador?: RatingData;
   mutualRatingCompleted?: boolean;
 
   paymentStatus?: PaymentStatus;
@@ -116,9 +116,9 @@ interface ServiceData {
   montoCobrado?: number;
   ordenCobroId?: string;
 
-  warrantyEndDate?: string; 
+  warrantyEndDate?: string;
   garantiaSolicitada?: boolean;
-  idSolicitudGarantia?: string; // ID del documento en la colección 'garantias'
+  idSolicitudGarantia?: string;
   garantiaResultado?: "aprobada" | "rechazada";
   compensacionAutorizada?: boolean;
 
@@ -127,16 +127,16 @@ interface ServiceData {
     detalle: string;
     reporteId?: string;
   };
-  [key: string]: any; 
+  [key: string]: any;
 }
 
 type DiaSemana = "lunes" | "martes" | "miercoles" | "jueves" | "viernes" | "sabado" | "domingo";
 
 interface DisponibilidadSlot {
-  idSlot: string; 
+  idSlot: string;
   dia: DiaSemana;
-  inicio: string; 
-  fin: string;    
+  inicio: string;
+  fin: string;
 }
 
 interface ProviderData {
@@ -159,8 +159,8 @@ interface ProviderData {
   hourlyRate?: number;
   membresiaActual?: string;
 
-  confirmacionesCount?: number; 
-  rechazosCount?: number;       
+  confirmacionesCount?: number;
+  rechazosCount?: number;
   penalizacionActiva?: {
     tipo: string;
     motivo: string;
@@ -176,19 +176,18 @@ interface ProviderData {
   disponibilidadAvanzada?: DisponibilidadSlot[];
 }
 
-interface UserData { 
+interface UserData {
   uid?: string;
   name?: string;
-  ratingSumUsuario?: number;    
-  ratingCountUsuario?: number;  
-  ratingUsuario?: number;       
-  isPremium?: boolean; // Para lógica de garantía extendida, etc.
-  membresiaActual?: string; // ej: "premium_anual_usuario"
-
-  serviciosCalificadosCount?: number; 
-  puntosReputacionUsuario?: number; 
+  ratingSumUsuario?: number;
+  ratingCountUsuario?: number;
+  ratingUsuario?: number;
+  isPremium?: boolean;
+  membresiaActual?: string;
+  serviciosCalificadosCount?: number;
+  puntosReputacionUsuario?: number;
   badgesUsuario?: string[];
-  idiomaPreferido?: string; // ej: "es", "en"
+  idiomaPreferido?: string;
 }
 
 interface DocumentoVerificable {
@@ -202,7 +201,7 @@ interface DocumentoVerificable {
   palabrasClaveDetectadasIA?: string[];
 }
 
-interface DocumentoPrestadorData { 
+interface DocumentoPrestadorData {
   id?: string;
   prestadorId: string;
   tipoDocumento: string;
@@ -211,7 +210,7 @@ interface DocumentoPrestadorData {
   estadoRevision: "pendiente" | "aprobado" | "rechazado";
   fechaSubida: admin.firestore.Timestamp;
   fechaRevision?: admin.firestore.Timestamp;
-  revisadoPor?: string; 
+  revisadoPor?: string;
   comentariosRevisor?: string;
 }
 
@@ -225,7 +224,7 @@ interface GarantiaData {
   estadoGarantia: "pendiente" | "en_revision" | "aprobada" | "rechazada";
   fechaResolucionGarantia?: admin.firestore.Timestamp;
   resolucionDetalles?: string;
-  resueltaPor?: string; 
+  resueltaPor?: string;
 }
 
 interface CitaData {
@@ -236,24 +235,24 @@ interface CitaData {
   detallesServicio: string;
   ubicacion?: { tipo: "actual" | "personalizada"; direccion?: string; lat?: number; lng?: number };
   notasAdicionales?: string;
-  estado: CitaEstado; 
+  estado: CitaEstado;
   fechaCreacion: admin.firestore.Timestamp;
   updatedAt?: admin.firestore.Timestamp;
 
   fechaConfirmacionPrestador?: admin.firestore.Timestamp;
   fechaRechazoPrestador?: admin.firestore.Timestamp;
   fechaCancelacion?: admin.firestore.Timestamp;
-  canceladaPor?: string; 
+  canceladaPor?: string;
   rolCancelador?: 'usuario' | 'prestador';
 
   serviceType?: "fixed" | "hourly";
-  precioServicio?: number; 
-  tarifaPorHora?: number;  
-  duracionHoras?: number;  
+  precioServicio?: number;
+  tarifaPorHora?: number;
+  duracionHoras?: number;
   montoTotalEstimado?: number;
 
-  ordenCobroId?: string; 
-  paymentStatus?: PaymentStatus; 
+  ordenCobroId?: string;
+  paymentStatus?: PaymentStatus;
   fechaCobro?: admin.firestore.Timestamp;
   montoCobrado?: number;
 }
@@ -264,32 +263,32 @@ interface NotificacionData {
   rolDestinatario: 'usuario' | 'prestador';
   titulo: string;
   cuerpo: string;
-  estadoNotificacion: 'pendiente' | 'leida' | 'procesada_por_trigger'; 
+  estadoNotificacion: 'pendiente' | 'leida' | 'procesada_por_trigger';
   fechaCreacion: admin.firestore.Timestamp;
   fechaLectura?: admin.firestore.Timestamp;
-  tipoNotificacion: string; 
+  tipoNotificacion: string;
   prioridad: 'alta' | 'normal';
-  datosAdicionales?: { [key: string]: any }; 
-  enlaceOpcional?: string; 
-  triggerProcesadoEn?: admin.firestore.Timestamp; 
+  datosAdicionales?: { [key: string]: any };
+  enlaceOpcional?: string;
+  triggerProcesadoEn?: admin.firestore.Timestamp;
 }
 
 interface MembresiaData {
-  userId: string; 
+  userId: string;
   rol: 'usuario' | 'prestador';
-  tipoMembresia: string; 
+  tipoMembresia: string;
   fechaInicio: admin.firestore.Timestamp;
   fechaExpiracion: admin.firestore.Timestamp;
   estadoMembresia: 'activa' | 'vencida' | 'cancelada' | 'pendiente_pago';
   beneficiosAdicionales?: {
-    descuentoComisionPorcentaje?: number; 
-    descuentoComisionAbsoluto?: number; 
-    prioridadAgenda?: boolean; 
-    garantiaExtendidaDiasAdicionales?: number; 
+    descuentoComisionPorcentaje?: number;
+    descuentoComisionAbsoluto?: number;
+    prioridadAgenda?: boolean;
+    garantiaExtendidaDiasAdicionales?: number;
   };
-  stripeSubscriptionId?: string; 
+  stripeSubscriptionId?: string;
   mercadoPagoSubscriptionId?: string;
-  ultimoPaymentIntentId?: string; 
+  ultimoPaymentIntentId?: string;
 }
 
 const PLANES_MEMBRESIA: { [key: string]: { duracionMeses: number, beneficios: MembresiaData['beneficiosAdicionales'], precioSimulado: number } } = {
@@ -305,7 +304,7 @@ const PLANES_MEMBRESIA: { [key: string]: { duracionMeses: number, beneficios: Me
   },
   "premium_mensual_prestador": {
     duracionMeses: 1,
-    beneficios: { descuentoComisionPorcentaje: 3 }, // Ejemplo: 3% en lugar de 6%
+    beneficios: { descuentoComisionPorcentaje: 3 },
     precioSimulado: 20,
   },
   "premium_anual_prestador": {
@@ -322,42 +321,42 @@ interface MensajeDataFirestore {
   leido?: boolean;
   moderado?: boolean;
   motivoBloqueo?: string;
-  textoOriginal?: string; 
+  textoOriginal?: string;
 }
 
 interface ChatDataFirestore {
   id?: string;
-  participantesUids: string[]; 
+  participantesUids: string[];
   participantesInfo?: {
     [uid: string]: { rol: 'usuario' | 'prestador'; nombre?: string; avatarUrl?: string };
   };
-  mensajes?: MensajeDataFirestore[]; 
+  mensajes?: MensajeDataFirestore[];
   estadoChat: 'activo' | 'archivado_usuario' | 'archivado_prestador' | 'finalizado_por_servicio';
   fechaCreacion: admin.firestore.Timestamp;
   ultimaActualizacion: admin.firestore.Timestamp;
-  ultimoMensajeTexto?: string; 
+  ultimoMensajeTexto?: string;
   ultimoMensajeTimestamp?: admin.firestore.Timestamp;
   ultimoMensajeRemitenteId?: string;
-  conteoNoLeido?: { [uid: string]: number }; 
-  metadataAdicional?: { [key: string]: any }; 
+  conteoNoLeido?: { [uid: string]: number };
+  metadataAdicional?: { [key: string]: any };
 }
 
 type EstadoContrato = 'pendiente_aceptacion_usuario' | 'pendiente_aceptacion_prestador' | 'aceptado_ambos' | 'rechazado_usuario' | 'rechazado_prestador' | 'cancelado_sistema';
 
 interface ContratoServicioData {
   id?: string;
-  referenciaId: string; 
+  referenciaId: string;
   tipoReferencia: 'servicio' | 'cita';
   usuarioId: string;
   prestadorId: string;
   fechaCreacionContrato: admin.firestore.Timestamp;
-  textoContrato: string; 
+  textoContrato: string;
   estadoContrato: EstadoContrato;
   fechaAceptacionUsuario?: admin.firestore.Timestamp;
   fechaAceptacionPrestador?: admin.firestore.Timestamp;
   fechaRechazoUsuario?: admin.firestore.Timestamp;
   fechaRechazoPrestador?: admin.firestore.Timestamp;
-  infoServicioOriginal?: { 
+  infoServicioOriginal?: {
     detalles?: string;
     fechaHora?: admin.firestore.Timestamp;
     monto?: number;
@@ -411,13 +410,13 @@ interface SugerenciaIARegistroData {
 }
 
 interface ServicioDestacadoData {
-  id?: string; 
-  servicioId: string; 
+  id?: string;
+  servicioId: string;
   prestadorId: string;
   descripcionPromocional: string;
   fechaInicio: admin.firestore.Timestamp;
   fechaFin: admin.firestore.Timestamp;
-  prioridad?: number; 
+  prioridad?: number;
   urlImagenPromocional?: string;
   urlVideoPromocional?: string;
 }
@@ -428,30 +427,30 @@ interface SoporteTicketData {
   id?: string;
   solicitanteId: string;
   rolSolicitante: 'usuario' | 'prestador';
-  tipoSoporte: string; 
-  mensaje: string; 
+  tipoSoporte: string;
+  mensaje: string;
   estadoSolicitud: EstadoSolicitudSoporte;
   fechaCreacion: admin.firestore.Timestamp;
-  referenciaId?: string; 
-  historialConversacion?: { 
-    remitenteId: string; 
+  referenciaId?: string;
+  historialConversacion?: {
+    remitenteId: string;
     mensaje: string;
     timestamp: admin.firestore.Timestamp;
   }[];
-  asignadoA?: string; 
+  asignadoA?: string;
   respuestaSoporte?: string; // Podría ser el último mensaje del agente en el historial
   fechaRespuestaSoporte?: admin.firestore.Timestamp;
   fechaCierre?: admin.firestore.Timestamp;
   prioridadTicket?: 'baja' | 'normal' | 'alta' | 'urgente';
-  adjuntosUrls?: string[]; 
+  adjuntosUrls?: string[];
 }
 
 interface TraduccionDataFirestore {
-  [key: string]: string | admin.firestore.Timestamp | undefined; 
+  [key: string]: string | admin.firestore.Timestamp | undefined;
   fechaUltimaActualizacion: admin.firestore.Timestamp;
 }
 
-interface UbicacionPrestadorData { 
+interface UbicacionPrestadorData {
   lat: number;
   lng: number;
   timestamp: admin.firestore.Timestamp;
@@ -464,7 +463,7 @@ interface CoberturaZone {
   radioKm: number;
 }
 
-interface ValidacionCoberturaData { 
+interface ValidacionCoberturaData {
   usuarioId?: string;
   direccionTexto?: string;
   coordenadasAnalizadas: { lat: number; lng: number } | null;
@@ -474,7 +473,7 @@ interface ValidacionCoberturaData {
   fechaValidacion: admin.firestore.Timestamp;
 }
 
-interface ValidacionConPrestadoresData { 
+interface ValidacionConPrestadoresData {
   usuarioId?: string;
   direccionTexto?: string;
   coordenadasAnalizadas: { lat: number; lng: number } | null;
@@ -482,7 +481,7 @@ interface ValidacionConPrestadoresData {
   zonaId?: string;
   mensajeResultado: string;
   prestadoresSugeridosIds?: string[];
-  filtrosAplicados?: any; 
+  filtrosAplicados?: any;
   fechaValidacion: admin.firestore.Timestamp;
 }
 
@@ -496,7 +495,7 @@ interface PrestadorSugeridoConDistancia {
   distanciaKm?: number;
   lat: number;
   lng: number;
-  categoriaPrincipal?: string; 
+  categoriaPrincipal?: string;
   isAvailable?: boolean;
 }
 
@@ -506,19 +505,19 @@ interface PrestadorMapaPopupData {
   avatarUrl?: string;
   rating?: number;
   ratingCount?: number;
-  categoriaPrincipal?: string; 
-  enlacePerfil: string; 
+  categoriaPrincipal?: string;
+  enlacePerfil: string;
 }
 
 interface HistorialItemDetallado {
-  id: string; 
+  id: string;
   tipo: 'cita' | 'servicio';
   estado: CitaEstado | ServiceRequestStatus;
-  participanteContrarioId: string; 
-  participanteContrarioNombre?: string; 
-  fechaRelevante: admin.firestore.Timestamp; 
-  fechaServicioProgramada?: string; 
-  detallesPrincipales?: string; 
+  participanteContrarioId: string;
+  participanteContrarioNombre?: string;
+  fechaRelevante: admin.firestore.Timestamp;
+  fechaServicioProgramada?: string;
+  detallesPrincipales?: string;
   ubicacion?: any;
   montoEstimado?: number;
   calificadoPorSolicitante: boolean;
@@ -527,28 +526,28 @@ interface HistorialItemDetallado {
 interface PenalizacionData {
   id?: string;
   prestadorId: string;
-  tipoInfraccion: string; 
+  tipoInfraccion: string;
   descripcionInfraccion: string;
   citaIdAsociada?: string;
   servicioIdAsociado?: string;
-  tipoPenalizacionAplicada: string; 
+  tipoPenalizacionAplicada: string;
   fechaAplicacion: admin.firestore.Timestamp;
   fechaExpiracion?: admin.firestore.Timestamp;
   estadoPenalizacion: 'activa' | 'expirada' | 'anulada';
-  aplicadaPor: string; 
+  aplicadaPor: string;
   notasAdmin?: string;
 }
 
 interface IncentivoOtorgadoData {
   id?: string;
-  receptorId: string; 
+  receptorId: string;
   rolReceptor: 'usuario' | 'prestador';
-  tipoIncentivo: 'PUNTOS_REPUTACION' | 'BADGE_CALIFICADOR_BRONCE' | 'BADGE_PROVEEDOR_ESTRELLA'; 
+  tipoIncentivo: 'PUNTOS_REPUTACION' | 'BADGE_CALIFICADOR_BRONCE' | 'BADGE_PROVEEDOR_ESTRELLA';
   descripcion: string;
-  valor?: number; 
-  nombreBadge?: string; 
+  valor?: number;
+  nombreBadge?: string;
   fechaOtorgado: admin.firestore.Timestamp;
-  referenciaId?: string; 
+  referenciaId?: string;
 }
 
 
@@ -573,9 +572,9 @@ async function getMockUser(userId: string): Promise<UserData | null> {
 
 async function _calcularMontoParaProveedor(servicioId: string, montoTotalServicio: number): Promise<number> {
   functions.logger.info(`[Comisiones] Calculando monto para proveedor del servicio: ${servicioId}, monto total: ${montoTotalServicio}`);
-  const COMISION_ESTANDAR_PORCENTAJE = 6; 
+  const COMISION_ESTANDAR_PORCENTAJE = 6;
 
-  const servicioRef = db.collection("servicios").doc(servicioId); 
+  const servicioRef = db.collection("servicios").doc(servicioId);
   const servicioDoc = await servicioRef.get();
 
   if (!servicioDoc.exists) {
@@ -585,7 +584,7 @@ async function _calcularMontoParaProveedor(servicioId: string, montoTotalServici
   const servicioData = servicioDoc.data() as ServiceData;
   const prestadorId = servicioData.prestadorId;
 
-  const membresiaRef = db.collection("membresias").doc(prestadorId); 
+  const membresiaRef = db.collection("membresias").doc(prestadorId);
   const membresiaDoc = await membresiaRef.get();
 
   let comisionAplicadaPorcentaje = COMISION_ESTANDAR_PORCENTAJE;
@@ -615,7 +614,7 @@ async function _calcularMontoParaProveedor(servicioId: string, montoTotalServici
 
 
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-  const R = 6371; 
+  const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a =
@@ -623,7 +622,7 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
       Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
       Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c; 
+  return R * c;
 };
 
 const DIAS_SEMANA_VALIDOS: DiaSemana[] = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"];
@@ -658,7 +657,7 @@ export { registrarDocumentoProfesional } from "./registrarDocumentoProfesional";
 export { verificarDocumentoProfesional } from "./verificarDocumentoProfesional"; // Renombrado desde validateDocumentAndRemoveContactInfo
 export { activarGarantiaPremium } from "./activarGarantiaPremium";
 export { resolverGarantiaPremium } from "./resolverGarantiaPremium";
-export { updateProviderRealtimeStatus } from "./updateProviderRealtimeStatus";
+// export { updateProviderRealtimeStatus } from "./updateProviderRealtimeStatus"; // Renombrada
 export { disconnectProvider } from "./disconnectProvider";
 export { verificarEstadoFunciones } from "./verificarEstadoFunciones";
 export { agendarCitaConPrestador } from "./agendarCitaConPrestador"; // Renombrado desde agendarCita
@@ -676,7 +675,8 @@ export { generarContratoDigital } from "./generarContratoDigital"; // Renombrado
 export { crearSolicitudSoporte } from "./crearSolicitudSoporte";
 export { responderSolicitudSoporte } from "./responderSolicitudSoporte";
 export { obtenerTraduccion } from "./obtenerTraduccion";
-export { actualizarUbicacionPrestador } from "./actualizarUbicacionPrestador";
+// export { actualizarUbicacionPrestador } from "./actualizarUbicacionPrestador"; // Renombrada a integrarGeolocalizacionTiempoReal
+export { integrarGeolocalizacionTiempoReal } from "./integrarGeolocalizacionTiempoReal"; // Nueva función para ubicación
 export { obtenerUbicacionesCercanas } from "./obtenerUbicacionesCercanas";
 export { validarCoberturaServicio } from "./validarCoberturaServicio";
 export { validarCoberturaYObtenerPrestadoresCercanos } from "./validarCoberturaYObtenerPrestadoresCercanos";
@@ -686,50 +686,7 @@ export { sugerirPrestadoresConGeolocalizacion } from "./sugerirPrestadoresConGeo
 export { gestionarPenalizacionPrestador } from "./gestionarPenalizacionPrestador"; // Renombrado desde gestionarPenalizacionesPrestadores
 
 
-// Nueva función para configurar el soporte multi-idioma (guardar preferencia del usuario)
-export const configurarSoporteMultiIdioma = functions.https.onCall(async (data, context) => {
-  functions.logger.info("Iniciando configurarSoporteMultiIdioma para usuario:", context.auth?.uid, "con datos:", data);
-
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
-  }
-  const userId = context.auth.uid;
-  const { idioma } = data; // ej. "es", "en"
-
-  if (!idioma || typeof idioma !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere el parámetro 'idioma' (string).");
-  }
-
-  // (Opcional) Validar contra una lista de idiomas soportados
-  const idiomasSoportados = ["es", "en"]; // Podrías expandir esto
-  if (!idiomasSoportados.includes(idioma.toLowerCase())) {
-    throw new functions.https.HttpsError("invalid-argument", `Idioma '${idioma}' no soportado. Soportados: ${idiomasSoportados.join(", ")}.`);
-  }
-
-  const userProfileRef = db.collection("usuarios").doc(userId);
-
-  try {
-    await userProfileRef.set({
-      idiomaPreferido: idioma.toLowerCase(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(), // Buena práctica
-    }, { merge: true });
-
-    functions.logger.info(`Preferencia de idioma para usuario ${userId} actualizada a: ${idioma.toLowerCase()}`);
-    
-    // Opcional: Actualizar custom claims si la preferencia de idioma se usa frecuentemente
-    // en reglas de seguridad o para personalización del lado del servidor muy rápida.
-    // const currentClaims = (await admin.auth().getUser(userId)).customClaims || {};
-    // await admin.auth().setCustomUserClaims(userId, { ...currentClaims, lang: idioma.toLowerCase() });
-
-    return {
-      success: true,
-      message: `Preferencia de idioma actualizada a ${idioma.toLowerCase()}. La aplicación se actualizará en la próxima recarga o cambio de vista.`,
-    };
-  } catch (error: any) {
-    functions.logger.error(`Error al actualizar preferencia de idioma para ${userId}:`, error);
-    throw new functions.https.HttpsError("internal", "No se pudo guardar tu preferencia de idioma.", error.message);
-  }
-});
+export { configurarSoporteMultiIdioma } from "./configurarSoporteMultiIdioma";
 
 
 // --- TRIGGERS ---
@@ -741,29 +698,3 @@ export { notificarLiberacionPagoAutomatica } from "./notificarLiberacionPagoAuto
 export { evaluarComportamientoPrestadorTrigger } from "./evaluarComportamientoPrestadorTrigger";
 export { otorgarIncentivosTrigger } from "./otorgarIncentivosTrigger"; // Renombrado desde asignarIncentivoUsuarioTrigger
 export { simulateDailyAutomatedChecks } from "./simulateDailyAutomatedChecks";
-
-
-// --- Comentarios sobre el Sistema Multi-Idioma Completo ---
-// La función `configurarSoporteMultiIdioma` anterior permite a los usuarios GUARDAR su preferencia.
-// La función `obtenerTraduccion` (ya creada) permite al backend OBTENER una cadena específica.
-
-// Para una aplicación frontend multi-idioma completa en Next.js:
-// 1. Biblioteca i18n en el Frontend:
-//    - Usarías una biblioteca como `next-intl` o `react-i18next`.
-//    - Estas bibliotecas manejan la carga de archivos de traducción (ej. `public/locales/es/common.json`, `public/locales/en/common.json`).
-//    - Permiten cambiar el idioma dinámicamente en la UI sin recargar la página.
-// 2. Detección del Idioma del Dispositivo/Navegador (Frontend):
-//    - El frontend puede usar `navigator.language` o `navigator.languages` para detectar el idioma del navegador.
-//    - Este puede ser el idioma por defecto si el usuario no ha guardado una preferencia.
-// 3. Obtención de Preferencia Guardada (Frontend):
-//    - Al iniciar sesión, el frontend podría leer el campo `idiomaPreferido` del perfil del usuario (obtenido de Firestore o de los custom claims del token de autenticación si se configuró).
-//    - Este idioma guardado tendría prioridad sobre el del navegador.
-// 4. Almacenamiento de Traducciones:
-//    - La colección `traducciones` en Firestore (que usa `obtenerTraduccion`) es buena para contenido dinámico o gestionado por un CMS.
-//    - Para los textos estáticos de la UI, los archivos JSON locales en el proyecto frontend suelen ser más eficientes de cargar.
-// 5. Sincronización:
-//    - Si un usuario cambia su preferencia usando `configurarSoporteMultiIdioma`, el frontend debería:
-//      a. Persistir el cambio en el backend (lo que hace la función).
-//      b. Actualizar el estado de la biblioteca i18n localmente para que la UI cambie inmediatamente.
-//      c. Guardar la preferencia localmente (localStorage) para la próxima visita antes de que se carguen los datos del perfil.
-// ---------------------------------------------------------------------------------
