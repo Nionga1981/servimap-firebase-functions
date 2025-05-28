@@ -33,7 +33,7 @@ export interface Provider {
   rating: number; 
   ratingCount: number; 
   ratingSum: number; 
-  services: Service[]; // Lista de servicios de precio fijo
+  services: Service[]; 
   isAvailable: boolean;
   location?: { lat: number; lng: number };
   specialties?: string[];
@@ -45,7 +45,7 @@ export interface Provider {
   lastConnection?: number;
   allowsHourlyServices?: boolean; 
   hourlyRate?: number; 
-  // gallery?: GalleryItem[]; // Consider fetching gallery separately or embedding a small sample
+  idiomasHablados?: string[];
 }
 
 export interface ChatMessage {
@@ -58,19 +58,21 @@ export interface ChatMessage {
 }
 
 export type ServiceRequestStatus =
-  | 'agendado'
-  | 'confirmado_proveedor'
+  | 'agendado' // Usuario agenda, pendiente de confirmación del prestador (para citas)
+  | 'pendiente_confirmacion' // Similar a agendado, usado por el flujo de `agendarCitaConPrestador`
+  | 'confirmada_prestador' // Prestador confirma la cita
+  | 'pagada' // Cita pagada
   | 'en_camino_proveedor'
   | 'servicio_iniciado'
-  | 'completado_proveedor' 
-  | 'finalizado_usuario'
-  | 'cancelado_usuario'
-  | 'cancelado_proveedor'
+  | 'completado_por_prestador' // Prestador marca como completado
+  | 'completado_por_usuario'   // Usuario confirma finalización
+  | 'cancelada_usuario'
+  | 'cancelada_prestador'
+  | 'rechazada_prestador'    // Prestador rechaza la cita
   | 'en_disputa'
   | 'cerrado_automaticamente'
   | 'cerrado_con_calificacion'
-  | 'cerrado_con_disputa_resuelta'
-  | 'pagada'; // Estado después de procesarCobroTrasConfirmacion
+  | 'cerrado_con_disputa_resuelta';
 
 export type PaymentStatus =
   | 'pendiente_confirmacion_usuario' 
@@ -79,14 +81,16 @@ export type PaymentStatus =
   | 'congelado_por_disputa' 
   | 'reembolsado_parcial'
   | 'reembolsado_total'
-  | 'pendiente_cobro' // Estado intermedio para citas
-  | 'procesado_exitosamente' // Pago de cita procesado
-  | 'fallido'; // Fallo en el pago de cita
+  | 'pendiente_cobro' 
+  | 'procesado_exitosamente' 
+  | 'fallido'
+  | 'no_aplica'; // Para citas que aún no llegan al punto de cobro
 
 export interface DemoUser {
   id: string;
   isPremium: boolean;
   name: string;
+  idiomaPreferido?: 'es' | 'en';
 }
 
 interface BaseServiceRequest {
@@ -100,10 +104,11 @@ interface BaseServiceRequest {
   createdAt: number; 
   updatedAt?: number;
   providerMarkedCompleteAt?: number; 
-  userConfirmedCompletionAt?: number;
+  userConfirmedCompletionAt?: number; // Timestamp de cuando el usuario confirma
   paymentStatus?: PaymentStatus;
+  paymentIntentId?: string; // ID de la intención de pago (Stripe, etc.)
   paymentReleasedToProviderAt?: number; 
-  ratingWindowExpiresAt?: number;
+  ratingWindowExpiresAt?: number; // Timestamp de cuando expira la ventana para calificar/disputar
   disputeDetails?: {
     reportedAt: number;
     reason: string;
@@ -122,6 +127,8 @@ interface BaseServiceRequest {
     ratedAt: number;
   };
   mutualRatingCompleted?: boolean;
+  solicitadoPorEmpresaId?: string;
+  miembroEmpresaUid?: string;
 }
 
 export interface FixedServiceRequest extends BaseServiceRequest {
@@ -137,8 +144,8 @@ export interface HourlyServiceRequest extends BaseServiceRequest {
   durationHours: number; 
   hourlyRate: number; 
   estimatedTotal: number; 
-  actualStartTime?: string; 
-  actualEndTime?: string;
+  actualStartTime?: number; // Timestamp
+  actualEndTime?: number; // Timestamp
   actualDurationHours?: number; 
   finalTotal?: number; 
 }
@@ -146,19 +153,32 @@ export interface HourlyServiceRequest extends BaseServiceRequest {
 export type ServiceRequest = FixedServiceRequest | HourlyServiceRequest;
 
 export interface Membresia {
-  id: string; // Será el UID del usuario o prestador
+  id: string; 
   rol: 'usuario' | 'prestador';
-  tipoMembresia: string; // Ej: "gratis", "premium_mensual_usuario", "premium_anual_prestador"
-  fechaInicio: string; // ISO Date string
-  fechaExpiracion: string; // ISO Date string
+  tipoMembresia: string; 
+  fechaInicio: string; 
+  fechaExpiracion: string; 
   estadoMembresia: 'activa' | 'vencida' | 'cancelada' | 'pendiente_pago';
   beneficiosAdicionales?: {
-    descuentoComisionPorcentaje?: number; // Para prestadores, ej. 3 (para 3%)
-    prioridadAgenda?: boolean; // Para usuarios
-    garantiaExtendidaDias?: number; // Para usuarios (ej. 7 días extra)
-    // otros beneficios...
+    descuentoComisionPorcentaje?: number; 
+    descuentoComisionAbsoluto?: number;
+    prioridadAgenda?: boolean; 
+    garantiaExtendidaDiasAdicionales?: number; 
   };
   stripeSubscriptionId?: string;
   mercadoPagoSubscriptionId?: string;
   ultimoPaymentIntentId?: string;
+}
+
+export interface BannerAd {
+  id: string;
+  nombre: string; // For admin reference
+  imageUrl: string;
+  enlaceUrl: string;
+  prioridad: number; // Higher number = higher priority
+  activo: boolean;
+  dataAiHint?: string;
+  // Optional scheduling fields
+  fechaInicio?: string; // ISO string date
+  fechaFin?: string;   // ISO string date
 }
