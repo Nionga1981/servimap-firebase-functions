@@ -1,15 +1,17 @@
+
 // src/types/index.ts
+import type { LucideIcon } from 'lucide-react';
 
 export interface Service {
   id: string;
   title: string;
   description: string;
-  price: number; 
-  category: string; 
+  price: number;
+  category: string;
   imageUrl?: string;
   dataAiHint?: string;
   providerId: string;
-  hourlyRate?: never; // Asegura que los servicios de precio fijo no tengan tarifa por hora
+  hourlyRate?: never;
 }
 
 export interface GalleryItem {
@@ -17,7 +19,7 @@ export interface GalleryItem {
   url: string;
   type: 'image' | 'video';
   description?: string;
-  dataAiHint?: string; // For image items
+  dataAiHint?: string;
 }
 
 export interface ProviderGallery {
@@ -25,26 +27,29 @@ export interface ProviderGallery {
   items: GalleryItem[];
 }
 
+export interface ProviderLocation {
+  lat: number;
+  lng: number;
+}
+
 export interface Provider {
   id: string;
   name: string;
   avatarUrl: string;
   dataAiHint?: string;
-  rating: number; 
-  ratingCount: number; 
-  ratingSum: number; 
-  services: Service[]; 
-  isAvailable: boolean;
-  location?: { lat: number; lng: number };
-  specialties?: string[];
-  currentLocation?: {
-    lat: number;
-    lng: number;
-    timestamp: number;
-  } | null;
+  rating: number;
+  ratingCount: number;
+  ratingSum: number;
+  services: Service[];
+  isAvailable: boolean; // General availability toggle by provider
+  estadoOnline: boolean; // Real-time online status for immediate services
+  ubicacionAproximada: ProviderLocation; // For browsing
+  ubicacionExacta?: ProviderLocation; // For accepted services, could be same as currentLocation
+  currentLocation?: ProviderLocation | null; // For real-time updates if available and sharing
   lastConnection?: number;
-  allowsHourlyServices?: boolean; 
-  hourlyRate?: number; 
+  specialties?: string[];
+  allowsHourlyServices?: boolean;
+  hourlyRate?: number;
   idiomasHablados?: string[];
 }
 
@@ -58,71 +63,72 @@ export interface ChatMessage {
 }
 
 export type ServiceRequestStatus =
-  | 'agendado' // Usuario agenda, pendiente de confirmación del prestador (para citas)
-  | 'pendiente_confirmacion' // Similar a agendado, usado por el flujo de `agendarCitaConPrestador`
-  | 'confirmada_prestador' // Prestador confirma la cita
-  | 'pagada' // Cita pagada
+  | 'agendado'
+  | 'pendiente_confirmacion'
+  | 'confirmada_prestador'
+  | 'pagada'
   | 'en_camino_proveedor'
   | 'servicio_iniciado'
-  | 'completado_por_prestador' // Prestador marca como completado
-  | 'completado_por_usuario'   // Usuario confirma finalización
+  | 'completado_por_prestador'
+  | 'completado_por_usuario'
   | 'cancelada_usuario'
   | 'cancelada_prestador'
-  | 'rechazada_prestador'    // Prestador rechaza la cita
+  | 'rechazada_prestador'
   | 'en_disputa'
   | 'cerrado_automaticamente'
   | 'cerrado_con_calificacion'
   | 'cerrado_con_disputa_resuelta';
 
 export type PaymentStatus =
-  | 'pendiente_confirmacion_usuario' 
-  | 'retenido_para_liberacion' 
-  | 'liberado_al_proveedor' 
-  | 'congelado_por_disputa' 
+  | 'pendiente_confirmacion_usuario'
+  | 'retenido_para_liberacion'
+  | 'liberado_al_proveedor'
+  | 'congelado_por_disputa'
   | 'reembolsado_parcial'
   | 'reembolsado_total'
-  | 'pendiente_cobro' 
-  | 'procesado_exitosamente' 
+  | 'pendiente_cobro'
+  | 'procesado_exitosamente'
   | 'fallido'
-  | 'no_aplica'; // Para citas que aún no llegan al punto de cobro
+  | 'no_aplica';
 
 export interface DemoUser {
   id: string;
   isPremium: boolean;
   name: string;
   idiomaPreferido?: 'es' | 'en';
+  ubicacionExacta?: ProviderLocation; // User's exact location
 }
 
 interface BaseServiceRequest {
-  id: string; 
-  userId: string; 
+  id: string;
+  userId: string;
   providerId: string;
-  location: { lat: number; lng: number } | { customAddress: string }; 
-  serviceDate: string; // YYYY-MM-DD.
+  location?: ProviderLocation | { customAddress: string }; // User's location for the service
+  serviceDate: string;
   notes?: string;
   status: ServiceRequestStatus;
-  createdAt: number; 
+  createdAt: number;
   updatedAt?: number;
-  providerMarkedCompleteAt?: number; 
-  userConfirmedCompletionAt?: number; // Timestamp de cuando el usuario confirma
+  providerMarkedCompleteAt?: number;
+  userConfirmedCompletionAt?: number;
   paymentStatus?: PaymentStatus;
-  paymentIntentId?: string; // ID de la intención de pago (Stripe, etc.)
-  paymentReleasedToProviderAt?: number; 
-  ratingWindowExpiresAt?: number; // Timestamp de cuando expira la ventana para calificar/disputar
+  paymentIntentId?: string;
+  paymentReleasedToProviderAt?: number;
+  ratingWindowExpiresAt?: number;
   disputeDetails?: {
     reportedAt: number;
     reason: string;
     resolution?: string;
     resolvedAt?: number;
   };
-  warrantyEndDate?: string; // YYYY-MM-DD
-  userRating?: { 
-    rating: number; 
+  warrantyEndDate?: string;
+  userRating?: {
+    rating: number;
     comment?: string;
     ratedAt: number;
   };
-  providerRating?: { 
-    rating: number; 
+  providerRating?: {
+    rating: number;
     comment?: string;
     ratedAt: number;
   };
@@ -133,52 +139,59 @@ interface BaseServiceRequest {
 
 export interface FixedServiceRequest extends BaseServiceRequest {
   serviceType: 'fixed';
-  selectedFixedServices?: { serviceId: string, title: string, price: number }[]; 
-  totalAmount?: number; 
-  serviceTime: string; // HH:MM
+  selectedFixedServices?: { serviceId: string, title: string, price: number }[];
+  totalAmount?: number;
+  serviceTime: string;
 }
 
 export interface HourlyServiceRequest extends BaseServiceRequest {
   serviceType: 'hourly';
-  startTime: string; // HH:MM
-  durationHours: number; 
-  hourlyRate: number; 
-  estimatedTotal: number; 
-  actualStartTime?: number; // Timestamp
-  actualEndTime?: number; // Timestamp
-  actualDurationHours?: number; 
-  finalTotal?: number; 
+  startTime: string;
+  durationHours: number;
+  hourlyRate: number;
+  estimatedTotal: number;
+  actualStartTime?: number;
+  actualEndTime?: number;
+  actualDurationHours?: number;
+  finalTotal?: number;
 }
 
 export type ServiceRequest = FixedServiceRequest | HourlyServiceRequest;
 
 export interface Membresia {
-  id: string; 
+  id: string;
   rol: 'usuario' | 'prestador';
-  tipoMembresia: string; 
-  fechaInicio: string; 
-  fechaExpiracion: string; 
+  tipoMembresia: string;
+  fechaInicio: string;
+  fechaExpiracion: string;
   estadoMembresia: 'activa' | 'vencida' | 'cancelada' | 'pendiente_pago';
   beneficiosAdicionales?: {
-    descuentoComisionPorcentaje?: number; 
+    descuentoComisionPorcentaje?: number;
     descuentoComisionAbsoluto?: number;
-    prioridadAgenda?: boolean; 
-    garantiaExtendidaDiasAdicionales?: number; 
+    prioridadAgenda?: boolean;
+    garantiaExtendidaDiasAdicionales?: number;
   };
   stripeSubscriptionId?: string;
   mercadoPagoSubscriptionId?: string;
   ultimoPaymentIntentId?: string;
 }
 
-export interface BannerAd {
+export interface BannerPublicitario {
   id: string;
-  nombre: string; // For admin reference
-  imageUrl: string;
-  enlaceUrl: string;
-  prioridad: number; // Higher number = higher priority
+  nombre: string;
+  imagenUrl: string;
+  linkDestino?: string;
+  orden: number; // Lower number = higher priority for display
   activo: boolean;
   dataAiHint?: string;
-  // Optional scheduling fields
-  fechaInicio?: string; // ISO string date
-  fechaFin?: string;   // ISO string date
+  fechaInicio?: string;
+  fechaFin?: string;
+}
+
+export interface CategoriaServicio {
+  id: string;
+  nombre: string;
+  iconoUrl: string; // URL to an image for the icon
+  icon?: LucideIcon; // Optional: if we still want to use Lucide for some defaults
+  keywords: string[];
 }
