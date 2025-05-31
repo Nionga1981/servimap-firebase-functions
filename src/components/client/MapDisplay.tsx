@@ -12,12 +12,12 @@ import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { AlertCircle, CheckCircle, Loader2, MapPin, Search, Star, Navigation, XCircle, Building2, ShieldQuestion } from 'lucide-react';
 import { mockProviders, USER_FIXED_LOCATION, mockCategoriasServicio } from '@/lib/mockData';
-import { LUCIDE_SERVICE_CATEGORIES as ICON_CATEGORIES_MAP, SERVICE_CATEGORIES } from '@/lib/constants';
+import { SERVICE_CATEGORIES } from '@/lib/constants'; // Corrected import
 import type { Provider, CategoriaServicio, ProviderLocation } from '@/types';
 import { cn } from '@/lib/utils';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { BottomSearchContainer } from '@/components/client/BottomSearchContainer';
-import { CategoryIconBar } from './CategoryIconBar'; // Ensuring relative path for import
+import { CategoryIconBar } from './CategoryIconBar'; // Changed to relative path
 
 const FALLBACK_GOOGLE_MAPS_API_KEY = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU";
 const PROVIDER_SEARCH_RADIUS_KM = 5;
@@ -32,7 +32,7 @@ const enRouteZoom = 15;
 
 const lucideIconToDataUri = (IconComponent: LucideIcon | undefined, color = "#008080", size = 32) => {
   if (typeof window === 'undefined' || !IconComponent) {
-    const GenericIcon = Building2;
+    const GenericIcon = Building2; // Fallback icon
     const svgString = ReactDOMServer.renderToStaticMarkup(
       <GenericIcon color={color} size={size} strokeWidth={2.5} />
     );
@@ -47,7 +47,7 @@ const lucideIconToDataUri = (IconComponent: LucideIcon | undefined, color = "#00
     return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(SvgWithXmlns)}`;
   } catch (error) {
     console.error("[MapDisplay] Error generating Lucide icon Data URI:", error);
-    const GenericIcon = Building2;
+    const GenericIcon = Building2; // Fallback icon on error
     const svgString = ReactDOMServer.renderToStaticMarkup(
       <GenericIcon color={color} size={size} strokeWidth={2.5} />
     );
@@ -122,7 +122,7 @@ const MapContentComponent = React.memo(({
       return {
         path: window.google.maps.SymbolPath.CIRCLE,
         scale: 8,
-        fillColor: '#008080', // Updated to Teal as requested
+        fillColor: '#008080',
         fillOpacity: 1,
         strokeWeight: 2,
         strokeColor: 'white',
@@ -167,7 +167,8 @@ const MapContentComponent = React.memo(({
         if (!locationToDisplay) return null;
 
         if (enRouteProviderInfo && enRouteProviderInfo.provider.id === provider.id) {
-          const enRouteProviderLucideIcon = ICON_CATEGORIES_MAP.find(c => c.id === (provider.services[0]?.category))?.icon;
+          const enRouteCategoryData = SERVICE_CATEGORIES.find(c => c.id === (provider.services[0]?.category));
+          const enRouteProviderLucideIcon = enRouteCategoryData?.icon;
           let enRouteMarkerIconUrl = '';
            if (enRouteProviderLucideIcon && isMapApiLoaded) {
               const cacheKey = `enroute_${provider.services[0]?.category || 'default'}`;
@@ -207,7 +208,7 @@ const MapContentComponent = React.memo(({
           if (categoryIconCache.current[cacheKey]) {
             markerIconUrl = categoryIconCache.current[cacheKey];
           } else {
-            const generatedUri = lucideIconToDataUri(mainCategoryLucideIcon, "#008080", 32); // Teal for regular provider icons
+            const generatedUri = lucideIconToDataUri(mainCategoryLucideIcon, "#008080", 32);
             if (generatedUri) {
               markerIconUrl = generatedUri;
               categoryIconCache.current[cacheKey] = markerIconUrl;
@@ -276,7 +277,7 @@ const MapContentComponent = React.memo(({
           options={{
             suppressMarkers: true,
             polylineOptions: {
-              strokeColor: '#008080', // Teal for route
+              strokeColor: '#008080',
               strokeOpacity: 0.7,
               strokeWeight: 5,
             },
@@ -309,7 +310,7 @@ export function MapDisplay() {
   const [showManualLocationInput, setShowManualLocationInput] = useState(false);
 
   const [allCategories, setAllCategories] = useState<CategoriaServicio[]>([]);
-  const [activeProvidersInCategories, setActiveProvidersInCategories] = useState<CategoriaServicio[]>([]);
+  const [activeCategories, setActiveCategories] = useState<CategoriaServicio[]>([]);
   
   const [allProviders, setAllProviders] = useState<Provider[]>([]);
   const [displayedProviders, setDisplayedProviders] = useState<Provider[]>([]);
@@ -329,20 +330,17 @@ export function MapDisplay() {
   const hiredProviderId = useMemo(() => searchParams.get('hiredProviderId'), [searchParams]);
   const categoryQueryParam = useMemo(() => searchParams.get('category'), [searchParams]);
 
-  // Load initial data (categories and providers) from mock
   useEffect(() => {
     setAllCategories(mockCategoriasServicio);
     setAllProviders(mockProviders);
   }, []);
 
-  // Handle category query param
   useEffect(() => {
     if (categoryQueryParam) {
       setSelectedCategory(categoryQueryParam);
     }
   }, [categoryQueryParam]);
 
-  // Request user's geolocation
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -372,16 +370,14 @@ export function MapDisplay() {
     }
   }, [hiredProviderId]);
 
-  // Filter providers and active categories based on location, search, and selected category
   useEffect(() => {
-    if (!userLocation || allProviders.length === 0) {
+    if (!userLocation || allProviders.length === 0 || allCategories.length === 0) {
       setDisplayedProviders([]);
-      setActiveProvidersInCategories([]);
+      setActiveCategories([]);
       return;
     }
 
-    // 1. Filter providers by online status and proximity
-    const onlineAndNearbyProviders = allProviders.filter(p => {
+    let providersFilteredByLocationAndStatus = allProviders.filter(p => {
       if (!p.estadoOnline || !p.ubicacionAproximada) return false;
       const distance = calculateDistance(
         userLocation.lat,
@@ -391,24 +387,21 @@ export function MapDisplay() {
       );
       return distance <= PROVIDER_SEARCH_RADIUS_KM;
     });
-    
-    // 2. Determine active categories for the icon bar (based on online & nearby providers)
+
     const relevantCategoryIds = new Set<string>();
-    onlineAndNearbyProviders.forEach(p => {
+    providersFilteredByLocationAndStatus.forEach(p => {
       p.services.forEach(s => relevantCategoryIds.add(s.category));
     });
     const activeCatsForBar = allCategories.filter(c => relevantCategoryIds.has(c.id));
-    setActiveProvidersInCategories(activeCatsForBar);
+    setActiveCategories(activeCatsForBar);
 
-    // 3. Apply selected category filter for display
-    let categoryFilteredProviders = onlineAndNearbyProviders;
+    let categoryFilteredProviders = providersFilteredByLocationAndStatus;
     if (selectedCategory) {
-      categoryFilteredProviders = onlineAndNearbyProviders.filter(p =>
+      categoryFilteredProviders = providersFilteredByLocationAndStatus.filter(p =>
         p.services.some(s => s.category === selectedCategory)
       );
     }
 
-    // 4. Apply search term filter
     let searchFilteredProviders = categoryFilteredProviders;
     if (searchTerm.trim() !== '') {
       const termLower = searchTerm.toLowerCase();
@@ -420,13 +413,9 @@ export function MapDisplay() {
       );
     }
     
-    // 5. Handle hired provider (ensure it's always at the top if present)
     if (hiredProviderId) {
       const hired = allProviders.find(p => p.id === hiredProviderId);
       if (hired) {
-        // If a provider is hired, usually we only want to show them or related info,
-        // so we might not need the other searchFilteredProviders.
-        // For now, this ensures the hired provider is shown, potentially alongside others.
         setDisplayedProviders([hired, ...searchFilteredProviders.filter(p => p.id !== hiredProviderId)]);
       } else {
         setDisplayedProviders(searchFilteredProviders);
@@ -454,16 +443,12 @@ export function MapDisplay() {
   };
   
   const handleSearchSubmit = () => {
-    // The useEffect for filtering providers already handles searchTerm changes.
-    // This function can be used if a specific action on submit is needed,
-    // for now, it's mostly handled reactively.
     console.log("Search submitted:", searchTerm);
   };
 
 
   const handleCategoryFilter = (categoryId: string | null) => {
     setSelectedCategory(categoryId);
-    // setSearchTerm(''); // Optionally clear search term when category changes
     setSelectedProviderForInfoWindow(null);
     if (mapInstance && userLocation && !hiredProviderId) { 
         mapInstance.panTo(userLocation);
@@ -657,40 +642,42 @@ export function MapDisplay() {
 
   return (
     <div className="h-full w-full flex flex-col relative">
-      {/* UI Elements Overlaying the Map */}
-      <div className="absolute top-0 left-0 right-0 z-20 p-3 md:p-4 space-y-3">
-        {/* Search Bar */}
-        {!enRouteProviderInfo && (
-            <Card className="shadow-lg rounded-lg bg-background backdrop-blur-sm border border-border/50">
-                <CardContent className="p-0 flex items-center">
-                <Search className="h-5 w-5 text-muted-foreground ml-3" />
-                <Input
-                    type="text"
-                    placeholder="¿Qué servicio estás buscando?"
-                    value={searchTerm}
-                    onChange={handleSearchInputChange}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
-                    className="flex-grow text-base border-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent h-12 placeholder:text-muted-foreground placeholder:font-normal"
-                    aria-label="Buscar servicio"
-                />
-                {searchTerm && (
-                    <Button variant="ghost" size="icon" onClick={() => setSearchTerm('')} className="h-9 w-9 mr-1">
-                        <XCircle className="h-5 w-5 text-muted-foreground hover:text-destructive"/>
-                    </Button>
-                )}
-                </CardContent>
-            </Card>
-        )}
+      {/* Top Search and Category Bar Area */}
+      {!enRouteProviderInfo && (
+        <div className="absolute top-0 left-0 right-0 z-20 p-3 md:p-4 space-y-3 bg-gradient-to-b from-background via-background/90 to-transparent">
+          {/* Search Bar */}
+          <Card className="shadow-lg rounded-lg bg-background backdrop-blur-sm border border-border/50">
+              <CardContent className="p-0 flex items-center">
+              <Search className="h-5 w-5 text-muted-foreground ml-3" />
+              <Input
+                  type="text"
+                  placeholder="¿Qué servicio estás buscando?"
+                  value={searchTerm}
+                  onChange={handleSearchInputChange}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
+                  className="flex-grow text-base border-none focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent h-12 placeholder:text-muted-foreground placeholder:font-normal"
+                  aria-label="Buscar servicio"
+              />
+              {searchTerm && (
+                  <Button variant="ghost" size="icon" onClick={() => setSearchTerm('')} className="h-9 w-9 mr-1">
+                      <XCircle className="h-5 w-5 text-muted-foreground hover:text-destructive"/>
+                  </Button>
+              )}
+              </CardContent>
+          </Card>
 
-        {/* Category Icons Bar - only show if not in "en route" mode */}
-        {!enRouteProviderInfo && activeProvidersInCategories.length > 0 && (
-          <CategoryIconBar
-              categories={activeProvidersInCategories}
-              onCategorySelect={handleCategoryFilter}
-              selectedCategoryId={selectedCategory}
-          />
-        )}
-      </div>
+          {/* Category Icons Bar */}
+          {activeCategories.length > 0 && (
+            <div className="bg-background/80 backdrop-blur-sm rounded-lg shadow-md">
+               <CategoryIconBar
+                  categories={activeCategories}
+                  onCategorySelect={handleCategoryFilter}
+                  selectedCategoryId={selectedCategory}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Map Area */}
       <div className="flex-grow relative z-0">
