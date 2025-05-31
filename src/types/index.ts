@@ -43,15 +43,16 @@ export interface Provider {
   services: Service[];
   isAvailable: boolean; // General availability toggle by provider
   estadoOnline: boolean; // Real-time online status for immediate services
-  ubicacionAproximada: ProviderLocation; // For browsing
-  ubicacionExacta?: ProviderLocation; // For accepted services, could be same as currentLocation
-  currentLocation?: ProviderLocation | null; // For real-time updates if available and sharing
+  ubicacionAproximada: ProviderLocation;
+  ubicacionExacta?: ProviderLocation;
+  currentLocation?: ProviderLocation | null;
   lastConnection?: number;
   specialties?: string[];
   allowsHourlyServices?: boolean;
   hourlyRate?: number;
   idiomasHablados?: string[];
   fcmTokens?: string[];
+  aceptaCotizacion?: boolean; // New field for quotations
 }
 
 export interface ChatMessage {
@@ -65,18 +66,18 @@ export interface ChatMessage {
 
 export type ServiceRequestStatus =
   | 'agendado'
-  | 'pendiente_confirmacion' // Usuario agenda, pendiente confirmación prestador (para citas)
-  | 'confirmada_prestador'   // Prestador confirma, pendiente pago/confirmación usuario (para citas)
-  | 'pagada'                 // Cita pagada y confirmada
+  | 'pendiente_confirmacion'
+  | 'confirmada_prestador'
+  | 'pagada'
   | 'en_camino_proveedor'
   | 'servicio_iniciado'
-  | 'completado_por_prestador' // Prestador marca como completado
-  | 'completado_por_usuario'   // Usuario confirma finalización (equivale a "finalizado")
+  | 'completado_por_prestador'
+  | 'completado_por_usuario'
   | 'cancelada_usuario'
   | 'cancelada_prestador'
-  | 'rechazada_prestador'    // Prestador rechaza la cita
+  | 'rechazada_prestador'
   | 'en_disputa'
-  | 'cerrado_automaticamente'  // Cerrado por sistema (ej. ventana de calificación expiró)
+  | 'cerrado_automaticamente'
   | 'cerrado_con_calificacion'
   | 'cerrado_con_disputa_resuelta';
 
@@ -97,7 +98,7 @@ export interface DemoUser {
   isPremium: boolean;
   name: string;
   idiomaPreferido?: 'es' | 'en';
-  ubicacionExacta?: ProviderLocation; // User's exact location
+  ubicacionExacta?: ProviderLocation;
   fcmTokens?: string[];
 }
 
@@ -105,68 +106,58 @@ interface BaseServiceRequest {
   id: string;
   userId: string;
   providerId: string;
-  location?: ProviderLocation | { customAddress: string }; // User's location for the service
-  serviceDate: string; // YYYY-MM-DD
+  location?: ProviderLocation | { customAddress: string };
+  serviceDate: string;
   notes?: string;
   status: ServiceRequestStatus;
-  createdAt: number; // Timestamp
-  updatedAt?: number; // Timestamp
-
-  // Fields related to service completion and rating
-  providerMarkedCompleteAt?: number; // Timestamp
-  userConfirmedCompletionAt?: number; // Timestamp (este es `fechaFinalizado`)
-  ratingWindowExpiresAt?: number; // Timestamp (userConfirmedCompletionAt + 7 days)
-  
+  createdAt: number;
+  updatedAt?: number;
+  providerMarkedCompleteAt?: number;
+  userConfirmedCompletionAt?: number;
+  ratingWindowExpiresAt?: number;
   calificacionUsuario?: {
-    estrellas: number; // 1 a 5
+    estrellas: number;
     comentario?: string;
-    fecha: number; // Timestamp
+    fecha: number;
   };
   calificacionPrestador?: {
-    estrellas: number; // 1 a 5
+    estrellas: number;
     comentario?: string;
-    fecha: number; // Timestamp
+    fecha: number;
   };
-  mutualRatingCompleted?: boolean; // True si ambas partes han calificado
-
-  // Fields related to payment
+  mutualRatingCompleted?: boolean;
   paymentStatus?: PaymentStatus;
   paymentIntentId?: string;
-  paymentReleasedToProviderAt?: number; // Timestamp
-
-  // Fields related to disputes and warranty
+  paymentReleasedToProviderAt?: number;
   disputeDetails?: {
-    reportedAt: number; // Timestamp
+    reportedAt: number;
     reason: string;
     resolution?: string;
-    resolvedAt?: number; // Timestamp
+    resolvedAt?: number;
   };
-  warrantyEndDate?: string; // YYYY-MM-DD (calculado basado en premium status y fecha finalización)
-  garantiaActiva?: boolean; // Activada automáticamente si no hay calificación y usuario es premium
-
-  // Fields for corporate accounts
+  warrantyEndDate?: string;
+  garantiaActiva?: boolean;
   solicitadoPorEmpresaId?: string;
   miembroEmpresaUid?: string;
-
-  // Field for notifications
-  titulo?: string; // Title of the service or appointment for notifications
+  titulo?: string;
+  originatingQuotationId?: string; // Link back to quotation if created from one
 }
 
 export interface FixedServiceRequest extends BaseServiceRequest {
   serviceType: 'fixed';
   selectedFixedServices?: { serviceId: string, title: string, price: number }[];
   totalAmount?: number;
-  serviceTime: string; // HH:MM
+  serviceTime: string;
 }
 
 export interface HourlyServiceRequest extends BaseServiceRequest {
   serviceType: 'hourly';
-  startTime: string; // HH:MM
+  startTime: string;
   durationHours: number;
   hourlyRate: number;
   estimatedTotal: number;
-  actualStartTime?: number; // Timestamp
-  actualEndTime?: number; // Timestamp
+  actualStartTime?: number;
+  actualEndTime?: number;
   actualDurationHours?: number;
   finalTotal?: number;
 }
@@ -176,9 +167,9 @@ export type ServiceRequest = FixedServiceRequest | HourlyServiceRequest;
 export interface Membresia {
   id: string;
   rol: 'usuario' | 'prestador';
-  tipoMembresia: string; // Ej: "premium_mensual_usuario", "gratis_prestador"
-  fechaInicio: string; // ISO Date string
-  fechaExpiracion: string; // ISO Date string
+  tipoMembresia: string;
+  fechaInicio: string;
+  fechaExpiracion: string;
   estadoMembresia: 'activa' | 'vencida' | 'cancelada' | 'pendiente_pago';
   beneficiosAdicionales?: {
     descuentoComisionPorcentaje?: number;
@@ -196,37 +187,36 @@ export interface BannerPublicitario {
   nombre: string;
   imagenUrl: string;
   linkDestino?: string;
-  orden: number; // Lower number = higher priority for display
+  orden: number;
   activo: boolean;
   dataAiHint?: string;
-  fechaInicio?: string; // ISO Date string
-  fechaFin?: string; // ISO Date string
+  fechaInicio?: string;
+  fechaFin?: string;
 }
 
 export interface CategoriaServicio {
   id: string;
   nombre: string;
-  iconoUrl: string; // URL to an image for the icon, e.g., from placehold.co or Firebase Storage
-  icon?: LucideIcon; // Optional: if we still want to use Lucide for some defaults or in UI
+  iconoUrl: string;
+  icon?: LucideIcon;
   keywords: string[];
 }
 
-// Estructuras para Cuentas Empresariales
 export interface MiembroEmpresa {
   uid: string;
   nombre?: string;
   email?: string;
-  rolEnEmpresa?: string; // Ej: "Comprador", "Administrador Junior"
+  rolEnEmpresa?: string;
   activo: boolean;
-  fechaAgregado: number; // Timestamp
+  fechaAgregado: number;
 }
 
 export interface MetodoPagoEmpresa {
   idMetodoPago: string;
-  tipo: string; // Ej: "tarjeta_credito"
+  tipo: string;
   ultimosDigitos?: string;
   predeterminado: boolean;
-  fechaAgregado: number; // Timestamp
+  fechaAgregado: number;
 }
 
 export interface EmpresaData {
@@ -239,14 +229,12 @@ export interface EmpresaData {
     rfc?: string;
     razonSocial?: string;
     direccionFiscal?: string;
-    // ... otros datos fiscales
   };
-  fechaCreacion: number; // Timestamp
-  updatedAt: number; // Timestamp
+  fechaCreacion: number;
+  updatedAt: number;
 }
 
-// Nueva interfaz para Logs de Actividad
-export type ActivityLogAction = 
+export type ActivityLogAction =
   | 'CAMBIO_ESTADO_SOLICITUD'
   | 'CALIFICACION_USUARIO'
   | 'CALIFICACION_PRESTADOR'
@@ -254,22 +242,82 @@ export type ActivityLogAction =
   | 'PAGO_RETENIDO'
   | 'PAGO_LIBERADO'
   | 'GARANTIA_ACTIVADA'
-  | 'INICIO_SESION' // Ejemplo para futuro
-  | 'CIERRE_SESION' // Ejemplo para futuro
-  | 'CONFIG_CAMBIADA'; // Ejemplo para futuro
+  | 'INICIO_SESION'
+  | 'CIERRE_SESION'
+  | 'CONFIG_CAMBIADA'
+  | 'COTIZACION_CREADA'
+  | 'COTIZACION_PRECIO_PROPUESTO'
+  | 'COTIZACION_ACEPTADA_USUARIO'
+  | 'COTIZACION_RECHAZADA'
+  | 'CHAT_CREADO';
 
 export interface ActivityLog {
-  id?: string; // Firestore lo autogenerará
-  actorId: string; // Quién realizó la acción (userId, providerId, 'sistema')
+  id?: string;
+  actorId: string;
   actorRol: 'usuario' | 'prestador' | 'sistema' | 'admin';
   accion: ActivityLogAction;
   descripcion: string;
-  fecha: number; // Timestamp (admin.firestore.Timestamp en backend)
-  entidadAfectada?: { // Opcional: qué entidad fue afectada
-    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago';
+  fecha: number;
+  entidadAfectada?: {
+    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat';
     id: string;
   };
-  detallesAdicionales?: Record<string, any>; // Para data extra, ej: { estadoAnterior: 'pendiente', estadoNuevo: 'aceptado' }
+  detallesAdicionales?: Record<string, any>;
 }
 
-    
+// --- New Types for Quotation and Chat ---
+export type SolicitudCotizacionEstado =
+  | "pendiente_revision_prestador" // User submitted, provider needs to review
+  | "precio_propuesto_al_usuario" // Provider reviewed, proposed a price, user needs to accept/reject
+  | "rechazada_prestador"          // Provider rejected the quote request
+  | "aceptada_por_usuario"         // User accepted the proposed price, ready to become service_request
+  | "rechazada_usuario"            // User rejected the proposed price
+  | "convertida_a_servicio"      // Quotation has been successfully converted to a service_request
+  | "expirada";                    // Quotation expired before action was taken
+
+export interface SolicitudCotizacion {
+  id?: string; // Firestore auto-ID
+  usuarioId: string;
+  prestadorId: string;
+  descripcionProblema: string; // User's description
+  videoUrl?: string; // Optional URL to video in Firebase Storage
+  estado: SolicitudCotizacionEstado;
+  precioSugerido?: number; // Set by provider
+  notasPrestador?: string; // Provider's notes on the quote
+  fechaCreacion: number; // Timestamp
+  fechaRespuestaPrestador?: number; // Timestamp
+  fechaRespuestaUsuario?: number; // Timestamp
+  tituloServicio?: string; // e.g., "Cotización para reparación de techo"
+  categoriaServicioId?: string; // Optional, if user selected a category
+}
+
+export interface MensajeChat {
+  id?: string; // Firestore auto-ID
+  remitenteId: string; // userId or providerId
+  texto: string;
+  timestamp: number; // Timestamp
+  tipo?: "texto" | "imagen" | "video_link"; // Optional, for rich messages
+  urlAdjunto?: string; // Optional, for images/videos
+  leidoPor?: string[]; // Array of UIDs who have read the message
+}
+
+export interface Chat {
+  id?: string; // Can be the solicitudServicioId
+  solicitudServicioId: string;
+  participantesUids: string[]; // [userId, providerId]
+  participantesInfo?: { // Optional, for quicker display of names/avatars
+    [uid: string]: { nombre?: string; avatarUrl?: string; rol: 'usuario' | 'prestador' };
+  };
+  fechaCreacion: number; // Timestamp
+  ultimaActualizacion: number; // Timestamp for the last message or status change
+  ultimoMensaje?: { // For previews in chat lists
+    texto: string;
+    remitenteId: string;
+    timestamp: number;
+  };
+  estadoChat?: "activo" | "archivado_usuario" | "archivado_prestador" | "finalizado_servicio";
+  conteoNoLeido?: { // Unread count for each participant
+    [uid: string]: number;
+  };
+  // Subcollection: mensajes (MensajeChat[])
+}

@@ -1,19 +1,15 @@
 
 // src/lib/mockData.ts
-import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation } from '@/types';
-import { SERVICE_CATEGORIES as LUCIDE_SERVICE_CATEGORIES } from './constants'; // Keep for fallbacks or other uses
+import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat } from '@/types';
+import { SERVICE_CATEGORIES as LUCIDE_SERVICE_CATEGORIES } from './constants';
 
-// --- Helper para generar ubicación aproximada ---
 const getApproximateLocation = (exactLoc: ProviderLocation, factor = 0.01): ProviderLocation => {
-  // Truncate to 2 decimal places for a noticeable but not too drastic shift
-  // Add a small random offset to make it less predictable if needed
   const latApprox = parseFloat((exactLoc.lat + (Math.random() - 0.5) * factor).toFixed(3));
   const lngApprox = parseFloat((exactLoc.lng + (Math.random() - 0.5) * factor).toFixed(3));
   return { lat: latApprox, lng: lngApprox };
 };
 
-
-export const USER_FIXED_LOCATION: ProviderLocation = { lat: 24.8093, lng: -107.4255 }; // Culiacán, Sinaloa (Galileo 772, Villa Universidad)
+export const USER_FIXED_LOCATION: ProviderLocation = { lat: 24.8093, lng: -107.4255 };
 
 const plumber1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.002, lng: USER_FIXED_LOCATION.lng - 0.002 };
 const electrician1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat - 0.003, lng: USER_FIXED_LOCATION.lng + 0.001 };
@@ -21,11 +17,6 @@ const nanny1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0
 const gardener1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat - 0.0025, lng: USER_FIXED_LOCATION.lng - 0.003 };
 const doctor1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.0005, lng: USER_FIXED_LOCATION.lng - 0.004 };
 const cleaner1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.01, lng: USER_FIXED_LOCATION.lng + 0.01 };
-const tutor1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat - 0.005, lng: USER_FIXED_LOCATION.lng + 0.005 };
-const nurse1InactiveExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat - 0.012, lng: USER_FIXED_LOCATION.lng - 0.008 };
-const designer1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.015, lng: USER_FIXED_LOCATION.lng - 0.01 };
-const handyman1InactiveExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat - 0.008, lng: USER_FIXED_LOCATION.lng + 0.012 };
-
 
 export const mockProviders: Provider[] = [
   {
@@ -36,18 +27,19 @@ export const mockProviders: Provider[] = [
     rating: 4.9,
     ratingCount: 120,
     ratingSum: 588,
-    isAvailable: true, // Availability toggle by provider
-    estadoOnline: true, // Real-time presence
+    isAvailable: true,
+    estadoOnline: true,
     services: [
         {id: 's_p1_1', title: 'Reparaciones Urgentes 24/7', description: 'Solución rápida a fugas y atascos, disponible a cualquier hora.', price: 90, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200/3F51B5/FFFFFF.png?text=Fuga', dataAiHint: 'water pipes'},
         {id: 's_p1_2', title: 'Instalación de Calentadores', description: 'Instalamos y reparamos calentadores de agua de todas las marcas.', price: 150, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200/3F51B5/FFFFFF.png?text=Boiler', dataAiHint: 'water heater'},
     ],
     ubicacionExacta: plumber1ExactLocation,
     ubicacionAproximada: getApproximateLocation(plumber1ExactLocation),
-    currentLocation: plumber1ExactLocation, // Assume exact for current if online
+    currentLocation: plumber1ExactLocation,
     specialties: ['Fugas de agua', 'Desazolves', 'Instalación de tuberías', 'Reparación de boilers'],
     allowsHourlyServices: false,
     idiomasHablados: ['es'],
+    aceptaCotizacion: true,
   },
   {
     id: 'electrician1',
@@ -69,6 +61,7 @@ export const mockProviders: Provider[] = [
     allowsHourlyServices: true,
     hourlyRate: 30,
     idiomasHablados: ['es', 'en'],
+    aceptaCotizacion: true,
   },
   {
     id: 'nanny1',
@@ -80,7 +73,7 @@ export const mockProviders: Provider[] = [
     ratingSum: 343,
     isAvailable: true,
     estadoOnline: true,
-    services: [], // Primarily hourly
+    services: [],
     ubicacionExacta: nanny1ExactLocation,
     ubicacionAproximada: getApproximateLocation(nanny1ExactLocation),
     currentLocation: nanny1ExactLocation,
@@ -88,6 +81,7 @@ export const mockProviders: Provider[] = [
     allowsHourlyServices: true,
     hourlyRate: 20,
     idiomasHablados: ['es'],
+    aceptaCotizacion: false,
   },
   {
     id: 'gardener1',
@@ -108,6 +102,7 @@ export const mockProviders: Provider[] = [
     specialties: ['Poda de árboles', 'Instalación de pasto', 'Sistemas de riego', 'Paisajismo'],
     allowsHourlyServices: false,
     idiomasHablados: ['es'],
+    aceptaCotizacion: true,
   },
   {
     id: 'doctor1',
@@ -129,6 +124,7 @@ export const mockProviders: Provider[] = [
     allowsHourlyServices: true,
     hourlyRate: 50,
     idiomasHablados: ['es', 'en'],
+    aceptaCotizacion: false,
   },
   {
     id: 'cleaner1',
@@ -139,17 +135,18 @@ export const mockProviders: Provider[] = [
     ratingCount: 80,
     ratingSum: 360,
     isAvailable: true,
-    estadoOnline: false, // Online but not available for immediate hire via map browsing perhaps
+    estadoOnline: false,
     services: [
       {id: 's_c1_1', title: 'Limpieza Profunda de Casas', description: 'Dejamos tu hogar reluciente de arriba a abajo.', price: 120, category: 'cleaning', providerId: 'cleaner1', imageUrl: 'https://placehold.co/300x200/2196F3/FFFFFF.png?text=CasaLimpia', dataAiHint: 'cleaning supplies'},
     ],
     ubicacionExacta: cleaner1ExactLocation,
     ubicacionAproximada: getApproximateLocation(cleaner1ExactLocation),
-    currentLocation: cleaner1ExactLocation, // They might be online but not "isAvailable" via toggle
+    currentLocation: cleaner1ExactLocation,
     specialties: ['Limpieza residencial', 'Limpieza de oficinas', 'Desinfección de áreas'],
     allowsHourlyServices: true,
     hourlyRate: 25,
     idiomasHablados: ['es'],
+    aceptaCotizacion: true,
   },
 ];
 
@@ -182,7 +179,7 @@ export const mockBannersPublicitarios: BannerPublicitario[] = [
     nombre: 'Promo Verano Limpieza',
     imagenUrl: 'https://placehold.co/400x150/2196F3/FFFFFF.png?text=Limpieza+Verano+25%25+OFF',
     linkDestino: '/promociones/verano-limpieza',
-    orden: 1, // Más importante
+    orden: 1,
     activo: true,
     dataAiHint: "cleaning summer promo"
   },
@@ -215,7 +212,6 @@ export const mockBannersPublicitarios: BannerPublicitario[] = [
   },
 ];
 
-// Match IDs with LUCIDE_SERVICE_CATEGORIES for consistency if needed
 export const mockCategoriasServicio: CategoriaServicio[] = [
   { id: 'plumbing', nombre: 'Plomería', iconoUrl: 'https://placehold.co/80x80/3F51B5/FFFFFF.png?text=PLM', keywords: ['plomeria', 'fontaneria'], icon: LUCIDE_SERVICE_CATEGORIES.find(c => c.id === 'plumbing')?.icon },
   { id: 'electrical', nombre: 'Electricidad', iconoUrl: 'https://placehold.co/80x80/008080/FFFFFF.png?text=ELC', keywords: ['electricidad', 'electricista'], icon: LUCIDE_SERVICE_CATEGORIES.find(c => c.id === 'electrical')?.icon },
@@ -224,3 +220,62 @@ export const mockCategoriasServicio: CategoriaServicio[] = [
   { id: 'gardening', nombre: 'Jardinería', iconoUrl: 'https://placehold.co/80x80/4CAF50/FFFFFF.png?text=JAR', keywords: ['jardineria', 'plantas'], icon: LUCIDE_SERVICE_CATEGORIES.find(c => c.id === 'gardening')?.icon },
   { id: 'child_care', nombre: 'Niñeras', iconoUrl: 'https://placehold.co/80x80/7E57C2/FFFFFF.png?text=NIN', keywords: ['cuidado de niños', 'niñera'], icon: LUCIDE_SERVICE_CATEGORIES.find(c => c.id === 'child_care')?.icon },
 ];
+
+// Mock data for quotations
+export const mockSolicitudesCotizacion: SolicitudCotizacion[] = [
+  {
+    id: 'cotizacion1',
+    usuarioId: 'currentUserDemoId',
+    prestadorId: 'plumber1',
+    descripcionProblema: 'Tengo una fuga grande en la tubería principal del baño, necesito ayuda urgente. Adjunto video mostrando el problema.',
+    videoUrl: 'https://storage.googleapis.com/servimap-videos/mock_fuga_video.mp4', // Placeholder
+    estado: 'pendiente_revision_prestador',
+    fechaCreacion: Date.now() - (2 * 60 * 60 * 1000), // Hace 2 horas
+    tituloServicio: 'Fuga en tubería de baño',
+    categoriaServicioId: 'plumbing',
+  },
+  {
+    id: 'cotizacion2',
+    usuarioId: 'standardUserDemoId',
+    prestadorId: 'electrician1',
+    descripcionProblema: 'El interruptor de la sala no funciona y huele un poco a quemado. ¿Pueden revisar?',
+    estado: 'precio_propuesto_al_usuario',
+    precioSugerido: 75,
+    notasPrestador: 'Revisión de interruptor y posible recableado. El precio incluye diagnóstico y mano de obra para reparación simple. Si se requiere cambiar todo el interruptor o hay daño mayor, el precio podría ajustarse.',
+    fechaCreacion: Date.now() - (24 * 60 * 60 * 1000), // Ayer
+    fechaRespuestaPrestador: Date.now() - (12 * 60 * 60 * 1000), // Hace 12 horas
+    tituloServicio: 'Interruptor defectuoso',
+    categoriaServicioId: 'electrical',
+  }
+];
+
+// Mock data for chats (simple examples)
+export const mockChats: Chat[] = [
+  {
+    id: 'chat_serv123', // Assume this ID matches a solicitudServicioId
+    solicitudServicioId: 'serv123_accepted', // A mock service ID that is "accepted"
+    participantesUids: ['currentUserDemoId', 'plumber1'],
+    participantesInfo: {
+      'currentUserDemoId': { nombre: 'Usuario Premium Demo', rol: 'usuario' },
+      'plumber1': { nombre: 'Mario Fontanería Express', rol: 'prestador' }
+    },
+    fechaCreacion: Date.now() - (3 * 60 * 60 * 1000), // Hace 3 horas
+    ultimaActualizacion: Date.now() - (1 * 60 * 1000), // Hace 1 minuto
+    ultimoMensaje: {
+      texto: 'Perfecto, estaré allí en unos 20 minutos.',
+      remitenteId: 'plumber1',
+      timestamp: Date.now() - (1 * 60 * 1000)
+    },
+    estadoChat: 'activo',
+    conteoNoLeido: { 'currentUserDemoId': 0, 'plumber1': 0 }
+    // Mensajes would be a subcollection
+  }
+];
+
+// You might also have a separate array for mockMensajes if you decide to populate them here
+// For example:
+// export const mockMensajesChat_serv123: MensajeChat[] = [
+//   { id: 'msg1', remitenteId: 'currentUserDemoId', texto: 'Hola Mario, ¿confirmado para las 3 PM?', timestamp: Date.now() - (60 * 60 * 1000) },
+//   { id: 'msg2', remitenteId: 'plumber1', texto: '¡Hola! Sí, confirmado. ¿Alguna instrucción especial para llegar?', timestamp: Date.now() - (58 * 60 * 1000) },
+// ];
+

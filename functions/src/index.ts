@@ -1,22 +1,20 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import type { ServiceRequest, ServiceRequestStatus, ActivityLogAction, UserData, ProviderData, ServiceData, CitaData } from "./index_interfaces"; // Asegúrate que este path sea correcto o define las interfaces aquí
-
+// Intentar importar desde el archivo de interfaces si existe, sino usar definiciones locales.
+// import type { ServiceRequest, ServiceRequestStatus, ActivityLogAction, UserData, ProviderData, ServiceData, CitaData, SolicitudCotizacion, SolicitudCotizacionEstado, Chat, MensajeChat } from "./index_interfaces";
 
 // Initialize Firebase Admin SDK if not already initialized
 if (admin.apps.length === 0) {
   admin.initializeApp();
 }
 const db = admin.firestore();
-// const visionClient = new ImageAnnotatorClient(); // Comentado si no se usa en este archivo directamente
 
-// --- INTERFACES (Copiadas de la app o un archivo compartido si es posible) ---
-// Es mejor tener un archivo de interfaces compartido, pero para este ejemplo, las duplicaré/simplificaré.
-// Asegúrate que ServiceRequest, ServiceRequestStatus, ActivityLogAction, UserData, ProviderData, CitaData
-// estén definidas aquí o importadas de un archivo como './index_interfaces.ts'
-// Por ejemplo, en un archivo index_interfaces.ts podrías tener:
-/*
+// --- START: INTERFACES (Definidas localmente para este ejemplo si no se importan) ---
+// Es MUCHO MEJOR tener un archivo de interfaces compartido (ej. index_interfaces.ts)
+// y que tanto el frontend como las funciones lo usen.
+// Estas son versiones simplificadas o que coinciden con src/types/index.ts
+
 export type ServiceRequestStatus =
   | "agendado" | "pendiente_confirmacion" | "confirmada_prestador" | "pagada"
   | "en_camino_proveedor" | "servicio_iniciado" | "completado_por_prestador"
@@ -24,36 +22,141 @@ export type ServiceRequestStatus =
   | "rechazada_prestador" | "en_disputa" | "cerrado_automaticamente"
   | "cerrado_con_calificacion" | "cerrado_con_disputa_resuelta";
 
-export interface ServiceRequest {
+export interface ServiceRequest { // Usado en solicitudes_servicio
   id: string;
-  userId: string;
-  providerId: string;
+  userId: string; // Debería ser usuarioId para consistencia
+  usuarioId: string;
+  providerId: string; // Debería ser prestadorId para consistencia
+  prestadorId: string;
   status: ServiceRequestStatus;
   createdAt: admin.firestore.Timestamp | number;
   updatedAt?: admin.firestore.Timestamp | number;
   titulo?: string;
-  // ...otros campos relevantes
-  // Para la lógica de actor en el log:
-  actorDelCambioId?: string; // Quién hizo el último cambio manual (usuarioId o prestadorId)
+  actorDelCambioId?: string;
   actorDelCambioRol?: 'usuario' | 'prestador';
+  calificacionUsuario?: any; // Simplificado
+  calificacionPrestador?: any; // Simplificado
+  // Otros campos relevantes de tu tipo ServiceRequest
+  paymentStatus?: string; // Ej: 'retenido_para_liberacion', 'liberado_al_proveedor'
+  originatingQuotationId?: string;
 }
-// Y así para las otras interfaces...
-*/
+
+export interface UserData { // Usado en usuarios
+  fcmTokens?: string[];
+  // otros campos de usuario
+  nombre?: string;
+}
+
+export interface ProviderData { // Usado en prestadores
+  fcmTokens?: string[];
+  // otros campos de prestador
+  nombre?: string;
+}
+
+export type SolicitudCotizacionEstado =
+  | "pendiente_revision_prestador" | "precio_propuesto_al_usuario"
+  | "rechazada_prestador" | "aceptada_por_usuario"
+  | "rechazada_usuario" | "convertida_a_servicio" | "expirada";
+
+export interface SolicitudCotizacionData { // Usado en solicitudes_cotizacion
+  id?: string;
+  usuarioId: string;
+  prestadorId: string;
+  descripcionProblema: string;
+  videoUrl?: string;
+  estado: SolicitudCotizacionEstado;
+  precioSugerido?: number;
+  notasPrestador?: string;
+  fechaCreacion: admin.firestore.Timestamp;
+  fechaRespuestaPrestador?: admin.firestore.Timestamp;
+  fechaRespuestaUsuario?: admin.firestore.Timestamp;
+  tituloServicio?: string;
+}
+
+export interface ChatData { // Usado en chats
+  id?: string;
+  solicitudServicioId: string;
+  participantesUids: string[];
+  participantesInfo?: {
+    [uid: string]: { nombre?: string; rol: 'usuario' | 'prestador' };
+  };
+  fechaCreacion: admin.firestore.Timestamp;
+  ultimaActualizacion?: admin.firestore.Timestamp;
+  ultimoMensaje?: {
+    texto: string;
+    remitenteId: string;
+    timestamp: admin.firestore.Timestamp;
+  };
+  // mensajes (subcolección)
+}
+
+export type ActivityLogAction =
+  | 'CAMBIO_ESTADO_SOLICITUD' | 'CALIFICACION_USUARIO' | 'CALIFICACION_PRESTADOR'
+  | 'SOLICITUD_CREADA' | 'PAGO_RETENIDO' | 'PAGO_LIBERADO'
+  | 'GARANTIA_ACTIVADA' | 'INICIO_SESION' | 'CIERRE_SESION'
+  | 'CONFIG_CAMBIADA' | 'COTIZACION_CREADA' | 'COTIZACION_PRECIO_PROPUESTO'
+  | 'COTIZACION_ACEPTADA_USUARIO' | 'COTIZACION_RECHAZADA' | 'CHAT_CREADO';
+
+// --- END: INTERFACES ---
 
 
-// --- START: Funciones importadas de otros archivos (mantener) ---
-// Ejemplo: export { activarMembresia } from "./activarMembresia";
-// Si tienes estas funciones en otros archivos, mantenlas exportadas.
-// ... (tus otras exportaciones de funciones callable y triggers)
-// --- END: Funciones importadas de otros archivos ---
+// --- Helper para enviar notificaciones (reutilizable) ---
+async function sendNotification(userId: string, userType: "usuario" | "prestador", title: string, body: string, data?: { [key: string]: string }) {
+  const userCol = userType === "usuario" ? "usuarios" : "prestadores";
+  const userDoc = await db.collection(userCol).doc(userId).get();
+  if (!userDoc.exists) {
+    functions.logger.error(`[NotificationHelper] ${userType} ${userId} no encontrado.`);
+    return;
+  }
+  const userData = (userType === "usuario" ? userDoc.data() as UserData : userDoc.data() as ProviderData);
+  const tokens = userData.fcmTokens;
+
+  if (tokens && tokens.length > 0) {
+    const payload = { notification: { title, body }, data };
+    try {
+      await admin.messaging().sendToDevice(tokens, payload);
+      functions.logger.info(`[NotificationHelper] Notificación enviada a ${userType} ${userId}.`);
+    } catch (error) {
+      functions.logger.error(`[NotificationHelper] Error enviando notificación a ${userType} ${userId}:`, error);
+      // Considerar limpiar tokens inválidos aquí
+    }
+  } else {
+    functions.logger.log(`[NotificationHelper] ${userType} ${userId} no tiene tokens FCM.`);
+  }
+}
+
+// --- Helper para crear logs de actividad (reutilizable) ---
+async function logActivity(
+  actorId: string,
+  actorRol: 'usuario' | 'prestador' | 'sistema' | 'admin',
+  accion: ActivityLogAction,
+  descripcion: string,
+  entidadAfectada?: { tipo: string; id: string },
+  detallesAdicionales?: Record<string, any>
+) {
+  try {
+    await db.collection("logs_actividad").add({
+      actorId,
+      actorRol,
+      accion,
+      descripcion,
+      fecha: admin.firestore.Timestamp.now(),
+      entidadAfectada: entidadAfectada || null,
+      detallesAdicionales: detallesAdicionales || null,
+    });
+    functions.logger.info(`[LogActivityHelper] Log creado: ${descripcion}`);
+  } catch (error) {
+    functions.logger.error(`[LogActivityHelper] Error al crear log: ${descripcion}`, error);
+  }
+}
 
 
-// --- TRIGGER FCM PARA CAMBIOS DE ESTADO DE SERVICIO (EXISTENTE) ---
+// --- FCM TRIGGER PARA CAMBIOS DE ESTADO DE SERVICIO (EXISTENTE, adaptado) ---
 export const onServiceStatusChangeSendNotification = functions.firestore
   .document("solicitudes_servicio/{solicitudId}")
   .onUpdate(async (change, context) => {
-    const newValue = change.after.data() as ServiceData | CitaData; // Usar ServiceData o CitaData según corresponda
-    const previousValue = change.before.data() as ServiceData | CitaData;
+    const newValue = change.after.data() as ServiceRequest;
+    const previousValue = change.before.data() as ServiceRequest;
     const solicitudId = context.params.solicitudId;
 
     if (!newValue || !previousValue) {
@@ -61,12 +164,12 @@ export const onServiceStatusChangeSendNotification = functions.firestore
       return null;
     }
 
-    if (newValue.estado === previousValue.estado) {
-      functions.logger.log(`[FCM Trigger ${solicitudId}] Estado no cambió (${newValue.estado}), no se envía notificación.`);
+    if (newValue.status === previousValue.status) {
+      // functions.logger.log(`[FCM Trigger ${solicitudId}] Estado no cambió (${newValue.status}), no se envía notificación.`);
       return null;
     }
     
-    functions.logger.log(`[FCM Trigger ${solicitudId}] Estado cambiado de ${previousValue.estado} a ${newValue.estado}. Preparando notificación.`);
+    functions.logger.log(`[FCM Trigger ${solicitudId}] Estado cambiado de ${previousValue.status} a ${newValue.status}. Preparando notificación.`);
 
     const usuarioId = newValue.usuarioId;
     const prestadorId = newValue.prestadorId;
@@ -75,16 +178,17 @@ export const onServiceStatusChangeSendNotification = functions.firestore
     let targetUserId: string | null = null;
     let targetUserType: 'usuario' | 'prestador' | null = null;
 
-    const serviceTitle = newValue.titulo || (newValue as ServiceData).detallesServicio || "un servicio";
+    const serviceTitle = newValue.titulo || "un servicio";
 
-    switch (newValue.estado) {
-      case "agendado":
+    // Notificaciones de cambios de estado de servicio
+    switch (newValue.status) {
+      case "agendado": // Usuario agenda, notificar al prestador
         targetUserId = prestadorId;
         targetUserType = "prestador";
         tituloNotif = "Nueva Solicitud de Servicio";
         cuerpoNotif = `Has recibido una nueva solicitud para "${serviceTitle}".`;
         break;
-      case "confirmada_prestador":
+      case "confirmada_prestador": // Prestador confirma, notificar al usuario
         targetUserId = usuarioId;
         targetUserType = "usuario";
         tituloNotif = "¡Cita Confirmada!";
@@ -94,10 +198,10 @@ export const onServiceStatusChangeSendNotification = functions.firestore
       case "cancelada_prestador":
         targetUserId = usuarioId;
         targetUserType = "usuario";
-        tituloNotif = `Cita ${newValue.estado === "rechazada_prestador" ? "Rechazada" : "Cancelada"}`;
-        cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido ${newValue.estado === "rechazada_prestador" ? "rechazada" : "cancelada"} por el prestador.`;
+        tituloNotif = `Cita ${newValue.status === "rechazada_prestador" ? "Rechazada" : "Cancelada"}`;
+        cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido ${newValue.status === "rechazada_prestador" ? "rechazada" : "cancelada"} por el prestador.`;
         break;
-      case "cancelada_usuario":
+      case "cancelada_usuario": // Usuario cancela, notificar al prestador
         targetUserId = prestadorId;
         targetUserType = "prestador";
         tituloNotif = "Cita Cancelada por Usuario";
@@ -128,69 +232,19 @@ export const onServiceStatusChangeSendNotification = functions.firestore
         cuerpoNotif = `El usuario ha confirmado la finalización de "${serviceTitle}". ¡Ya puedes calificarlo!`;
         break;
       default:
-        functions.logger.log(`[FCM Trigger ${solicitudId}] Estado ${newValue.estado} no maneja notificación específica por ahora.`);
+        functions.logger.log(`[FCM Trigger ${solicitudId}] Estado ${newValue.status} no maneja notificación específica por ahora.`);
         return null;
     }
 
-    if (!targetUserId || !targetUserType) {
-      functions.logger.log(`[FCM Trigger ${solicitudId}] No se definió destinatario para el estado ${newValue.estado}.`);
-      return null;
-    }
-
-    const recipientCollection = targetUserType === "usuario" ? "usuarios" : "prestadores";
-    const recipientDoc = await db.collection(recipientCollection).doc(targetUserId).get();
-
-    if (!recipientDoc.exists) {
-      functions.logger.error(`[FCM Trigger ${solicitudId}] Documento del destinatario ${targetUserType} ${targetUserId} no encontrado.`);
-      return null;
-    }
-
-    const recipientData = (targetUserType === "usuario" ? recipientDoc.data() as UserData : recipientDoc.data() as ProviderData);
-    const tokens = recipientData.fcmTokens;
-
-    if (!tokens || tokens.length === 0) {
-      functions.logger.log(`[FCM Trigger ${solicitudId}] El destinatario ${targetUserType} ${targetUserId} no tiene tokens FCM registrados.`);
-      return null;
-    }
-
-    const payload: admin.messaging.MessagingPayload = {
-      notification: {
-        title: tituloNotif,
-        body: cuerpoNotif,
-      },
-      data: { 
-        solicitudId: solicitudId,
-        nuevoEstado: newValue.estado,
-        tipoNotificacion: `SERVICIO_${newValue.estado.toUpperCase()}`,
-      },
-    };
-
-    try {
-      const response = await admin.messaging().sendToDevice(tokens, payload);
-      functions.logger.log(`[FCM Trigger ${solicitudId}] Notificación enviada exitosamente a ${response.successCount} tokens para ${targetUserType} ${targetUserId}.`);
-      response.results.forEach((result, index) => {
-        const error = result.error;
-        if (error) {
-          functions.logger.error(
-            `[FCM Trigger ${solicitudId}] Falla al enviar notificación al token ${tokens[index]}:`,
-            error
-          );
-          // Lógica para limpiar tokens inválidos/caducados (ejemplo)
-          // if (error.code === "messaging/invalid-registration-token" ||
-          //     error.code === "messaging/registration-token-not-registered") {
-          //   db.collection(recipientCollection).doc(targetUserId).update({
-          //     fcmTokens: admin.firestore.FieldValue.arrayRemove(tokens[index])
-          //   });
-          // }
-        }
-      });
-    } catch (error) {
-      functions.logger.error(`[FCM Trigger ${solicitudId}] Error al enviar notificación FCM a ${targetUserType} ${targetUserId}:`, error);
+    if (targetUserId && targetUserType) {
+      await sendNotification(targetUserId, targetUserType, tituloNotif, cuerpoNotif, { solicitudId, nuevoEstado: newValue.status });
+    } else {
+      functions.logger.log(`[FCM Trigger ${solicitudId}] No se definió destinatario para el estado ${newValue.status}.`);
     }
     return null;
   });
 
-// --- NUEVO TRIGGER PARA LOGS DE ACTIVIDAD ---
+// --- TRIGGER PARA LOGS DE ACTIVIDAD (EXISTENTE, adaptado) ---
 export const logSolicitudServicioChanges = functions.firestore
   .document("solicitudes_servicio/{solicitudId}")
   .onUpdate(async (change, context) => {
@@ -203,133 +257,266 @@ export const logSolicitudServicioChanges = functions.firestore
       return null;
     }
 
-    const logs_actividad_ref = db.collection("logs_actividad");
-    const now = admin.firestore.Timestamp.now();
-    let actorId: string = "sistema"; // Por defecto, si no podemos determinar el actor
-    let actorRol: "usuario" | "prestador" | "sistema" | "admin" = "sistema";
-    let logEntryNeeded = false;
-    let descripcionLog = "";
+    let actorId: string = afterData.actorDelCambioId || "sistema";
+    let actorRol: 'usuario' | 'prestador' | 'sistema' | 'admin' = afterData.actorDelCambioRol || "sistema";
+    
     const detallesAdicionales: Record<string, any> = {
         solicitudId: solicitudId,
         estadoAnterior: beforeData.status,
         estadoNuevo: afterData.status,
     };
 
-    // 1. Cambio de Estado
     if (beforeData.status !== afterData.status) {
-      logEntryNeeded = true;
-      descripcionLog = `Solicitud ${solicitudId} cambió de estado: ${beforeData.status} -> ${afterData.status}.`;
-
-      // Determinar el actor basado en la transición de estado
-      // Esta lógica puede necesitar ajustes basados en cómo tu app realmente establece quién hace el cambio.
-      // Si tienes un campo 'actorDelCambioId' en 'solicitudes_servicio' que se actualiza con cada cambio manual, úsalo.
-      if (afterData.status === "confirmada_prestador" || afterData.status === "rechazada_prestador" || afterData.status === "en_camino_proveedor" || afterData.status === "servicio_iniciado" || afterData.status === "completado_por_prestador") {
-        actorId = afterData.providerId;
-        actorRol = "prestador";
-      } else if (afterData.status === "cancelada_usuario" || afterData.status === "completado_por_usuario") {
-        actorId = afterData.userId;
-        actorRol = "usuario";
-      } else if (afterData.status === "cancelada_prestador") {
-        actorId = afterData.providerId;
-        actorRol = "prestador";
-      } else if (afterData.status === "cerrado_automaticamente") {
-        actorId = "sistema";
-        actorRol = "sistema";
-        descripcionLog = `Solicitud ${solicitudId} cerrada automáticamente por sistema. Estado anterior: ${beforeData.status}.`;
+      // Determinar actor si no viene explícito (fallback)
+      if (!afterData.actorDelCambioId) {
+        if (afterData.status === "confirmada_prestador" || afterData.status === "rechazada_prestador" || afterData.status === "en_camino_proveedor" || afterData.status === "servicio_iniciado" || afterData.status === "completado_por_prestador" || afterData.status === "cancelada_prestador") {
+            actorId = afterData.prestadorId;
+            actorRol = "prestador";
+        } else if (afterData.status === "cancelada_usuario" || afterData.status === "completado_por_usuario") {
+            actorId = afterData.usuarioId;
+            actorRol = "usuario";
+        } else if (afterData.status === "cerrado_automaticamente") {
+            actorId = "sistema";
+            actorRol = "sistema";
+        }
       }
-      // Considerar otros estados y quién los gatilla.
-      
-      // Si el actor es 'sistema' pero el cambio fue gatillado por un 'updatedAt' cercano al 'now',
-      // podría ser que una función callable hizo el cambio. Necesitarías pasar el actorId a esa función.
-      // Para simplificar, si no es un estado automático claro, asumimos el actor del 'updatedAt'
-      // Esto es una heurística y puede no ser 100% preciso sin más contexto.
-      // Si `afterData.actorDelCambioId` y `afterData.actorDelCambioRol` existen, úsalos:
-      // if (afterData.actorDelCambioId && afterData.actorDelCambioRol) {
-      //   actorId = afterData.actorDelCambioId;
-      //   actorRol = afterData.actorDelCambioRol;
-      // }
+      const descLog = `Solicitud ${solicitudId} cambió de estado por ${actorRol} ${actorId}: ${beforeData.status} -> ${afterData.status}.`;
+      await logActivity(actorId, actorRol, "CAMBIO_ESTADO_SOLICITUD", descLog, { tipo: "solicitud_servicio", id: solicitudId }, detallesAdicionales);
     }
 
-    // 2. Creación de Calificación (detectado por la presencia nueva de la calificación)
-    // Calificación de Usuario
     if (!beforeData.calificacionUsuario && afterData.calificacionUsuario) {
-        logEntryNeeded = true;
-        descripcionLog = `Usuario ${afterData.userId} calificó servicio ${solicitudId} (Prestador: ${afterData.providerId}) con ${afterData.calificacionUsuario.estrellas} estrellas.`;
-        actorId = afterData.userId;
-        actorRol = "usuario";
-        detallesAdicionales.calificacionUsuario = afterData.calificacionUsuario;
-        
-        await logs_actividad_ref.add({
-            actorId: actorId,
-            actorRol: actorRol,
-            accion: "CALIFICACION_USUARIO" as ActivityLogAction,
-            descripcion: descripcionLog,
-            fecha: now,
-            entidadAfectada: { tipo: "solicitud_servicio", id: solicitudId },
-            detallesAdicionales: { estrellas: afterData.calificacionUsuario.estrellas, comentario: afterData.calificacionUsuario.comentario || "" },
-        });
-        logEntryNeeded = false; // Ya creamos el log específico para esto
+      const descLog = `Usuario ${afterData.usuarioId} calificó servicio ${solicitudId} (Prestador: ${afterData.prestadorId}) con ${afterData.calificacionUsuario.estrellas} estrellas.`;
+      await logActivity(afterData.usuarioId, "usuario", "CALIFICACION_USUARIO", descLog, { tipo: "solicitud_servicio", id: solicitudId }, { estrellas: afterData.calificacionUsuario.estrellas, comentario: afterData.calificacionUsuario.comentario || "" });
     }
 
-    // Calificación de Prestador
     if (!beforeData.calificacionPrestador && afterData.calificacionPrestador) {
-        logEntryNeeded = true;
-        descripcionLog = `Prestador ${afterData.providerId} calificó a usuario ${afterData.userId} en servicio ${solicitudId} con ${afterData.calificacionPrestador.estrellas} estrellas.`;
-        actorId = afterData.providerId;
-        actorRol = "prestador";
-        detallesAdicionales.calificacionPrestador = afterData.calificacionPrestador;
+      const descLog = `Prestador ${afterData.prestadorId} calificó a usuario ${afterData.usuarioId} en servicio ${solicitudId} con ${afterData.calificacionPrestador.estrellas} estrellas.`;
+      await logActivity(afterData.prestadorId, "prestador", "CALIFICACION_PRESTADOR", descLog, { tipo: "solicitud_servicio", id: solicitudId }, { estrellas: afterData.calificacionPrestador.estrellas, comentario: afterData.calificacionPrestador.comentario || "" });
+    }
+    return null;
+  });
 
-         await logs_actividad_ref.add({
-            actorId: actorId,
-            actorRol: actorRol,
-            accion: "CALIFICACION_PRESTADOR" as ActivityLogAction,
-            descripcion: descripcionLog,
-            fecha: now,
-            entidadAfectada: { tipo: "solicitud_servicio", id: solicitudId },
-            detallesAdicionales: { estrellas: afterData.calificacionPrestador.estrellas, comentario: afterData.calificacionPrestador.comentario || "" },
-        });
-        logEntryNeeded = false; // Ya creamos el log específico para esto
+
+// --- NUEVAS FUNCIONES Y TRIGGERS ---
+
+/**
+ * Trigger para notificar al usuario cuando un prestador responde a una solicitud de cotización.
+ */
+export const onQuotationResponseNotifyUser = functions.firestore
+  .document("solicitudes_cotizacion/{cotizacionId}")
+  .onUpdate(async (change, context) => {
+    const cotizacionId = context.params.cotizacionId;
+    const beforeData = change.before.data() as SolicitudCotizacionData | undefined;
+    const afterData = change.after.data() as SolicitudCotizacionData | undefined;
+
+    if (!beforeData || !afterData) {
+      functions.logger.warn(`[QuotationNotify ${cotizacionId}] Datos antes o después no disponibles.`);
+      return null;
     }
 
-    // Si hubo un cambio de estado genérico y no se ha logueado ya por calificación
-    if (logEntryNeeded && beforeData.status !== afterData.status) {
-      try {
-        await logs_actividad_ref.add({
-          actorId: actorId,
-          actorRol: actorRol,
-          accion: "CAMBIO_ESTADO_SOLICITUD" as ActivityLogAction,
-          descripcion: descripcionLog,
-          fecha: now,
-          entidadAfectada: { tipo: "solicitud_servicio", id: solicitudId },
-          detallesAdicionales: detallesAdicionales,
-        });
-        functions.logger.info(`[LogTrigger ${solicitudId}] Log de cambio de estado creado: ${descripcionLog}`);
-      } catch (error) {
-        functions.logger.error(`[LogTrigger ${solicitudId}] Error al crear log de actividad:`, error);
+    const usuarioId = afterData.usuarioId;
+    const prestadorId = afterData.prestadorId;
+    const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
+    const nombrePrestador = prestadorDoc.exists ? (prestadorDoc.data() as ProviderData).nombre || "El prestador" : "El prestador";
+    const tituloServicio = afterData.tituloServicio || "tu cotización";
+
+    let notifTitle = "";
+    let notifBody = "";
+    let logDesc = "";
+    let logAction: ActivityLogAction | null = null;
+
+    // Si el estado cambió Y fue el prestador quien lo cambió (ej. de "pendiente_revision_prestador" a "precio_propuesto_al_usuario")
+    if (afterData.estado !== beforeData.estado) {
+      if (afterData.estado === "precio_propuesto_al_usuario" && beforeData.estado === "pendiente_revision_prestador") {
+        notifTitle = "¡Cotización Actualizada!";
+        notifBody = `${nombrePrestador} ha propuesto un precio de $${afterData.precioSugerido} para ${tituloServicio}. Revisa y acepta o rechaza.`;
+        logAction = "COTIZACION_PRECIO_PROPUESTO";
+        logDesc = `${nombrePrestador} (ID: ${prestadorId}) propuso precio $${afterData.precioSugerido} para cotización ${cotizacionId} de usuario ${usuarioId}.`;
+      } else if (afterData.estado === "rechazada_prestador" && beforeData.estado === "pendiente_revision_prestador") {
+        notifTitle = "Cotización Rechazada";
+        notifBody = `${nombrePrestador} ha tenido que rechazar tu solicitud de cotización para ${tituloServicio}. ${afterData.notasPrestador || ""}`;
+        logAction = "COTIZACION_RECHAZADA";
+        logDesc = `${nombrePrestador} (ID: ${prestadorId}) rechazó cotización ${cotizacionId} de usuario ${usuarioId}. Motivo: ${afterData.notasPrestador || "No especificado"}`;
       }
-    } else if (!logEntryNeeded && beforeData.status !== afterData.status) {
-        functions.logger.info(`[LogTrigger ${solicitudId}] Cambio de estado ${beforeData.status} -> ${afterData.status} no requirió log genérico (probablemente logueado específicamente).`);
-    } else if (!logEntryNeeded && beforeData.status === afterData.status) {
-        // functions.logger.info(`[LogTrigger ${solicitudId}] No hubo cambio de estado ni se detectó evento de calificación nuevo relevante para logging general.`);
     }
 
-
-    // Futuro: Detectar cambios en otros campos críticos si es necesario.
-    // ej: if (beforeData.paymentStatus !== afterData.paymentStatus) { ... }
-    // ej: if (beforeData.garantiaActiva !== afterData.garantiaActiva && afterData.garantiaActiva === true) { ... }
+    if (notifTitle && notifBody) {
+      await sendNotification(usuarioId, "usuario", notifTitle, notifBody, { cotizacionId: cotizacionId, nuevoEstado: afterData.estado });
+    }
+    if (logAction && logDesc) {
+      await logActivity(prestadorId, "prestador", logAction, logDesc, { tipo: "solicitud_cotizacion", id: cotizacionId }, { precioSugerido: afterData.precioSugerido, notasPrestador: afterData.notasPrestador });
+    }
 
     return null;
   });
 
-// Puedes añadir más triggers para otras colecciones o eventos si es necesario.
-// Ejemplo: un trigger para `logs_autenticacion` cuando se crea un usuario o inicia sesión,
-// pero eso normalmente se maneja con triggers de Authentication.
+/**
+ * Función Callable para que el usuario acepte una cotización con precio.
+ * Esto crea una solicitud de servicio.
+ */
+export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
+  }
+  const usuarioId = context.auth.uid;
+  const { cotizacionId } = data;
 
-// No olvides exportar aquí todas tus funciones callable, pubsub, etc.
-// que ya tenías, si es que las eliminaste de este archivo y las moviste a otros.
-// Si este es tu único archivo index.ts, todas las exportaciones van aquí.
+  if (!cotizacionId || typeof cotizacionId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'cotizacionId'.");
+  }
+
+  const cotizacionRef = db.collection("solicitudes_cotizacion").doc(cotizacionId);
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const cotizacionDoc = await transaction.get(cotizacionRef);
+      if (!cotizacionDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Cotización ${cotizacionId} no encontrada.`);
+      }
+      const cotizacionData = cotizacionDoc.data() as SolicitudCotizacionData;
+
+      if (cotizacionData.usuarioId !== usuarioId) {
+        throw new functions.https.HttpsError("permission-denied", "No eres el propietario de esta cotización.");
+      }
+      if (cotizacionData.estado !== "precio_propuesto_al_usuario") {
+        throw new functions.https.HttpsError("failed-precondition", `La cotización no está en estado 'precio_propuesto_al_usuario'. Estado actual: ${cotizacionData.estado}`);
+      }
+      if (typeof cotizacionData.precioSugerido !== "number" || cotizacionData.precioSugerido <= 0) {
+        throw new functions.https.HttpsError("failed-precondition", "La cotización no tiene un precio sugerido válido.");
+      }
+
+      // Crear la nueva solicitud de servicio
+      const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc(); // Firestore genera ID
+      const ahora = admin.firestore.Timestamp.now();
+
+      const nuevaSolicitudData: Omit<ServiceRequest, "id"> = { // Asegurar que los campos coincidan con tu tipo ServiceRequest
+        usuarioId: usuarioId,
+        prestadorId: cotizacionData.prestadorId,
+        status: "confirmada_prestador", // El proveedor ya aceptó al dar precio, usuario acepta ahora.
+        createdAt: ahora,
+        updatedAt: ahora,
+        titulo: cotizacionData.tituloServicio || `Servicio de cotización ${cotizacionId.substring(0,5)}`,
+        // @ts-ignore // Ignorar error de TS si ServiceRequest no tiene todos estos campos exactamente (ajustar según definición)
+        detallesServicio: cotizacionData.descripcionProblema,
+        precio: cotizacionData.precioSugerido,
+        // tipoServicio: 'fijo_cotizado', // Podrías añadir un tipo específico
+        paymentStatus: "pendiente_cobro", // O 'retenido_para_liberacion' si el pago se hace inmediatamente
+        originatingQuotationId: cotizacionId, // Enlazar a la cotización original
+        // ... otros campos necesarios para tu ServiceRequest
+      };
+      transaction.set(nuevaSolicitudRef, nuevaSolicitudData);
+
+      // Actualizar estado de la cotización
+      transaction.update(cotizacionRef, {
+        estado: "convertida_a_servicio",
+        fechaRespuestaUsuario: ahora,
+      });
+
+      await logActivity(
+        usuarioId, "usuario", "COTIZACION_ACEPTADA_USUARIO",
+        `Usuario ${usuarioId} aceptó cotización ${cotizacionId} (Prestador: ${cotizacionData.prestadorId}). Nueva solicitud de servicio ID: ${nuevaSolicitudRef.id}.`,
+        { tipo: "solicitud_cotizacion", id: cotizacionId },
+        { nuevaSolicitudServicioId: nuevaSolicitudRef.id, precioAceptado: cotizacionData.precioSugerido }
+      );
+
+      // Notificar al prestador
+      await sendNotification(
+        cotizacionData.prestadorId, "prestador",
+        "¡Cotización Aceptada!",
+        `El usuario ha aceptado tu cotización de $${cotizacionData.precioSugerido} para "${cotizacionData.tituloServicio || 'el servicio'}". Se ha creado una nueva solicitud de servicio.`,
+        { solicitudId: nuevaSolicitudRef.id, cotizacionId: cotizacionId }
+      );
+
+      return { success: true, message: "Cotización aceptada y solicitud de servicio creada.", servicioId: nuevaSolicitudRef.id };
+    });
+  } catch (error: any) {
+    functions.logger.error(`Error al aceptar cotización ${cotizacionId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar la aceptación de la cotización.", error.message);
+  }
+});
+
+
+/**
+ * Trigger para crear una sala de chat cuando una solicitud de servicio es confirmada.
+ */
+export const onServiceConfirmedCreateChatRoom = functions.firestore
+  .document("solicitudes_servicio/{solicitudId}")
+  .onUpdate(async (change, context) => {
+    const solicitudId = context.params.solicitudId;
+    const afterData = change.after.data() as ServiceRequest | undefined;
+    const beforeData = change.before.data() as ServiceRequest | undefined;
+
+    if (!afterData || !beforeData) {
+      functions.logger.warn(`[ChatCreate ${solicitudId}] Datos no disponibles.`);
+      return null;
+    }
+
+    // Estado que consideramos "confirmado" para iniciar chat.
+    // Podría ser 'confirmada_prestador' (si el usuario aún debe pagar) o 'pagada'.
+    // Usemos 'confirmada_prestador' como el punto donde la coordinación puede empezar.
+    const chatTriggerStatus: ServiceRequestStatus = "confirmada_prestador";
+
+    if (afterData.status === chatTriggerStatus && beforeData.status !== chatTriggerStatus) {
+      functions.logger.info(`[ChatCreate ${solicitudId}] Servicio confirmado. Creando/Verificando sala de chat.`);
+
+      const usuarioId = afterData.usuarioId;
+      const prestadorId = afterData.prestadorId;
+      const chatDocRef = db.collection("chats").doc(solicitudId); // Usar solicitudId como ID del chat
+
+      try {
+        const chatDoc = await chatDocRef.get();
+        if (chatDoc.exists) {
+          functions.logger.info(`[ChatCreate ${solicitudId}] Sala de chat ya existe.`);
+          return null; // Ya existe, no hacer nada
+        }
+
+        const usuarioInfoDoc = await db.collection("usuarios").doc(usuarioId).get();
+        const prestadorInfoDoc = await db.collection("prestadores").doc(prestadorId).get();
+
+        const nuevoChatData: ChatData = {
+          solicitudServicioId: solicitudId,
+          participantesUids: [usuarioId, prestadorId].sort(), // Guardar ordenado para consultas
+          participantesInfo: {
+            [usuarioId]: {
+              nombre: (usuarioInfoDoc.data() as UserData)?.nombre || `Usuario ${usuarioId.substring(0,5)}`,
+              rol: 'usuario',
+            },
+            [prestadorId]: {
+              nombre: (prestadorInfoDoc.data() as ProviderData)?.nombre || `Prestador ${prestadorId.substring(0,5)}`,
+              rol: 'prestador',
+            },
+          },
+          fechaCreacion: admin.firestore.Timestamp.now(),
+          ultimaActualizacion: admin.firestore.Timestamp.now(),
+          estadoChat: "activo",
+          conteoNoLeido: { [usuarioId]: 0, [prestadorId]: 0 }
+        };
+
+        await chatDocRef.set(nuevoChatData);
+        functions.logger.info(`[ChatCreate ${solicitudId}] Sala de chat creada exitosamente.`);
+
+        await logActivity(
+            "sistema", "sistema", "CHAT_CREADO",
+            `Sala de chat creada para solicitud ${solicitudId} entre usuario ${usuarioId} y prestador ${prestadorId}.`,
+            { tipo: "chat", id: solicitudId }, // Usando solicitudId como ID del chat
+            { solicitudServicioId: solicitudId }
+        );
+
+        // Notificar a ambos
+        const serviceTitle = afterData.titulo || "el servicio";
+        await sendNotification(usuarioId, "usuario", "Chat Habilitado", `Ya puedes chatear con el prestador sobre "${serviceTitle}".`, { chatId: solicitudId, solicitudId: solicitudId });
+        await sendNotification(prestadorId, "prestador", "Chat Habilitado", `Ya puedes chatear con el usuario sobre "${serviceTitle}".`, { chatId: solicitudId, solicitudId: solicitudId });
+
+      } catch (error) {
+        functions.logger.error(`[ChatCreate ${solicitudId}] Error al crear sala de chat:`, error);
+      }
+    }
+    return null;
+  });
+
+
+// Exportar otras funciones si las tienes...
 export {
-    // ... (tus otras funciones exportadas aquí)
+    // ... (tus otras funciones exportadas aquí, si las moviste)
 }
-
-    
