@@ -1,9 +1,13 @@
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import { ImageAnnotatorClient } from "@google-cloud/vision";
 
-admin.initializeApp();
+// Initialize Firebase Admin SDK if not already initialized
+if (admin.apps.length === 0) {
+  admin.initializeApp();
+}
 const db = admin.firestore();
 const visionClient = new ImageAnnotatorClient();
 
@@ -85,7 +89,7 @@ interface ServiceDataFirebase {
   imageUrl?: string;
 }
 
-interface ServiceData {
+interface ServiceData { // Solicitud de Servicio
   id?: string;
   usuarioId: string;
   prestadorId: string;
@@ -97,38 +101,61 @@ interface ServiceData {
   precio?: number;
   categoria?: string;
 
-  fechaServicio?: admin.firestore.Timestamp;
+  // Campos para servicios agendados / por horas
+  serviceType?: 'fixed' | 'hourly';
+  fechaServicio?: admin.firestore.Timestamp; // Para fijos agendados
+  serviceTime?: string; // Para fijos agendados
+  startTime?: string; // Para por horas
+  durationHours?: number; // Para por horas
+  hourlyRate?: number; // Para por horas
+  estimatedTotal?: number; // Para por horas
+  
   ubicacion?: { tipo: "actual" | "personalizada"; direccion?: string; lat?: number; lng?: number };
   notasAdicionales?: string;
 
+  // Timestamps de ciclo de vida
   fechaConfirmacionPrestador?: admin.firestore.Timestamp;
-  fechaConfirmacion?: admin.firestore.Timestamp;
-  userConfirmedCompletionAt?: admin.firestore.Timestamp;
-  habilitarCalificacion?: boolean;
+  fechaConfirmacion?: admin.firestore.Timestamp; // Confirmación del usuario (genérica)
+  userConfirmedCompletionAt?: admin.firestore.Timestamp; // Usuario confirma finalización del servicio
+  providerMarkedCompleteAt?: admin.firestore.Timestamp; // Prestador marca como completado
+
+  // Calificación y Ventana
+  habilitarCalificacion?: boolean; // Podría ser redundante si se usa ratingWindowExpiresAt
   ratingWindowExpiresAt?: admin.firestore.Timestamp;
   calificacionUsuario?: RatingData;
   calificacionPrestador?: RatingData;
   mutualRatingCompleted?: boolean;
 
+  // Pagos
   paymentStatus?: PaymentStatus;
-  fechaLiberacionPago?: admin.firestore.Timestamp;
-  fechaCobro?: admin.firestore.Timestamp;
-  montoCobrado?: number;
-  ordenCobroId?: string;
+  paymentIntentId?: string; // ID de la pasarela de pago
+  fechaLiberacionPago?: admin.firestore.Timestamp; // Pago liberado al proveedor
+  paymentReleasedToProviderAt?: admin.firestore.Timestamp; // Alias o nuevo campo
+  fechaCobro?: admin.firestore.Timestamp; // Fecha en que se intentó/realizó el cobro al usuario
+  montoCobrado?: number; // Monto final cobrado al usuario
+  ordenCobroId?: string; // ID interno de orden de cobro
 
-  warrantyEndDate?: string;
+  // Garantía
+  warrantyEndDate?: string; // YYYY-MM-DD
   garantiaSolicitada?: boolean;
   idSolicitudGarantia?: string;
   garantiaResultado?: "aprobada" | "rechazada";
   compensacionAutorizada?: boolean;
+  garantiaActiva?: boolean; // Campo para garantía activada automáticamente
 
+  // Disputa
   detallesDisputa?: {
     reportadoEn: admin.firestore.Timestamp;
     detalle: string;
     reporteId?: string;
   };
-  [key: string]: any;
+  
+  // Para notificaciones
+  titulo?: string; // Para identificar el servicio en notificaciones
+
+  [key: string]: any; // Para flexibilidad
 }
+
 
 type DiaSemana = "lunes" | "martes" | "miercoles" | "jueves" | "viernes" | "sabado" | "domingo";
 
@@ -148,12 +175,15 @@ interface ProviderData {
   rating?: number;
   documentosVerificables?: DocumentoVerificable[];
   isAvailable?: boolean;
-  currentLocation?: {
+  estadoOnline?: boolean; // Añadido para indicar si está activamente en línea
+  currentLocation?: { // Para ubicación en tiempo real si isAvailable
     lat: number;
     lng: number;
     timestamp: admin.firestore.Timestamp;
   } | null;
-  location?: { lat: number; lng: number }; // Ubicación base
+  ubicacionAproximada?: { lat: number; lng: number; }; // Ubicación general para búsqueda
+  ubicacionExacta?: { lat: number; lng: number; }; // Ubicación exacta para servicios aceptados
+  location?: { lat: number; lng: number }; // Ubicación base (podría ser redundante con ubicacionAproximada o Exacta)
   lastConnection?: admin.firestore.Timestamp;
   allowsHourlyServices?: boolean;
   hourlyRate?: number;
@@ -174,6 +204,7 @@ interface ProviderData {
   specialties?: string[];
   idiomasHablados?: string[];
   disponibilidadAvanzada?: DisponibilidadSlot[];
+  fcmTokens?: string[]; // Para notificaciones push
 }
 
 interface UserData {
@@ -188,6 +219,7 @@ interface UserData {
   puntosReputacionUsuario?: number;
   badgesUsuario?: string[];
   idiomaPreferido?: string;
+  fcmTokens?: string[]; // Para notificaciones push
 }
 
 interface DocumentoVerificable {
@@ -227,7 +259,7 @@ interface GarantiaData {
   resueltaPor?: string;
 }
 
-interface CitaData {
+interface CitaData { // Similar a ServiceData, pero específica para citas
   id?: string;
   usuarioId: string;
   prestadorId: string;
@@ -246,16 +278,18 @@ interface CitaData {
   rolCancelador?: 'usuario' | 'prestador';
 
   serviceType?: "fixed" | "hourly";
-  precioServicio?: number;
-  tarifaPorHora?: number;
-  duracionHoras?: number;
-  montoTotalEstimado?: number;
+  precioServicio?: number; // Para fixed agendado
+  tarifaPorHora?: number; // Para hourly agendado
+  duracionHoras?: number; // Para hourly agendado
+  montoTotalEstimado?: number; // Calculado para hourly, o fijo para fixed
 
   ordenCobroId?: string;
   paymentStatus?: PaymentStatus;
   fechaCobro?: admin.firestore.Timestamp;
   montoCobrado?: number;
+  titulo?: string; // Para identificar la cita en notificaciones
 }
+
 
 interface NotificacionData {
   id?: string;
@@ -263,13 +297,13 @@ interface NotificacionData {
   rolDestinatario: 'usuario' | 'prestador';
   titulo: string;
   cuerpo: string;
-  estadoNotificacion: 'pendiente' | 'leida' | 'procesada_por_trigger';
+  estadoNotificacion: 'pendiente' | 'leida' | 'procesada_por_trigger' | 'enviada_fcm';
   fechaCreacion: admin.firestore.Timestamp;
   fechaLectura?: admin.firestore.Timestamp;
-  tipoNotificacion: string;
+  tipoNotificacion: string; // Ej: 'NUEVA_SOLICITUD', 'SOLICITUD_ACEPTADA', 'PAGO_LIBERADO'
   prioridad: 'alta' | 'normal';
-  datosAdicionales?: { [key: string]: any };
-  enlaceOpcional?: string;
+  datosAdicionales?: { [key: string]: any }; // Ej: { servicioId: 'xyz', citaId: 'abc' }
+  enlaceOpcional?: string; // Para deeplinking en la app
   triggerProcesadoEn?: admin.firestore.Timestamp;
 }
 
@@ -438,7 +472,7 @@ interface SoporteTicketData {
     timestamp: admin.firestore.Timestamp;
   }[];
   asignadoA?: string;
-  respuestaSoporte?: string; // Podría ser el último mensaje del agente en el historial
+  respuestaSoporte?: string; 
   fechaRespuestaSoporte?: admin.firestore.Timestamp;
   fechaCierre?: admin.firestore.Timestamp;
   prioridadTicket?: 'baja' | 'normal' | 'alta' | 'urgente';
@@ -553,14 +587,12 @@ interface IncentivoOtorgadoData {
 
 // --- FUNCIONES HELPER ---
 
-// Asumimos que estas funciones existen o son adaptadas
 async function getMockUser(userId: string): Promise<UserData | null> {
     const userRef = db.collection("usuarios").doc(userId);
     const userDoc = await userRef.get();
     if (userDoc.exists) {
         return userDoc.data() as UserData;
     }
-    // Simulación básica si no se encuentra
     if (userId === "currentUserDemoId") {
         return { uid: userId, name: "Usuario Premium Demo", isPremium: true, membresiaActual: "premium_anual_usuario", idiomaPreferido: "es" };
     }
@@ -574,7 +606,7 @@ async function _calcularMontoParaProveedor(servicioId: string, montoTotalServici
   functions.logger.info(`[Comisiones] Calculando monto para proveedor del servicio: ${servicioId}, monto total: ${montoTotalServicio}`);
   const COMISION_ESTANDAR_PORCENTAJE = 6;
 
-  const servicioRef = db.collection("servicios").doc(servicioId);
+  const servicioRef = db.collection("servicios").doc(servicioId); // Asumiendo que 'servicios' es la colección de ServiceData
   const servicioDoc = await servicioRef.get();
 
   if (!servicioDoc.exists) {
@@ -645,56 +677,199 @@ const checkSlotsOverlap = (slotA: { inicio: string, fin: string }, slotB: { inic
 };
 
 // --- FUNCIONES CALLABLE ---
-// ... (funciones existentes como activarMembresia, etc.) ...
-
 export { activarMembresia } from "./activarMembresia";
 export { confirmServiceCompletionByUserService } from "./confirmServiceCompletionByUser";
 export { calificarPrestador } from "./calificarPrestador";
 export { calificarUsuario } from "./calificarUsuario";
-export { reportarProblemaServicio } from "./reportarProblemaServicio"; // Renombrado desde reportServiceIssue para consistencia
+export { reportarProblemaServicio } from "./reportarProblemaServicio"; 
 export { obtenerServiciosCompletados } from "./obtenerServiciosCompletados";
 export { registrarDocumentoProfesional } from "./registrarDocumentoProfesional";
-export { verificarDocumentoProfesional } from "./verificarDocumentoProfesional"; // Renombrado desde validateDocumentAndRemoveContactInfo
+export { verificarDocumentoProfesional } from "./verificarDocumentoProfesional"; 
 export { activarGarantiaPremium } from "./activarGarantiaPremium";
 export { resolverGarantiaPremium } from "./resolverGarantiaPremium";
-// export { updateProviderRealtimeStatus } from "./updateProviderRealtimeStatus"; // Renombrada
 export { disconnectProvider } from "./disconnectProvider";
 export { verificarEstadoFunciones } from "./verificarEstadoFunciones";
-export { agendarCitaConPrestador } from "./agendarCitaConPrestador"; // Renombrado desde agendarCita
-export { cancelarCita } from "./cancelarCita"; // Renombrado desde cancelarCitaAgendada
-export { confirmarCitaPorPrestador } from "./confirmarCitaPrestador"; // Renombrado desde confirmarCitaPorPrestador
+export { agendarCitaConPrestador } from "./agendarCitaConPrestador"; 
+export { cancelarCita } from "./cancelarCita"; 
+export { confirmarCitaPorPrestador } from "./confirmarCitaPrestador"; 
 export { procesarCobroTrasConfirmacion } from "./procesarCobroTrasConfirmacion";
-export { enviarNotificacionInApp } from "./enviarNotificacionInApp"; // Renombrado desde crearNotificacion
+export { enviarNotificacionInApp } from "./enviarNotificacionInApp"; 
 export { iniciarChat } from "./iniciarChat";
 export { enviarMensaje } from "./enviarMensaje";
 export { configurarDisponibilidadAvanzada } from "./configurarDisponibilidadAvanzada";
-export { sugerirPrestadoresIA } from "./sugerirPrestadoresIA"; // Renombrado desde sugerirPrestadoresInteligente
+export { sugerirPrestadoresIA } from "./sugerirPrestadoresIA"; 
 export { mostrarServiciosDestacados } from "./mostrarServiciosDestacados";
 export { revisarDocumentoPrestador } from "./revisarDocumentoPrestador";
-export { generarContratoDigital } from "./generarContratoDigital"; // Renombrado desde gestionarContratoServicio
+export { generarContratoDigital } from "./generarContratoDigital"; 
 export { crearSolicitudSoporte } from "./crearSolicitudSoporte";
 export { responderSolicitudSoporte } from "./responderSolicitudSoporte";
 export { obtenerTraduccion } from "./obtenerTraduccion";
-// export { actualizarUbicacionPrestador } from "./actualizarUbicacionPrestador"; // Renombrada a integrarGeolocalizacionTiempoReal
-export { integrarGeolocalizacionTiempoReal } from "./integrarGeolocalizacionTiempoReal"; // Nueva función para ubicación
+export { integrarGeolocalizacionTiempoReal } from "./integrarGeolocalizacionTiempoReal"; 
 export { obtenerUbicacionesCercanas } from "./obtenerUbicacionesCercanas";
 export { validarCoberturaServicio } from "./validarCoberturaServicio";
 export { validarCoberturaYObtenerPrestadoresCercanos } from "./validarCoberturaYObtenerPrestadoresCercanos";
 export { obtenerDetallesPrestadorParaPopup } from "./obtenerDetallesPrestadorParaPopup";
 export { obtenerHistorialAgrupado } from "./obtenerHistorialAgrupado";
 export { sugerirPrestadoresConGeolocalizacion } from "./sugerirPrestadoresConGeolocalizacion";
-export { gestionarPenalizacionPrestador } from "./gestionarPenalizacionPrestador"; // Renombrado desde gestionarPenalizacionesPrestadores
-
-
+export { gestionarPenalizacionPrestador } from "./gestionarPenalizacionPrestador"; 
 export { configurarSoporteMultiIdioma } from "./configurarSoporteMultiIdioma";
 
 
 // --- TRIGGERS ---
-// ... (triggers existentes como moderarMensajesChat, etc.) ...
 
 export { moderarMensajesChat } from "./moderarMensajesChat";
 export { enviarNotificacionInAppTrigger } from "./enviarNotificacionInAppTrigger";
 export { notificarLiberacionPagoAutomatica } from "./notificarLiberacionPagoAutomatica";
 export { evaluarComportamientoPrestadorTrigger } from "./evaluarComportamientoPrestadorTrigger";
-export { otorgarIncentivosTrigger } from "./otorgarIncentivosTrigger"; // Renombrado desde asignarIncentivoUsuarioTrigger
+export { otorgarIncentivosTrigger } from "./otorgarIncentivosTrigger"; 
 export { simulateDailyAutomatedChecks } from "./simulateDailyAutomatedChecks";
+
+
+// --- NUEVO TRIGGER FCM PARA CAMBIOS DE ESTADO DE SERVICIO ---
+export const onServiceStatusChangeSendNotification = functions.firestore
+  .document("solicitudes_servicio/{solicitudId}") // Ajusta el path a tu colección real
+  .onUpdate(async (change, context) => {
+    const newValue = change.after.data() as ServiceData | CitaData; // Usar ServiceData o CitaData según corresponda
+    const previousValue = change.before.data() as ServiceData | CitaData;
+    const solicitudId = context.params.solicitudId;
+
+    if (!newValue || !previousValue) {
+      functions.logger.log(`[FCM Trigger ${solicitudId}] No new or previous data, exiting.`);
+      return null;
+    }
+
+    // Solo enviar notificación si el estado realmente cambió
+    if (newValue.estado === previousValue.estado) {
+      functions.logger.log(`[FCM Trigger ${solicitudId}] Estado no cambió (${newValue.estado}), no se envía notificación.`);
+      return null;
+    }
+    
+    functions.logger.log(`[FCM Trigger ${solicitudId}] Estado cambiado de ${previousValue.estado} a ${newValue.estado}. Preparando notificación.`);
+
+    const usuarioId = newValue.usuarioId;
+    const prestadorId = newValue.prestadorId;
+    let tituloNotif = "";
+    let cuerpoNotif = "";
+    let targetUserId: string | null = null;
+    let targetUserType: 'usuario' | 'prestador' | null = null;
+
+    const serviceTitle = newValue.titulo || newValue.detallesServicio || "un servicio"; // Usar un título representativo del servicio/cita
+
+    // Lógica para determinar a quién notificar y qué mensaje enviar
+    switch (newValue.estado) {
+      case "agendado": // Solicitud creada por usuario, notificar al prestador
+        targetUserId = prestadorId;
+        targetUserType = "prestador";
+        tituloNotif = "Nueva Solicitud de Servicio";
+        cuerpoNotif = `Has recibido una nueva solicitud para "${serviceTitle}".`;
+        break;
+      case "confirmada_prestador": // Prestador confirma, notificar al usuario
+        targetUserId = usuarioId;
+        targetUserType = "usuario";
+        tituloNotif = "¡Cita Confirmada!";
+        cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido confirmada por el prestador.`;
+        break;
+      case "rechazada_prestador": // Prestador rechaza, notificar al usuario
+      case "cancelada_prestador": // Prestador cancela, notificar al usuario
+        targetUserId = usuarioId;
+        targetUserType = "usuario";
+        tituloNotif = `Cita ${newValue.estado === "rechazada_prestador" ? "Rechazada" : "Cancelada"}`;
+        cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido ${newValue.estado === "rechazada_prestador" ? "rechazada" : "cancelada"} por el prestador.`;
+        break;
+      case "cancelada_usuario": // Usuario cancela, notificar al prestador
+        targetUserId = prestadorId;
+        targetUserType = "prestador";
+        tituloNotif = "Cita Cancelada por Usuario";
+        cuerpoNotif = `La cita para "${serviceTitle}" ha sido cancelada por el usuario.`;
+        break;
+      case "en_camino_proveedor":
+        targetUserId = usuarioId;
+        targetUserType = "usuario";
+        tituloNotif = "¡Tu Proveedor está en Camino!";
+        cuerpoNotif = `El proveedor para "${serviceTitle}" está en camino.`;
+        break;
+      case "servicio_iniciado":
+        targetUserId = usuarioId;
+        targetUserType = "usuario";
+        tituloNotif = "Servicio Iniciado";
+        cuerpoNotif = `El proveedor ha iniciado el servicio "${serviceTitle}".`;
+        break;
+      case "completado_por_prestador": // Proveedor completa, notificar al usuario para que confirme
+        targetUserId = usuarioId;
+        targetUserType = "usuario";
+        tituloNotif = "Servicio Completado por Prestador";
+        cuerpoNotif = `El prestador ha marcado "${serviceTitle}" como completado. Por favor, confirma y califica.`;
+        break;
+      case "completado_por_usuario": // Usuario confirma, notificar al prestador para que califique
+        targetUserId = prestadorId;
+        targetUserType = "prestador";
+        tituloNotif = "¡Servicio Confirmado por Usuario!";
+        cuerpoNotif = `El usuario ha confirmado la finalización de "${serviceTitle}". ¡Ya puedes calificarlo!`;
+        break;
+      // Otros estados como 'en_disputa', 'cerrado_con_calificacion', etc., también podrían tener notificaciones.
+      default:
+        functions.logger.log(`[FCM Trigger ${solicitudId}] Estado ${newValue.estado} no maneja notificación específica por ahora.`);
+        return null;
+    }
+
+    if (!targetUserId || !targetUserType) {
+      functions.logger.log(`[FCM Trigger ${solicitudId}] No se definió destinatario para el estado ${newValue.estado}.`);
+      return null;
+    }
+
+    // Obtener los tokens FCM del destinatario
+    const recipientCollection = targetUserType === "usuario" ? "usuarios" : "prestadores";
+    const recipientDoc = await db.collection(recipientCollection).doc(targetUserId).get();
+
+    if (!recipientDoc.exists) {
+      functions.logger.error(`[FCM Trigger ${solicitudId}] Documento del destinatario ${targetUserType} ${targetUserId} no encontrado.`);
+      return null;
+    }
+
+    const recipientData = (targetUserType === "usuario" ? recipientDoc.data() as UserData : recipientDoc.data() as ProviderData);
+    const tokens = recipientData.fcmTokens;
+
+    if (!tokens || tokens.length === 0) {
+      functions.logger.log(`[FCM Trigger ${solicitudId}] El destinatario ${targetUserType} ${targetUserId} no tiene tokens FCM registrados.`);
+      return null;
+    }
+
+    const payload: admin.messaging.MessagingPayload = {
+      notification: {
+        title: tituloNotif,
+        body: cuerpoNotif,
+        // icon: "URL_A_TU_ICONO_DE_APP", // Opcional
+        // click_action: "URL_O_RUTA_PARA_ABRIR_EN_LA_APP" // Opcional para deeplinking
+      },
+      data: { // Datos adicionales que tu app cliente puede usar
+        solicitudId: solicitudId,
+        nuevoEstado: newValue.estado,
+        tipoNotificacion: `SERVICIO_${newValue.estado.toUpperCase()}`, // ej: SERVICIO_CONFIRMADA_PRESTADOR
+        // Puedes añadir más datos relevantes aquí
+      },
+    };
+
+    try {
+      const response = await admin.messaging().sendToDevice(tokens, payload);
+      functions.logger.log(`[FCM Trigger ${solicitudId}] Notificación enviada exitosamente a ${response.successCount} tokens para ${targetUserType} ${targetUserId}.`);
+      response.results.forEach((result, index) => {
+        const error = result.error;
+        if (error) {
+          functions.logger.error(
+            `[FCM Trigger ${solicitudId}] Falla al enviar notificación al token ${tokens[index]}:`,
+            error
+          );
+          // Lógica para limpiar tokens inválidos/caducados
+          if (error.code === "messaging/invalid-registration-token" ||
+              error.code === "messaging/registration-token-not-registered") {
+            // db.collection(recipientCollection).doc(targetUserId).update({
+            //   fcmTokens: admin.firestore.FieldValue.arrayRemove(tokens[index])
+            // });
+          }
+        }
+      });
+    } catch (error) {
+      functions.logger.error(`[FCM Trigger ${solicitudId}] Error al enviar notificación FCM a ${targetUserType} ${targetUserId}:`, error);
+    }
+    return null;
+  });
