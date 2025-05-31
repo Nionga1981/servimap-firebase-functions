@@ -1,11 +1,12 @@
 
 // src/services/requestService.ts
 "use client";
-import type { ServiceRequest, FixedServiceRequest, HourlyServiceRequest, DemoUser, PaymentStatus, ServiceRequestStatus } from '@/types';
+import type { ServiceRequest, FixedServiceRequest, HourlyServiceRequest, DemoUser, PaymentStatus, ServiceRequestStatus, ActivityLog, ActivityLogAction } from '@/types';
 import { mockProviders, USER_FIXED_LOCATION, mockDemoUsers as mockUsers } from '@/lib/mockData';
 
 // Simulación de una base de datos en memoria para las solicitudes de servicio
 let serviceRequests: ServiceRequest[] = [];
+let activityLogs: ActivityLog[] = []; // Simulación de la colección de logs
 
 const RATING_WINDOW_DAYS = 7; // 7 días para calificar
 const STANDARD_WARRANTY_DAYS = 3; 
@@ -34,6 +35,32 @@ const sendPushNotificationMock = (details: NotificationDetails) => {
 };
 // --- END MOCK PUSH NOTIFICATION FUNCTION ---
 
+// --- MOCK ACTIVITY LOG FUNCTION (Client-Side Simulation) ---
+const logActivity = (
+  actorId: string,
+  actorRol: 'usuario' | 'prestador' | 'sistema' | 'admin',
+  accion: ActivityLogAction,
+  descripcion: string,
+  entidadAfectada?: { tipo: ActivityLog['entidadAfectada']['tipo'], id: string },
+  detallesAdicionales?: Record<string, any>
+) => {
+  const newLog: ActivityLog = {
+    id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    actorId,
+    actorRol,
+    accion,
+    descripcion,
+    fecha: Date.now(),
+    ...(entidadAfectada && { entidadAfectada }),
+    ...(detallesAdicionales && { detallesAdicionales }),
+  };
+  activityLogs.push(newLog);
+  console.log(`[Activity Log Simulated] ${newLog.descripcion}`, newLog);
+  // En una aplicación real, esta lógica estaría principalmente en el backend (Cloud Functions)
+  // para asegurar que los logs se escriban de forma confiable.
+};
+// --- END MOCK ACTIVITY LOG FUNCTION ---
+
 
 export const createServiceRequest = async (
   requestData: Omit<FixedServiceRequest, 'id' | 'createdAt' | 'status' | 'paymentStatus'> | Omit<HourlyServiceRequest, 'id' | 'createdAt' | 'status' | 'paymentStatus'>
@@ -44,36 +71,54 @@ export const createServiceRequest = async (
   if (!providerExists) {
     throw new Error(`Proveedor con ID ${requestData.providerId} no encontrado.`);
   }
-
+  
   const providerDetails = mockProviders.find(p => p.id === requestData.providerId);
 
   let paymentStatus: PaymentStatus;
+  let initialStatus: ServiceRequestStatus = 'agendado';
+
   if (requestData.serviceType === 'fixed') {
-    // For fixed services, assume payment is processed and status becomes "retenido_para_liberacion" if it's an immediate hire.
-    // If it's an appointment, it might start as "pendiente_cobro".
-    // For this simulation, we'll assume it's an immediate request or an appointment that just got paid.
-    paymentStatus = 'retenido_para_liberacion';
+    // Si tiene selectedFixedServices y totalAmount, podría ser un "contratar ahora"
+    if ((requestData as FixedServiceRequest).selectedFixedServices && (requestData as FixedServiceRequest).totalAmount) {
+        paymentStatus = 'retenido_para_liberacion'; // Asumimos pago inmediato y retención
+        initialStatus = 'pagada'; // Y el servicio está listo para iniciar o en camino
+        logActivity(requestData.userId, 'usuario', 'PAGO_RETENIDO', `Pago retenido para nueva solicitud fija (ID temporal). Monto: ${(requestData as FixedServiceRequest).totalAmount}`);
+    } else {
+        paymentStatus = 'pendiente_cobro'; // Cita agendada, pago pendiente
+    }
   } else { // hourly
-    paymentStatus = 'no_aplica'; // Typically billed after service completion
+    paymentStatus = 'no_aplica'; // Típicamente facturado después de la finalización del servicio
   }
+
 
   const newRequest: ServiceRequest = {
     ...requestData,
     id: `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     createdAt: Date.now(),
-    status: 'agendado', // Initial status when user requests
+    status: initialStatus,
     paymentStatus: paymentStatus,
+    titulo: requestData.serviceType === 'fixed' ? (requestData as FixedServiceRequest).selectedFixedServices?.[0]?.title || 'Servicio Agendado' : 'Servicio por Horas',
   };
 
   serviceRequests.push(newRequest);
   console.log('[RequestService] Solicitud creada:', newRequest);
+
+  logActivity(
+    requestData.userId,
+    'usuario',
+    'SOLICITUD_CREADA',
+    `Usuario ${requestData.userId} creó solicitud para prestador ${requestData.providerId}. Tipo: ${requestData.serviceType}.`,
+    { tipo: 'solicitud_servicio', id: newRequest.id },
+    { detalles: requestData.notes || "Sin notas" }
+  );
+
 
   // Notify Provider of new request
   sendPushNotificationMock({
     recipientId: newRequest.providerId,
     recipientType: 'provider',
     title: 'Nueva Solicitud de Servicio',
-    body: `Has recibido una nueva solicitud de ${providerDetails?.name || 'un usuario'} para "${requestData.serviceType === 'fixed' ? requestData.selectedFixedServices?.[0]?.title || 'un servicio' : 'un servicio por horas'}".`,
+    body: `Has recibido una nueva solicitud de ${providerDetails?.name || 'un usuario'} para "${newRequest.titulo}".`,
     data: { requestId: newRequest.id, type: 'NEW_SERVICE_REQUEST' },
   });
 
@@ -101,9 +146,9 @@ export const updateServiceRequestByProvider = async (
   const validTransitionsForProvider: Partial<Record<ServiceRequestStatus, ServiceRequestStatus[]>> = {
     'agendado': ['confirmada_prestador', 'rechazada_prestador', 'cancelada_prestador'],
     'confirmada_prestador': ['en_camino_proveedor', 'cancelada_prestador'],
-    'pagada': ['en_camino_proveedor', 'servicio_iniciado'],
-    'en_camino_proveedor': ['servicio_iniciado'],
-    'servicio_iniciado': ['completado_por_prestador'],
+    'pagada': ['en_camino_proveedor', 'servicio_iniciado', 'cancelada_prestador'], // Prestador puede cancelar si ya está pagada
+    'en_camino_proveedor': ['servicio_iniciado', 'cancelada_prestador'], // Podría cancelar en camino
+    'servicio_iniciado': ['completado_por_prestador', 'cancelada_prestador'], // Podría cancelar si algo sale mal
   };
 
   if (!validTransitionsForProvider[request.status]?.includes(newStatus)) {
@@ -117,28 +162,37 @@ export const updateServiceRequestByProvider = async (
   let userNotifBody = '';
 
   if (newStatus === 'confirmada_prestador') {
-    request.paymentStatus = request.serviceType === 'fixed' ? 'retenido_para_liberacion' : 'pendiente_cobro'; // Retain if fixed, or pending for hourly
-    userNotifTitle = '¡Servicio Confirmado!';
-    userNotifBody = `Tu solicitud de servicio con ${mockProviders.find(p=>p.id === providerId)?.name || 'el proveedor'} ha sido confirmada.`;
+    // Para citas (agendado -> confirmada_prestador), ahora podría estar pendiente de cobro
+    if (request.paymentStatus === 'pendiente_cobro') {
+      // Aquí se podría simular un intento de cobro automático, si es el flujo deseado
+      // request.paymentStatus = 'retenido_para_liberacion'; // Si el cobro es exitoso
+    }
+    userNotifTitle = '¡Cita Confirmada!';
+    userNotifBody = `Tu cita con ${mockProviders.find(p=>p.id === providerId)?.name || 'el proveedor'} ha sido confirmada.`;
   } else if (newStatus === 'rechazada_prestador' || newStatus === 'cancelada_prestador') {
-    userNotifTitle = 'Servicio Cancelado/Rechazado';
-    userNotifBody = `Tu solicitud de servicio con ${mockProviders.find(p=>p.id === providerId)?.name || 'el proveedor'} ha sido ${newStatus === 'rechazada_prestador' ? 'rechazada' : 'cancelada'}.`;
-    // Handle potential refunds if payment was already 'retenido_para_liberacion'
+    userNotifTitle = `Cita ${newStatus === 'rechazada_prestador' ? 'Rechazada' : 'Cancelada'}`;
+    userNotifBody = `Tu cita con ${mockProviders.find(p=>p.id === providerId)?.name || 'el proveedor'} ha sido ${newStatus === 'rechazada_prestador' ? 'rechazada' : 'cancelada'} por el proveedor.`;
     if (request.paymentStatus === 'retenido_para_liberacion') {
-        request.paymentStatus = 'reembolsado_total'; // Simulate refund
+        request.paymentStatus = 'reembolsado_total'; 
         userNotifBody += ' Se procesará un reembolso.';
+        logActivity('sistema', 'sistema', 'PAGO_LIBERADO', `Reembolso total procesado para solicitud ${request.id} debido a cancelación/rechazo del proveedor.`, { tipo: 'solicitud_servicio', id: request.id });
     }
   } else if (newStatus === 'en_camino_proveedor') {
-    userNotifTitle = '¡Proveedor en Camino!';
-    userNotifBody = `${mockProviders.find(p=>p.id === providerId)?.name || 'El proveedor'} está en camino.`;
+    userNotifTitle = '¡Tu Proveedor está en Camino!';
+    userNotifBody = `${mockProviders.find(p=>p.id === providerId)?.name || 'El proveedor'} para "${request.titulo}" está en camino.`;
   } else if (newStatus === 'servicio_iniciado') {
     userNotifTitle = 'Servicio Iniciado';
-    userNotifBody = `${mockProviders.find(p=>p.id === providerId)?.name || 'El proveedor'} ha iniciado el servicio.`;
+    userNotifBody = `El proveedor ha iniciado el servicio "${request.titulo}".`;
   } else if (newStatus === 'completado_por_prestador') {
     request.providerMarkedCompleteAt = Date.now();
-    userNotifTitle = 'Servicio Marcado como Completado';
-    userNotifBody = `${mockProviders.find(p=>p.id === providerId)?.name || 'El proveedor'} ha marcado el servicio como completado. Por favor, confirma la finalización.`;
+    userNotifTitle = 'Servicio Completado por Prestador';
+    userNotifBody = `El prestador ha marcado "${request.titulo}" como completado. Por favor, confirma y califica.`;
   }
+
+  // El log de cambio de estado se manejará por el trigger de Firestore.
+  // Pero si queremos loguear la acción del proveedor específicamente:
+  // logActivity(providerId, 'prestador', 'CAMBIO_ESTADO_SOLICITUD', `Proveedor actualizó estado de ${oldStatus} a ${newStatus} para solicitud ${request.id}`, { tipo: 'solicitud_servicio', id: request.id }, { estadoAnterior: oldStatus, estadoNuevo: newStatus, notasProveedor: providerNotes });
+
 
   if (userNotifTitle && userNotifBody) {
     sendPushNotificationMock({
@@ -178,11 +232,11 @@ export const confirmServiceCompletionByUser = async (
   request.updatedAt = now;
   request.ratingWindowExpiresAt = now + (RATING_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   
-  // Ensure payment status is 'retenido_para_liberacion' if it was processed for fixed services
-  if (request.serviceType === 'fixed' && request.paymentStatus !== 'retenido_para_liberacion') {
-    // This might indicate an issue in prior flow, but for robustness:
-    // request.paymentStatus = 'retenido_para_liberacion';
-    // console.warn(`[RequestService] Payment status for ${requestId} was not 'retenido_para_liberacion' upon user completion. Review flow.`);
+  if (request.serviceType === 'fixed' && request.paymentStatus !== 'retenido_para_liberacion' && request.paymentStatus !== 'procesado_exitosamente') {
+    // This might indicate an issue in prior flow, but for robustness if it was a "pay later" fixed appointment:
+    // request.paymentStatus = 'retenido_para_liberacion'; // Assuming payment is now processed/confirmed
+    // For simplicity, we'll assume payment was 'retenido_para_liberacion' if it's a fixed service.
+    // This implies that for fixed services, payment retention happens before provider marks complete.
   }
 
 
@@ -196,11 +250,13 @@ export const confirmServiceCompletionByUser = async (
 
   console.log(`[RequestService] Servicio ${requestId} confirmado por usuario ${userId} de ${oldStatus} a completado_por_usuario. Ventana de calificación hasta ${new Date(request.ratingWindowExpiresAt).toLocaleString()}. Garantía hasta ${request.warrantyEndDate}.`);
   
+  // El log de cambio de estado se maneja por el trigger de Firestore.
+
   sendPushNotificationMock({
     recipientId: request.providerId,
     recipientType: 'provider',
     title: '¡Servicio Confirmado por Usuario!',
-    body: `El usuario ha confirmado la finalización del servicio "${request.serviceType === 'fixed' ? request.selectedFixedServices?.[0]?.title || 'servicio' : 'servicio por horas'}". Ya puedes calificar al usuario.`,
+    body: `El usuario ha confirmado la finalización del servicio "${request.titulo}". ¡Ya puedes calificarlo!`,
     data: { requestId: request.id, type: 'USER_CONFIRMED_COMPLETION' },
   });
   
@@ -223,7 +279,9 @@ export const rateServiceByUser = async (
     throw new Error(`Solo se pueden calificar servicios en estado 'completado_por_usuario' o 'cerrado_automaticamente'. Estado actual: ${request.status}`);
   }
   if (request.ratingWindowExpiresAt && Date.now() > request.ratingWindowExpiresAt) {
-    throw new Error("La ventana para calificar este servicio ha expirado.");
+    // Aún permitir calificar si la ventana expiró pero el servicio no se ha cerrado por completo (raro, pero posible)
+    // throw new Error("La ventana para calificar este servicio ha expirado.");
+    console.warn(`[RequestService] Usuario ${userId} calificando servicio ${requestId} después de la ventana de expiración.`);
   }
   if (request.calificacionUsuario) {
     throw new Error("Ya has calificado este servicio.");
@@ -232,23 +290,40 @@ export const rateServiceByUser = async (
   request.calificacionUsuario = { estrellas, comentario, fecha: Date.now() };
   request.updatedAt = Date.now();
   
+  logActivity(
+    userId,
+    'usuario',
+    'CALIFICACION_USUARIO',
+    `Usuario ${userId} calificó servicio ${requestId} para prestador ${request.providerId} con ${estrellas} estrellas.`,
+    { tipo: 'solicitud_servicio', id: requestId },
+    { estrellas, comentario: comentario || "" }
+  );
+
   let notificationSentToProvider = false;
 
   if (request.calificacionPrestador) {
     request.mutualRatingCompleted = true;
-    request.status = 'cerrado_con_calificacion';
+    request.status = 'cerrado_con_calificacion'; // Este es un cambio de estado, el trigger de Firestore lo logueará
   }
   
-  // Liberar pago si estaba retenido y el usuario califica
   if (request.paymentStatus === 'retenido_para_liberacion') {
     request.paymentStatus = 'liberado_al_proveedor';
     request.paymentReleasedToProviderAt = Date.now();
     console.log(`[RequestService] Pago para servicio ${requestId} liberado al proveedor debido a calificación del usuario.`);
+    
+    logActivity(
+      'sistema', // O userId si la acción de calificar gatilla el pago
+      'sistema', 
+      'PAGO_LIBERADO', 
+      `Pago para solicitud ${requestId} liberado al proveedor ${request.providerId} tras calificación del usuario.`,
+      { tipo: 'solicitud_servicio', id: requestId }
+    );
+
     sendPushNotificationMock({
         recipientId: request.providerId,
         recipientType: 'provider',
         title: '¡Pago Liberado y Calificación Recibida!',
-        body: `El usuario ha calificado tu servicio y el pago de $${(request as FixedServiceRequest).totalAmount || (request as HourlyServiceRequest).finalTotal || 'N/A'} ha sido liberado.`,
+        body: `El usuario ha calificado tu servicio "${request.titulo}" y el pago ha sido liberado.`,
         data: { requestId: request.id, type: 'PAYMENT_RELEASED_USER_RATED' },
     });
     notificationSentToProvider = true;
@@ -259,7 +334,7 @@ export const rateServiceByUser = async (
         recipientId: request.providerId,
         recipientType: 'provider',
         title: '¡Calificación Recibida!',
-        body: `El usuario ha calificado tu servicio. Estrellas: ${estrellas}.`,
+        body: `El usuario ha calificado tu servicio "${request.titulo}". Estrellas: ${estrellas}.`,
         data: { requestId: request.id, type: 'USER_RATED_SERVICE' },
     });
   }
@@ -281,7 +356,7 @@ export const rateServiceByProvider = async (
   const request = serviceRequests[requestIndex];
 
   if (request.status !== 'completado_por_usuario' && request.status !== 'cerrado_automaticamente' && request.status !== 'cerrado_con_calificacion') {
-    throw new Error(`El prestador solo puede calificar servicios que el usuario haya confirmado. Estado actual: ${request.status}`);
+    throw new Error(`El prestador solo puede calificar servicios que el usuario haya confirmado o estén cerrados. Estado actual: ${request.status}`);
   }
   if (request.calificacionPrestador) {
     throw new Error("Ya has calificado a este usuario para este servicio.");
@@ -289,9 +364,19 @@ export const rateServiceByProvider = async (
 
   request.calificacionPrestador = { estrellas, comentario, fecha: Date.now() };
   request.updatedAt = Date.now();
+
+  logActivity(
+    providerId,
+    'prestador',
+    'CALIFICACION_PRESTADOR',
+    `Proveedor ${providerId} calificó al usuario ${request.userId} del servicio ${requestId} con ${estrellas} estrellas.`,
+    { tipo: 'solicitud_servicio', id: requestId },
+    { estrellas, comentario: comentario || "" }
+  );
+
   if (request.calificacionUsuario) {
     request.mutualRatingCompleted = true;
-    request.status = 'cerrado_con_calificacion';
+    request.status = 'cerrado_con_calificacion'; // Este es un cambio de estado, el trigger de Firestore lo logueará
   }
   
   console.log(`[RequestService] Proveedor ${providerId} calificó al usuario del servicio ${requestId} con ${estrellas} estrellas.`);
@@ -300,7 +385,7 @@ export const rateServiceByProvider = async (
     recipientId: request.userId,
     recipientType: 'user',
     title: '¡Has Sido Calificado!',
-    body: `${mockProviders.find(p=>p.id === providerId)?.name || 'El proveedor'} te ha calificado por el servicio. Estrellas: ${estrellas}.`,
+    body: `${mockProviders.find(p=>p.id === providerId)?.name || 'El proveedor'} te ha calificado por el servicio "${request.titulo}". Estrellas: ${estrellas}.`,
     data: { requestId: request.id, type: 'PROVIDER_RATED_USER' },
   });
   
@@ -316,20 +401,31 @@ export const checkExpiredRatingWindowsAndActivateWarranty = async (): Promise<vo
   serviceRequests.forEach(req => {
     let statusChanged = false;
     const oldStatus = req.status;
+    let logDetails: Record<string, any> = {};
 
     if (
-      (req.status === 'completado_por_usuario' || req.status === 'cerrado_automaticamente') &&
+      (req.status === 'completado_por_usuario' || req.status === 'cerrado_automaticamente') && // Puede que ya esté cerrado_automaticamente por otra razón
       req.ratingWindowExpiresAt &&
       now > req.ratingWindowExpiresAt &&
-      !req.calificacionUsuario 
+      !req.calificacionUsuario // Solo si el usuario no ha calificado
     ) {
-      // Liberar pago si está retenido y el usuario no calificó
+      logDetails.ventanaExpirada = true;
       if (req.paymentStatus === 'retenido_para_liberacion') {
         req.paymentStatus = 'liberado_al_proveedor';
         req.paymentReleasedToProviderAt = now;
         req.updatedAt = now;
         statusChanged = true;
+        logDetails.pagoLiberado = true;
         console.log(`[RequestService-Scheduled] Pago para servicio ${req.id} liberado automáticamente al proveedor (ventana expiró).`);
+        
+        logActivity(
+          'sistema', 
+          'sistema', 
+          'PAGO_LIBERADO', 
+          `Pago para solicitud ${req.id} liberado automáticamente (ventana de calificación expiró).`,
+          { tipo: 'solicitud_servicio', id: req.id }
+        );
+
         sendPushNotificationMock({
           recipientId: req.providerId,
           recipientType: 'provider',
@@ -339,14 +435,23 @@ export const checkExpiredRatingWindowsAndActivateWarranty = async (): Promise<vo
         });
       }
 
-      // Activar garantía si el usuario es premium y no ha calificado
       if (!req.garantiaActiva) {
         const user = getMockUser(req.userId);
         if (user?.isPremium) {
           req.garantiaActiva = true;
           req.updatedAt = now; // Asegurar que updatedAt se actualice
           statusChanged = true;
+          logDetails.garantiaActivada = true;
           console.log(`[RequestService-Scheduled] Garantía activada para servicio ${req.id} del usuario premium ${req.userId}.`);
+          
+          logActivity(
+            'sistema',
+            'sistema',
+            'GARANTIA_ACTIVADA',
+            `Garantía activada automáticamente para solicitud ${req.id} de usuario premium ${req.userId}.`,
+            { tipo: 'solicitud_servicio', id: req.id }
+          );
+          
           sendPushNotificationMock({
             recipientId: req.userId,
             recipientType: 'user',
@@ -357,12 +462,21 @@ export const checkExpiredRatingWindowsAndActivateWarranty = async (): Promise<vo
         }
       }
       
-      // Cerrar el servicio si aún no estaba cerrado_automaticamente
-      if (req.status === 'completado_por_usuario') {
+      if (req.status === 'completado_por_usuario') { // Solo cambiar a cerrado_automaticamente si no lo estaba ya
           req.status = 'cerrado_automaticamente';
-          req.updatedAt = now; // Asegurar que updatedAt se actualice
+          req.updatedAt = now;
           statusChanged = true;
+          // El log de cambio de estado se maneja por el trigger de Firestore,
+          // pero podríamos añadir un log específico de "cierre por expiración" aquí si es útil.
           console.log(`[RequestService-Scheduled] Servicio ${req.id} (estado anterior: ${oldStatus}) cerrado automáticamente (ventana de calificación expiró, sin calificación de usuario).`);
+          logActivity(
+            'sistema',
+            'sistema',
+            'CAMBIO_ESTADO_SOLICITUD',
+            `Servicio ${req.id} cerrado automáticamente (ventana expiró). Estado anterior: ${oldStatus}, nuevo: cerrado_automaticamente.`,
+            { tipo: 'solicitud_servicio', id: req.id },
+            { ...logDetails, estadoAnterior: oldStatus, estadoNuevo: 'cerrado_automaticamente' }
+          );
       }
       
       if (statusChanged) processedCount++;
@@ -376,8 +490,16 @@ export const checkExpiredRatingWindowsAndActivateWarranty = async (): Promise<vo
   }
 };
 
+// Simulación de ejecución periódica (en cliente)
 if (typeof window !== 'undefined') { 
     setInterval(() => {
-        // checkExpiredRatingWindowsAndActivateWarranty(); // Puede ser ruidoso
-    }, 60000 * 5); 
+        // checkExpiredRatingWindowsAndActivateWarranty(); // Comentado para reducir ruido en consola durante desarrollo
+    }, 60000 * 5); // Cada 5 minutos
 }
+
+// Función para obtener logs (solo para demo en cliente)
+export const getActivityLogs = async (): Promise<ActivityLog[]> => {
+  return [...activityLogs].sort((a, b) => b.fecha - a.fecha); // Devolver una copia ordenada
+};
+
+    

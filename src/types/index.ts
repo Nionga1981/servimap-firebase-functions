@@ -51,6 +51,7 @@ export interface Provider {
   allowsHourlyServices?: boolean;
   hourlyRate?: number;
   idiomasHablados?: string[];
+  fcmTokens?: string[];
 }
 
 export interface ChatMessage {
@@ -97,6 +98,7 @@ export interface DemoUser {
   name: string;
   idiomaPreferido?: 'es' | 'en';
   ubicacionExacta?: ProviderLocation; // User's exact location
+  fcmTokens?: string[];
 }
 
 interface BaseServiceRequest {
@@ -125,7 +127,7 @@ interface BaseServiceRequest {
     comentario?: string;
     fecha: number; // Timestamp
   };
-  mutualRatingCompleted?: boolean; // True si ambos han calificado
+  mutualRatingCompleted?: boolean; // True si ambas partes han calificado
 
   // Fields related to payment
   paymentStatus?: PaymentStatus;
@@ -145,6 +147,9 @@ interface BaseServiceRequest {
   // Fields for corporate accounts
   solicitadoPorEmpresaId?: string;
   miembroEmpresaUid?: string;
+
+  // Field for notifications
+  titulo?: string; // Title of the service or appointment for notifications
 }
 
 export interface FixedServiceRequest extends BaseServiceRequest {
@@ -240,3 +245,31 @@ export interface EmpresaData {
   updatedAt: number; // Timestamp
 }
 
+// Nueva interfaz para Logs de Actividad
+export type ActivityLogAction = 
+  | 'CAMBIO_ESTADO_SOLICITUD'
+  | 'CALIFICACION_USUARIO'
+  | 'CALIFICACION_PRESTADOR'
+  | 'SOLICITUD_CREADA'
+  | 'PAGO_RETENIDO'
+  | 'PAGO_LIBERADO'
+  | 'GARANTIA_ACTIVADA'
+  | 'INICIO_SESION' // Ejemplo para futuro
+  | 'CIERRE_SESION' // Ejemplo para futuro
+  | 'CONFIG_CAMBIADA'; // Ejemplo para futuro
+
+export interface ActivityLog {
+  id?: string; // Firestore lo autogenerará
+  actorId: string; // Quién realizó la acción (userId, providerId, 'sistema')
+  actorRol: 'usuario' | 'prestador' | 'sistema' | 'admin';
+  accion: ActivityLogAction;
+  descripcion: string;
+  fecha: number; // Timestamp (admin.firestore.Timestamp en backend)
+  entidadAfectada?: { // Opcional: qué entidad fue afectada
+    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago';
+    id: string;
+  };
+  detallesAdicionales?: Record<string, any>; // Para data extra, ej: { estadoAnterior: 'pendiente', estadoNuevo: 'aceptado' }
+}
+
+    
