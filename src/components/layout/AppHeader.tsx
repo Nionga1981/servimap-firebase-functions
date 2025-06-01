@@ -16,40 +16,48 @@ import {
 } from '@/components/ui/dropdown-menu';
 import Image from 'next/image';
 import { DEFAULT_USER_AVATAR, SERVICE_CATEGORIES } from '@/lib/constants';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { mockIdiomas } from '@/lib/mockData'; // For simulated translations
 
 const navLinks = [
-  // { href: "/client", label: "Buscar Servicios" }, // Eliminado
-  { href: "/provider", label: "Ofrecer Servicios" },
-  // { href: "/chat", label: "Demo de Chat" }, // Eliminado
+  { href: "/provider", labelKey: "label_offer_services" },
 ];
 
+type LanguageCode = 'es' | 'en';
+
 export function AppHeader() {
-  const [currentLanguage, setCurrentLanguage] = useState<'ES' | 'EN'>('ES');
+  const [currentLanguage, setCurrentLanguage] = useState<LanguageCode>('es');
+  const [translations, setTranslations] = useState<Record<string, string>>({});
   const router = useRouter();
   const pathname = usePathname();
 
+  useEffect(() => {
+    // Simulate fetching translations for the current language
+    const langData = mockIdiomas.find(lang => lang.codigo === currentLanguage);
+    if (langData) {
+      setTranslations(langData.recursos);
+    }
+  }, [currentLanguage]);
+
+  const getTranslatedText = (key: string, fallback: string) => {
+    return translations[key] || fallback;
+  };
+
   const toggleLanguage = () => {
-    const newLang = currentLanguage === 'ES' ? 'EN' : 'ES';
+    const newLang = currentLanguage === 'es' ? 'en' : 'es';
     setCurrentLanguage(newLang);
-    alert(`Simulación: Idioma cambiado a ${newLang === 'EN' ? 'Inglés' : 'Español'}.\nLa traducción completa de la interfaz requiere un sistema i18n.`);
+    // In a real app, you would also save this preference to the user's profile
+    // and potentially reload resources or use an i18n library to update UI.
+    console.log(`Simulación: Idioma cambiado a ${newLang}. Preferencia debería guardarse y UI actualizarse con i18n.`);
   };
 
   const handleCategorySelect = (categoryId: string | null) => {
-    if (pathname === '/') { // Solo aplicar filtro si estamos en la página del mapa
-      if (categoryId && categoryId !== 'all') {
-        router.push(`/?category=${categoryId}`);
-      } else {
-        router.push('/'); // Limpiar filtro o ir a "Todas las Categorías"
-      }
+    const targetPath = categoryId && categoryId !== 'all' ? `/?category=${categoryId}` : '/';
+    if (pathname === '/' || pathname.startsWith('/?')) {
+      router.push(targetPath);
     } else {
-      // Si no estamos en la página del mapa, redirigir a la página del mapa con el filtro
-      if (categoryId && categoryId !== 'all') {
-        router.push(`/?category=${categoryId}`);
-      } else {
-        router.push('/');
-      }
+      router.push(targetPath);
     }
   };
 
@@ -68,16 +76,16 @@ export function AppHeader() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="text-foreground/80 transition-colors hover:text-foreground hover:bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0">
-              Categorías <ChevronDown className="ml-1 h-4 w-4" />
+              {getTranslatedText('label_categories', 'Categorías')} <ChevronDown className="ml-1 h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-56">
-            <DropdownMenuLabel>Explorar por Categoría</DropdownMenuLabel>
+            <DropdownMenuLabel>{getTranslatedText('label_categories', 'Explorar por Categoría')}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem onClick={() => handleCategorySelect('all')}>
                 <Search className="mr-2 h-4 w-4 text-muted-foreground" />
-                <span>Todas las Categorías</span>
+                <span>{getTranslatedText('label_all_categories', 'Todas las Categorías')}</span>
               </DropdownMenuItem>
               {SERVICE_CATEGORIES.map((category) => {
                 const IconComponent = category.icon;
@@ -98,7 +106,7 @@ export function AppHeader() {
             href={link.href}
             className="text-foreground/80 transition-colors hover:text-foreground"
           >
-            {link.label}
+            {getTranslatedText(link.labelKey, link.labelKey)}
           </Link>
         ))}
       </nav>
@@ -127,16 +135,16 @@ export function AppHeader() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="flex items-center justify-start text-muted-foreground hover:text-foreground w-full text-left">
-                  Categorías <ChevronDown className="ml-auto h-4 w-4" />
+                  {getTranslatedText('label_categories', 'Categorías')} <ChevronDown className="ml-auto h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-full">
-                 <DropdownMenuLabel>Explorar por Categoría</DropdownMenuLabel>
+                 <DropdownMenuLabel>{getTranslatedText('label_categories', 'Explorar por Categoría')}</DropdownMenuLabel>
                  <DropdownMenuSeparator />
                  <DropdownMenuGroup>
                    <DropdownMenuItem onClick={() => handleCategorySelect('all')}>
                      <Search className="mr-2 h-4 w-4 text-muted-foreground" />
-                     <span>Todas las Categorías</span>
+                     <span>{getTranslatedText('label_all_categories', 'Todas las Categorías')}</span>
                    </DropdownMenuItem>
                     {SERVICE_CATEGORIES.map((category) => {
                       const IconComponent = category.icon;
@@ -157,7 +165,7 @@ export function AppHeader() {
                 href={link.href}
                 className="text-muted-foreground hover:text-foreground"
               >
-                {link.label}
+                {getTranslatedText(link.labelKey, link.labelKey)}
               </Link>
             ))}
           </nav>
@@ -166,7 +174,7 @@ export function AppHeader() {
       <div className="flex w-full items-center gap-2 md:ml-auto md:gap-2 lg:gap-4 justify-end">
         <Button variant="outline" size="sm" onClick={toggleLanguage} className="gap-1">
           <Globe className="h-4 w-4" />
-          {currentLanguage === 'ES' ? 'EN' : 'ES'}
+          {currentLanguage === 'es' ? 'EN' : 'ES'}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -184,12 +192,12 @@ export function AppHeader() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Mi Cuenta</DropdownMenuLabel>
+            <DropdownMenuLabel>{getTranslatedText('my_account', 'Mi Cuenta')}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Perfil</DropdownMenuItem>
-            <DropdownMenuItem>Configuración</DropdownMenuItem>
+            <DropdownMenuItem>{getTranslatedText('profile', 'Perfil')}</DropdownMenuItem>
+            <DropdownMenuItem>{getTranslatedText('settings', 'Configuración')}</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Cerrar Sesión</DropdownMenuItem>
+            <DropdownMenuItem>{getTranslatedText('logout', 'Cerrar Sesión')}</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

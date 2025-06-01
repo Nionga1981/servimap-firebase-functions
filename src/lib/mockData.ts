@@ -1,6 +1,6 @@
 
 // src/lib/mockData.ts
-import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad } from '@/types';
+import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad, IdiomaDocumento } from '@/types';
 import { SERVICE_CATEGORIES as LUCIDE_SERVICE_CATEGORIES } from './constants';
 
 const getApproximateLocation = (exactLoc: ProviderLocation, factor = 0.01): ProviderLocation => {
@@ -269,7 +269,6 @@ export const mockChats: Chat[] = [
   }
 ];
 
-// Mock data for loyalty promotions
 export const mockPromocionesFidelidad: PromocionFidelidad[] = [
   {
     id: 'promo_desc_10',
@@ -292,10 +291,10 @@ export const mockPromocionesFidelidad: PromocionFidelidad[] = [
     id: 'promo_sorteo_premium',
     descripcion: 'Participa en el sorteo de 1 mes de Membresía Premium',
     puntosRequeridos: 50,
-    tipoDescuento: 'monto_fijo', // N/A for raffles, but structure needs it
-    valorDescuento: 0,         // N/A
+    tipoDescuento: 'monto_fijo', 
+    valorDescuento: 0,        
     activo: true,
-    codigoPromocional: 'SORTEOPREMIUM24' // Example
+    codigoPromocional: 'SORTEOPREMIUM24' 
   },
   {
     id: 'promo_inactiva_test',
@@ -305,4 +304,43 @@ export const mockPromocionesFidelidad: PromocionFidelidad[] = [
     valorDescuento: 5,
     activo: false,
   },
+];
+
+export const mockIdiomas: IdiomaDocumento[] = [
+  {
+    codigo: 'es',
+    nombre: 'Español',
+    recursos: {
+      greeting: '¡Hola!',
+      search_placeholder: '¿Qué servicio estás buscando?',
+      button_change_language: 'Cambiar a Inglés',
+      label_language_current: 'Idioma actual: Español',
+      label_categories: 'Categorías',
+      label_all_categories: 'Todas las Categorías',
+      label_offer_services: 'Ofrecer Servicios',
+      error_geolocation: 'Error de Geolocalización. Usando ubicación predeterminada.',
+      profile: 'Perfil',
+      settings: 'Configuración',
+      logout: 'Cerrar Sesión',
+      my_account: 'Mi Cuenta',
+    }
+  },
+  {
+    codigo: 'en',
+    nombre: 'English',
+    recursos: {
+      greeting: 'Hello!',
+      search_placeholder: 'What service are you looking for?',
+      button_change_language: 'Switch to Spanish',
+      label_language_current: 'Current language: English',
+      label_categories: 'Categories',
+      label_all_categories: 'All Categories',
+      label_offer_services: 'Offer Services',
+      error_geolocation: 'Geolocation Error. Using default location.',
+      profile: 'Profile',
+      settings: 'Settings',
+      logout: 'Logout',
+      my_account: 'My Account',
+    }
+  }
 ];

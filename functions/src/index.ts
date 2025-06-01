@@ -12,6 +12,7 @@ const COMISION_SISTEMA_PAGO_PORCENTAJE = 0.04; // 4% payment processor fee
 const COMISION_APP_SERVICIOMAP_PORCENTAJE = 0.06; // 6% ServiMap app commission on original total
 const PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD = 0.10; // 10% of ServiMap's commission goes to loyalty
 const FACTOR_CONVERSION_PUNTOS = 10; // $10 MXN (or monetary unit) per 1 loyalty point
+const DEFAULT_LANGUAGE_CODE = "es";
 
 // --- INTERFACES (Ideally from a shared types file, simplified here) ---
 export type ServiceRequestStatus =
@@ -52,11 +53,13 @@ export interface UserData {
   puntosAcumulados?: number;
   historialPuntos?: admin.firestore.FieldValue | HistorialPuntoUsuario[];
   isPremium?: boolean;
+  idiomaPreferido?: string;
 }
 
 export interface ProviderData {
   fcmTokens?: string[];
   nombre?: string;
+  aceptaCotizacion?: boolean;
 }
 
 export interface ServiceRequest {
@@ -73,8 +76,8 @@ export interface ServiceRequest {
   calificacionPrestador?: any;
   paymentStatus?: PaymentStatus;
   originatingQuotationId?: string;
-  precio?: number; // Represents montoTotalPagadoPorUsuario if not overridden by montoCobrado
-  montoCobrado?: number; // Preferred field for montoTotalPagadoPorUsuario
+  precio?: number;
+  montoCobrado?: number;
   paymentReleasedToProviderAt?: admin.firestore.Timestamp | number;
   detallesFinancieros?: admin.firestore.FieldValue | DetallesFinancieros;
 }
@@ -121,10 +124,10 @@ export type ActivityLogAction =
   | "CAMBIO_ESTADO_SOLICITUD" | "CALIFICACION_USUARIO" | "CALIFICACION_PRESTADOR"
   | "SOLICITUD_CREADA" | "PAGO_RETENIDO" | "PAGO_LIBERADO"
   | "GARANTIA_ACTIVADA" | "INICIO_SESION" | "CIERRE_SESION"
-  | "CONFIG_CAMBIADA" | "COTIZacion_CREADA" | "COTIZACION_PRECIO_PROPUESTO"
+  | "CONFIG_CAMBIADA" | "COTIZACION_CREADA" | "COTIZACION_PRECIO_PROPUESTO"
   | "COTIZACION_ACEPTADA_USUARIO" | "COTIZACION_RECHAZADA" | "CHAT_CREADO"
   | "PUNTOS_FIDELIDAD_GANADOS" | "PUNTOS_FIDELIDAD_CANJEADOS" | "FONDO_FIDELIDAD_APORTE"
-  | "PAGO_PROCESADO_DETALLES";
+  | "PAGO_PROCESADO_DETALLES" | "TRADUCCION_SOLICITADA";
 
 export interface PromocionFidelidad {
   id?: string;
@@ -139,8 +142,18 @@ export interface PromocionFidelidad {
   serviciosAplicables?: string[];
 }
 
+interface IdiomaRecursosFirestore {
+  [key: string]: string;
+}
+interface IdiomaDocumentoFirestore {
+  codigo: string;
+  nombre: string;
+  recursos: IdiomaRecursosFirestore;
+}
+
+
 // --- Helper para enviar notificaciones ---
-async function sendNotification(userId: string, userType: "usuario" | "prestador", title: string, body: string, data?: { [key: string]: string }) {
+async function sendNotification(userId: string, userType: "usuario" | "prestador", title: string, body: string, data?: {[key: string]: string}) {
   const userCol = userType === "usuario" ? "usuarios" : "prestadores";
   const userDoc = await db.collection(userCol).doc(userId).get();
   if (!userDoc.exists) {
@@ -151,7 +164,7 @@ async function sendNotification(userId: string, userType: "usuario" | "prestador
   const tokens = (userData as UserData).fcmTokens || (userData as ProviderData).fcmTokens;
 
   if (tokens && tokens.length > 0) {
-    const payload = { notification: { title, body }, data };
+    const payload = {notification: {title, body}, data};
     try {
       await admin.messaging().sendToDevice(tokens, payload);
       functions.logger.info(`[NotificationHelper] Notificación enviada a ${userType} ${userId}.`);
@@ -169,7 +182,7 @@ async function logActivity(
   actorRol: "usuario" | "prestador" | "sistema" | "admin",
   accion: ActivityLogAction,
   descripcion: string,
-  entidadAfectada?: { tipo: string; id: string },
+  entidadAfectada?: {tipo: string; id: string},
   detallesAdicionales?: Record<string, any>
 ) {
   try {
@@ -212,56 +225,54 @@ export const onServiceStatusChangeSendNotification = functions.firestore
     let targetUserType: "usuario" | "prestador" | null = null;
     const serviceTitle = newValue.titulo || "un servicio";
 
-    // Notificaciones por cambio de estado de servicio
     if (newValue.status !== previousValue.status) {
-        switch (newValue.status) {
-        case "agendado":
-            targetUserId = prestadorId; targetUserType = "prestador";
-            tituloNotif = "Nueva Solicitud de Servicio"; cuerpoNotif = `Has recibido una nueva solicitud para "${serviceTitle}".`;
-            break;
-        case "confirmada_prestador":
-            targetUserId = usuarioId; targetUserType = "usuario";
-            tituloNotif = "¡Cita Confirmada!"; cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido confirmada.`;
-            break;
-        case "rechazada_prestador": case "cancelada_prestador":
-            targetUserId = usuarioId; targetUserType = "usuario";
-            tituloNotif = `Cita ${newValue.status === "rechazada_prestador" ? "Rechazada" : "Cancelada"}`;
-            cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido ${newValue.status === "rechazada_prestador" ? "rechazada" : "cancelada"} por el prestador.`;
-            break;
-        case "cancelada_usuario":
-            targetUserId = prestadorId; targetUserType = "prestador";
-            tituloNotif = "Cita Cancelada por Usuario"; cuerpoNotif = `La cita para "${serviceTitle}" ha sido cancelada por el usuario.`;
-            break;
-        case "en_camino_proveedor":
-            targetUserId = usuarioId; targetUserType = "usuario";
-            tituloNotif = "¡Tu Proveedor está en Camino!"; cuerpoNotif = `El proveedor para "${serviceTitle}" está en camino.`;
-            break;
-        case "servicio_iniciado":
-            targetUserId = usuarioId; targetUserType = "usuario";
-            tituloNotif = "Servicio Iniciado"; cuerpoNotif = `El proveedor ha iniciado el servicio "${serviceTitle}".`;
-            break;
-        case "completado_por_prestador":
-            targetUserId = usuarioId; targetUserType = "usuario";
-            tituloNotif = "Servicio Completado por Prestador"; cuerpoNotif = `El prestador ha marcado "${serviceTitle}" como completado. Por favor, confirma y califica.`;
-            break;
-        case "completado_por_usuario":
-            targetUserId = prestadorId; targetUserType = "prestador";
-            tituloNotif = "¡Servicio Confirmado por Usuario!"; cuerpoNotif = `El usuario ha confirmado la finalización de "${serviceTitle}". ¡Ya puedes calificarlo!`;
-            break;
-        }
+      switch (newValue.status) {
+      case "agendado":
+        targetUserId = prestadorId; targetUserType = "prestador";
+        tituloNotif = "Nueva Solicitud de Servicio"; cuerpoNotif = `Has recibido una nueva solicitud para "${serviceTitle}".`;
+        break;
+      case "confirmada_prestador":
+        targetUserId = usuarioId; targetUserType = "usuario";
+        tituloNotif = "¡Cita Confirmada!"; cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido confirmada.`;
+        break;
+      case "rechazada_prestador": case "cancelada_prestador":
+        targetUserId = usuarioId; targetUserType = "usuario";
+        tituloNotif = `Cita ${newValue.status === "rechazada_prestador" ? "Rechazada" : "Cancelada"}`;
+        cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido ${newValue.status === "rechazada_prestador" ? "rechazada" : "cancelada"} por el prestador.`;
+        break;
+      case "cancelada_usuario":
+        targetUserId = prestadorId; targetUserType = "prestador";
+        tituloNotif = "Cita Cancelada por Usuario"; cuerpoNotif = `La cita para "${serviceTitle}" ha sido cancelada por el usuario.`;
+        break;
+      case "en_camino_proveedor":
+        targetUserId = usuarioId; targetUserType = "usuario";
+        tituloNotif = "¡Tu Proveedor está en Camino!"; cuerpoNotif = `El proveedor para "${serviceTitle}" está en camino.`;
+        break;
+      case "servicio_iniciado":
+        targetUserId = usuarioId; targetUserType = "usuario";
+        tituloNotif = "Servicio Iniciado"; cuerpoNotif = `El proveedor ha iniciado el servicio "${serviceTitle}".`;
+        break;
+      case "completado_por_prestador":
+        targetUserId = usuarioId; targetUserType = "usuario";
+        tituloNotif = "Servicio Completado por Prestador"; cuerpoNotif = `El prestador ha marcado "${serviceTitle}" como completado. Por favor, confirma y califica.`;
+        break;
+      case "completado_por_usuario":
+        targetUserId = prestadorId; targetUserType = "prestador";
+        tituloNotif = "¡Servicio Confirmado por Usuario!"; cuerpoNotif = `El usuario ha confirmado la finalización de "${serviceTitle}". ¡Ya puedes calificarlo!`;
+        break;
+      }
     }
 
-    // Notificaciones por cambio de estado de pago (específicamente para liberación)
     if (newValue.paymentStatus !== previousValue.paymentStatus && newValue.paymentStatus === "liberado_al_proveedor") {
-        targetUserId = prestadorId; targetUserType = "prestador";
-        tituloNotif = "¡Pago Liberado!";
-        const montoLiberado = (newValue.detallesFinancieros as DetallesFinancieros)?.montoFinalLiberadoAlPrestador?.toFixed(2) || (newValue.precio || newValue.montoCobrado || 0).toFixed(2);
-        cuerpoNotif = `El pago para el servicio "${serviceTitle}" ha sido liberado a tu cuenta. Monto: $${montoLiberado}.`;
+      targetUserId = prestadorId; targetUserType = "prestador";
+      tituloNotif = "¡Pago Liberado!";
+      const montoLiberado = (newValue.detallesFinancieros as DetallesFinancieros)?.montoFinalLiberadoAlPrestador?.toFixed(2) || (newValue.precio || newValue.montoCobrado || 0).toFixed(2);
+      cuerpoNotif = `El pago para el servicio "${serviceTitle}" ha sido liberado a tu cuenta. Monto: $${montoLiberado}.`;
     }
 
 
     if (targetUserId && targetUserType && tituloNotif && cuerpoNotif) {
-      await sendNotification(targetUserId, targetUserType, tituloNotif, cuerpoNotif, { solicitudId, nuevoEstado: newValue.status, nuevoEstadoPago: newValue.paymentStatus || "N/A" });
+      await sendNotification(targetUserId, targetUserType, tituloNotif, cuerpoNotif, {solicitudId, nuevoEstado: newValue.status, nuevoEstadoPago: newValue.paymentStatus || "N/A"});
     }
     return null;
   });
@@ -281,57 +292,55 @@ export const logSolicitudServicioChanges = functions.firestore
     const actorId = afterData.actorDelCambioId || "sistema";
     const actorRol: "usuario" | "prestador" | "sistema" | "admin" = afterData.actorDelCambioRol || "sistema";
     const now = admin.firestore.Timestamp.now();
-    const updatesToServiceRequest: Partial<ServiceRequest> & { updatedAt: admin.firestore.Timestamp } = { updatedAt: now };
+    const updatesToServiceRequest: Partial<ServiceRequest> & {updatedAt: admin.firestore.Timestamp} = {updatedAt: now};
 
 
     if (beforeData.status !== afterData.status) {
       const descLog = `Solicitud ${solicitudId} cambió de ${beforeData.status} a ${afterData.status} por ${actorRol} ${actorId}.`;
-      await logActivity(actorId, actorRol, "CAMBIO_ESTADO_SOLICITUD", descLog, { tipo: "solicitud_servicio", id: solicitudId }, { estadoAnterior: beforeData.status, estadoNuevo: afterData.status });
+      await logActivity(actorId, actorRol, "CAMBIO_ESTADO_SOLICITUD", descLog, {tipo: "solicitud_servicio", id: solicitudId}, {estadoAnterior: beforeData.status, estadoNuevo: afterData.status});
     }
 
     if (!beforeData.calificacionUsuario && afterData.calificacionUsuario) {
       const descLog = `Usuario ${afterData.usuarioId} calificó servicio ${solicitudId} (Prestador: ${afterData.prestadorId}) con ${afterData.calificacionUsuario.estrellas} estrellas.`;
-      await logActivity(afterData.usuarioId, "usuario", "CALIFICACION_USUARIO", descLog, { tipo: "solicitud_servicio", id: solicitudId }, { estrellas: afterData.calificacionUsuario.estrellas, comentario: afterData.calificacionUsuario.comentario || "" });
+      await logActivity(afterData.usuarioId, "usuario", "CALIFICACION_USUARIO", descLog, {tipo: "solicitud_servicio", id: solicitudId}, {estrellas: afterData.calificacionUsuario.estrellas, comentario: afterData.calificacionUsuario.comentario || ""});
     }
 
     if (!beforeData.calificacionPrestador && afterData.calificacionPrestador) {
       const descLog = `Prestador ${afterData.prestadorId} calificó a usuario ${afterData.usuarioId} en servicio ${solicitudId} con ${afterData.calificacionPrestador.estrellas} estrellas.`;
-      await logActivity(afterData.prestadorId, "prestador", "CALIFICACION_PRESTADOR", descLog, { tipo: "solicitud_servicio", id: solicitudId }, { estrellas: afterData.calificacionPrestador.estrellas, comentario: afterData.calificacionPrestador.comentario || "" });
+      await logActivity(afterData.prestadorId, "prestador", "CALIFICACION_PRESTADOR", descLog, {tipo: "solicitud_servicio", id: solicitudId}, {estrellas: afterData.calificacionPrestador.estrellas, comentario: afterData.calificacionPrestador.comentario || ""});
     }
 
     const isFinalizedState = (afterData.status === "cerrado_con_calificacion" || afterData.status === "cerrado_automaticamente");
     const wasNotFinalizedBefore = (beforeData.status !== "cerrado_con_calificacion" && beforeData.status !== "cerrado_automaticamente");
-    // Check if payment was previously 'retenido_para_liberacion' and is now to be 'liberado_al_proveedor'
+
     const shouldReleasePayment = (beforeData.paymentStatus === "retenido_para_liberacion" && isFinalizedState && wasNotFinalizedBefore) ||
-                                (afterData.paymentStatus === "retenido_para_liberacion" && isFinalizedState && !wasNotFinalizedBefore); // For immediate rating use case
+                                (afterData.paymentStatus === "retenido_para_liberacion" && isFinalizedState && !wasNotFinalizedBefore);
 
     if (shouldReleasePayment || (isFinalizedState && wasNotFinalizedBefore && afterData.paymentStatus === "retenido_para_liberacion")) {
       const montoTotalPagadoPorUsuario = afterData.montoCobrado || afterData.precio || 0;
-      let detallesFinancierosNuevos: DetallesFinancieros = { montoTotalPagadoPorUsuario };
+      let detallesFinancierosNuevos: DetallesFinancieros = {montoTotalPagadoPorUsuario};
 
       if (montoTotalPagadoPorUsuario > 0) {
-        // 1. Calculate financial breakdown
         detallesFinancierosNuevos.comisionSistemaPagoPct = COMISION_SISTEMA_PAGO_PORCENTAJE;
         detallesFinancierosNuevos.comisionSistemaPagoMonto = montoTotalPagadoPorUsuario * COMISION_SISTEMA_PAGO_PORCENTAJE;
         detallesFinancierosNuevos.montoNetoProcesador = montoTotalPagadoPorUsuario - detallesFinancierosNuevos.comisionSistemaPagoMonto;
 
         detallesFinancierosNuevos.comisionAppPct = COMISION_APP_SERVICIOMAP_PORCENTAJE;
-        detallesFinancierosNuevos.comisionAppMonto = montoTotalPagadoPorUsuario * COMISION_APP_SERVICIOMAP_PORCENTAJE; // 6% of total
+        detallesFinancierosNuevos.comisionAppMonto = montoTotalPagadoPorUsuario * COMISION_APP_SERVICIOMAP_PORCENTAJE;
 
         detallesFinancierosNuevos.aporteFondoFidelidadMonto = detallesFinancierosNuevos.comisionAppMonto * PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD;
-        
+
         detallesFinancierosNuevos.montoBrutoParaPrestador = detallesFinancierosNuevos.montoNetoProcesador - detallesFinancierosNuevos.comisionAppMonto;
-        detallesFinancierosNuevos.montoFinalLiberadoAlPrestador = detallesFinancierosNuevos.montoBrutoParaPrestador; // Assuming no other adjustments for now
+        detallesFinancierosNuevos.montoFinalLiberadoAlPrestador = detallesFinancierosNuevos.montoBrutoParaPrestador;
         detallesFinancierosNuevos.fechaLiberacion = now;
 
         updatesToServiceRequest.paymentStatus = "liberado_al_proveedor";
         updatesToServiceRequest.paymentReleasedToProviderAt = now;
         updatesToServiceRequest.detallesFinancieros = detallesFinancierosNuevos;
 
-        await logActivity("sistema", "sistema", "PAGO_LIBERADO", `Pago para servicio ${solicitudId} liberado. Prestador recibe $${detallesFinancierosNuevos.montoFinalLiberadoAlPrestador?.toFixed(2)}.`, { tipo: "solicitud_servicio", id: solicitudId }, detallesFinancierosNuevos);
-        await logActivity("sistema", "sistema", "PAGO_PROCESADO_DETALLES", `Detalles financieros procesados para ${solicitudId}.`, { tipo: "solicitud_servicio", id: solicitudId }, detallesFinancierosNuevos);
+        await logActivity("sistema", "sistema", "PAGO_LIBERADO", `Pago para servicio ${solicitudId} liberado. Prestador recibe $${detallesFinancierosNuevos.montoFinalLiberadoAlPrestador?.toFixed(2)}.`, {tipo: "solicitud_servicio", id: solicitudId}, detallesFinancierosNuevos);
+        await logActivity("sistema", "sistema", "PAGO_PROCESADO_DETALLES", `Detalles financieros procesados para ${solicitudId}.`, {tipo: "solicitud_servicio", id: solicitudId}, detallesFinancierosNuevos);
 
-        // 2. Award points to user
         const pointsEarned = Math.floor(montoTotalPagadoPorUsuario / FACTOR_CONVERSION_PUNTOS);
         if (pointsEarned > 0) {
           const userRef = db.collection("usuarios").doc(afterData.usuarioId);
@@ -342,7 +351,6 @@ export const logSolicitudServicioChanges = functions.firestore
             fecha: now,
             descripcion: `Puntos por servicio: ${afterData.titulo || solicitudId.substring(0, 6)}`,
           };
-          // Check if userRef document exists before trying to update, create if not
           const userDoc = await userRef.get();
           if (userDoc.exists) {
             await userRef.update({
@@ -350,17 +358,15 @@ export const logSolicitudServicioChanges = functions.firestore
               historialPuntos: admin.firestore.FieldValue.arrayUnion(userHistoryEntry),
             });
           } else {
-             await userRef.set({ // Create user doc if it doesn't exist
-                puntosAcumulados: pointsEarned,
-                historialPuntos: [userHistoryEntry],
-                nombre: `Usuario ${afterData.usuarioId.substring(0,5)}`, // Default name
-                // Add other default fields for UserData if needed
-             });
+            await userRef.set({
+              puntosAcumulados: pointsEarned,
+              historialPuntos: [userHistoryEntry],
+              nombre: `Usuario ${afterData.usuarioId.substring(0, 5)}`,
+            });
           }
-          await logActivity(afterData.usuarioId, "usuario", "PUNTOS_FIDELIDAD_GANADOS", `Usuario ganó ${pointsEarned} puntos por servicio ${solicitudId}.`, { tipo: "usuario", id: afterData.usuarioId }, { puntos: pointsEarned, servicioId });
+          await logActivity(afterData.usuarioId, "usuario", "PUNTOS_FIDELIDAD_GANADOS", `Usuario ganó ${pointsEarned} puntos por servicio ${solicitudId}.`, {tipo: "usuario", id: afterData.usuarioId}, {puntos: pointsEarned, servicioId});
         }
 
-        // 3. Contribute to loyalty fund
         if (detallesFinancierosNuevos.aporteFondoFidelidadMonto > 0) {
           const fundRef = db.collection("fondoFidelidad").doc("global");
           const fundHistoryEntry = {
@@ -370,27 +376,25 @@ export const logSolicitudServicioChanges = functions.firestore
             montoAportadoAlFondo: detallesFinancierosNuevos.aporteFondoFidelidadMonto,
             fecha: now,
           };
-          // Ensure fundRef document exists before trying to update, create if not
           const fundDoc = await fundRef.get();
           if (fundDoc.exists) {
             await fundRef.update({
-                totalAcumulado: admin.firestore.FieldValue.increment(detallesFinancierosNuevos.aporteFondoFidelidadMonto),
-                registros: admin.firestore.FieldValue.arrayUnion(fundHistoryEntry),
+              totalAcumulado: admin.firestore.FieldValue.increment(detallesFinancierosNuevos.aporteFondoFidelidadMonto),
+              registros: admin.firestore.FieldValue.arrayUnion(fundHistoryEntry),
             });
           } else {
             await fundRef.set({
-                totalAcumulado: detallesFinancierosNuevos.aporteFondoFidelidadMonto,
-                registros: [fundHistoryEntry],
+              totalAcumulado: detallesFinancierosNuevos.aporteFondoFidelidadMonto,
+              registros: [fundHistoryEntry],
             });
           }
-          await logActivity("sistema", "sistema", "FONDO_FIDELIDAD_APORTE", `Aporte de ${detallesFinancierosNuevos.aporteFondoFidelidadMonto.toFixed(2)} al fondo de fidelidad por servicio ${solicitudId}.`, { tipo: "fondo_fidelidad", id: "global" }, { monto: detallesFinancierosNuevos.aporteFondoFidelidadMonto, servicioId });
+          await logActivity("sistema", "sistema", "FONDO_FIDELIDAD_APORTE", `Aporte de ${detallesFinancierosNuevos.aporteFondoFidelidadMonto.toFixed(2)} al fondo de fidelidad por servicio ${solicitudId}.`, {tipo: "fondo_fidelidad", id: "global"}, {monto: detallesFinancierosNuevos.aporteFondoFidelidadMonto, servicioId});
         }
       }
     }
 
-    // If there are updates to the service request document itself (like paymentStatus or detallesFinancieros)
-    if (Object.keys(updatesToServiceRequest).length > 1) { // more than just updatedAt
-        await change.after.ref.update(updatesToServiceRequest);
+    if (Object.keys(updatesToServiceRequest).length > 1) {
+      await change.after.ref.update(updatesToServiceRequest);
     }
 
     return null;
@@ -426,15 +430,15 @@ export const onQuotationResponseNotifyUser = functions.firestore
         logDesc = `${nombrePrestador} (ID: ${prestadorId}) rechazó cotización ${cotizacionId}. Motivo: ${afterData.notasPrestador || "No especificado"}`;
       }
     }
-    if (notifTitle && notifBody) await sendNotification(usuarioId, "usuario", notifTitle, notifBody, { cotizacionId: cotizacionId, nuevoEstado: afterData.estado });
-    if (logAction && logDesc) await logActivity(prestadorId, "prestador", logAction, logDesc, { tipo: "solicitud_cotizacion", id: cotizacionId }, { precioSugerido: afterData.precioSugerido, notasPrestador: afterData.notasPrestador });
+    if (notifTitle && notifBody) await sendNotification(usuarioId, "usuario", notifTitle, notifBody, {cotizacionId: cotizacionId, nuevoEstado: afterData.estado});
+    if (logAction && logDesc) await logActivity(prestadorId, "prestador", logAction, logDesc, {tipo: "solicitud_cotizacion", id: cotizacionId}, {precioSugerido: afterData.precioSugerido, notasPrestador: afterData.notasPrestador});
     return null;
   });
 
 export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
   const usuarioId = context.auth.uid;
-  const { cotizacionId } = data;
+  const {cotizacionId} = data;
   if (!cotizacionId || typeof cotizacionId !== "string") throw new functions.https.HttpsError("invalid-argument", "Se requiere 'cotizacionId'.");
 
   const cotizacionRef = db.collection("solicitudes_cotizacion").doc(cotizacionId);
@@ -452,19 +456,19 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
       const ahora = admin.firestore.Timestamp.now();
       const nuevaSolicitudData: Omit<ServiceRequest, "id"> = {
         usuarioId: usuarioId, prestadorId: cotizacionData.prestadorId, status: "confirmada_prestador",
-        createdAt: ahora, updatedAt: ahora, titulo: cotizacionData.tituloServicio || `Servicio de cotización ${cotizacionId.substring(0,5)}`,
-        // @ts-ignore // This might be needed if 'precio' is not on Omit type directly
-        precio: cotizacionData.precioSugerido, // This now represents montoTotalPagadoPorUsuario
-        montoCobrado: cotizacionData.precioSugerido, // Explicitly set montoCobrado
-        paymentStatus: "retenido_para_liberacion", // Assume payment is processed and retained at this point
+        createdAt: ahora, updatedAt: ahora, titulo: cotizacionData.tituloServicio || `Servicio de cotización ${cotizacionId.substring(0, 5)}`,
+        // @ts-ignore
+        precio: cotizacionData.precioSugerido,
+        montoCobrado: cotizacionData.precioSugerido,
+        paymentStatus: "retenido_para_liberacion",
         originatingQuotationId: cotizacionId,
       };
       transaction.set(nuevaSolicitudRef, nuevaSolicitudData);
-      transaction.update(cotizacionRef, { estado: "convertida_a_servicio", fechaRespuestaUsuario: ahora });
+      transaction.update(cotizacionRef, {estado: "convertida_a_servicio", fechaRespuestaUsuario: ahora});
 
-      await logActivity(usuarioId, "usuario", "COTIZACION_ACEPTADA_USUARIO", `Usuario aceptó cotización ${cotizacionId}. Nueva solicitud ID: ${nuevaSolicitudRef.id}.`, { tipo: "solicitud_cotizacion", id: cotizacionId }, { nuevaSolicitudServicioId: nuevaSolicitudRef.id, precioAceptado: cotizacionData.precioSugerido });
-      await sendNotification(cotizacionData.prestadorId, "prestador", "¡Cotización Aceptada!", `Usuario aceptó tu cotización de $${cotizacionData.precioSugerido} para "${cotizacionData.tituloServicio || 'el servicio'}". Se ha creado una solicitud de servicio.`, { solicitudId: nuevaSolicitudRef.id, cotizacionId: cotizacionId });
-      return { success: true, message: "Cotización aceptada y servicio creado.", servicioId: nuevaSolicitudRef.id };
+      await logActivity(usuarioId, "usuario", "COTIZACION_ACEPTADA_USUARIO", `Usuario aceptó cotización ${cotizacionId}. Nueva solicitud ID: ${nuevaSolicitudRef.id}.`, {tipo: "solicitud_cotizacion", id: cotizacionId}, {nuevaSolicitudServicioId: nuevaSolicitudRef.id, precioAceptado: cotizacionData.precioSugerido});
+      await sendNotification(cotizacionData.prestadorId, "prestador", "¡Cotización Aceptada!", `Usuario aceptó tu cotización de $${cotizacionData.precioSugerido} para "${cotizacionData.tituloServicio || "el servicio"}". Se ha creado una solicitud de servicio.`, {solicitudId: nuevaSolicitudRef.id, cotizacionId: cotizacionId});
+      return {success: true, message: "Cotización aceptada y servicio creado.", servicioId: nuevaSolicitudRef.id};
     });
   } catch (error: any) {
     functions.logger.error(`Error al aceptar cotización ${cotizacionId}:`, error);
@@ -488,7 +492,9 @@ export const onServiceConfirmedCreateChatRoom = functions.firestore
       const chatDocRef = db.collection("chats").doc(solicitudId);
       try {
         const chatDoc = await chatDocRef.get();
-        if (chatDoc.exists) { functions.logger.info(`Chat ${solicitudId} ya existe.`); return null; }
+        if (chatDoc.exists) {
+          functions.logger.info(`Chat ${solicitudId} ya existe.`); return null;
+        }
 
         const usuarioInfoDoc = await db.collection("usuarios").doc(usuarioId).get();
         const prestadorInfoDoc = await db.collection("prestadores").doc(prestadorId).get();
@@ -496,17 +502,19 @@ export const onServiceConfirmedCreateChatRoom = functions.firestore
         const nuevoChatData: ChatData = {
           solicitudServicioId: solicitudId, participantesUids: [usuarioId, prestadorId].sort(),
           participantesInfo: {
-            [usuarioId]: { nombre: (usuarioInfoDoc.data() as UserData)?.nombre || `Usuario ${usuarioId.substring(0,5)}`, rol: "usuario" },
-            [prestadorId]: { nombre: (prestadorInfoDoc.data() as ProviderData)?.nombre || `Prestador ${prestadorId.substring(0,5)}`, rol: "prestador" },
+            [usuarioId]: {nombre: (usuarioInfoDoc.data() as UserData)?.nombre || `Usuario ${usuarioId.substring(0, 5)}`, rol: "usuario"},
+            [prestadorId]: {nombre: (prestadorInfoDoc.data() as ProviderData)?.nombre || `Prestador ${prestadorId.substring(0, 5)}`, rol: "prestador"},
           },
-          fechaCreacion: ahora, ultimaActualizacion: ahora, estadoChat: "activo", conteoNoLeido: { [usuarioId]: 0, [prestadorId]: 0 }
+          fechaCreacion: ahora, ultimaActualizacion: ahora, estadoChat: "activo", conteoNoLeido: {[usuarioId]: 0, [prestadorId]: 0}
         };
         await chatDocRef.set(nuevoChatData);
-        await logActivity("sistema", "sistema", "CHAT_CREADO", `Chat creado para solicitud ${solicitudId}.`, { tipo: "chat", id: solicitudId }, { solicitudServicioId: solicitudId });
+        await logActivity("sistema", "sistema", "CHAT_CREADO", `Chat creado para solicitud ${solicitudId}.`, {tipo: "chat", id: solicitudId}, {solicitudServicioId: solicitudId});
         const serviceTitle = afterData.titulo || "el servicio";
-        await sendNotification(usuarioId, "usuario", "Chat Habilitado", `Ya puedes chatear sobre "${serviceTitle}".`, { chatId: solicitudId, solicitudId: solicitudId });
-        await sendNotification(prestadorId, "prestador", "Chat Habilitado", `Ya puedes chatear sobre "${serviceTitle}".`, { chatId: solicitudId, solicitudId: solicitudId });
-      } catch (error) { functions.logger.error(`[ChatCreate ${solicitudId}] Error:`, error); }
+        await sendNotification(usuarioId, "usuario", "Chat Habilitado", `Ya puedes chatear sobre "${serviceTitle}".`, {chatId: solicitudId, solicitudId: solicitudId});
+        await sendNotification(prestadorId, "prestador", "Chat Habilitado", `Ya puedes chatear sobre "${serviceTitle}".`, {chatId: solicitudId, solicitudId: solicitudId});
+      } catch (error) {
+        functions.logger.error(`[ChatCreate ${solicitudId}] Error:`, error);
+      }
     }
     return null;
   });
@@ -516,7 +524,7 @@ export const canjearPuntosPromocion = functions.https.onCall(async (data, contex
     throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para canjear puntos.");
   }
   const usuarioId = context.auth.uid;
-  const { promocionId } = data;
+  const {promocionId} = data;
 
   if (!promocionId || typeof promocionId !== "string") {
     throw new functions.https.HttpsError("invalid-argument", "Se requiere 'promocionId'.");
@@ -545,11 +553,11 @@ export const canjearPuntosPromocion = functions.https.onCall(async (data, contex
         throw new functions.https.HttpsError("failed-precondition", "Esta promoción no está activa.");
       }
       if (promocionData.fechaExpiracion && promocionData.fechaExpiracion.toMillis() < now.toMillis()) {
-        transaction.update(promocionRef, { activo: false });
+        transaction.update(promocionRef, {activo: false});
         throw new functions.https.HttpsError("failed-precondition", "Esta promoción ha expirado.");
       }
       if (typeof promocionData.usosDisponibles === "number" && promocionData.usosDisponibles <= 0) {
-        transaction.update(promocionRef, { activo: false });
+        transaction.update(promocionRef, {activo: false});
         throw new functions.https.HttpsError("failed-precondition", "Esta promoción se ha agotado.");
       }
       if ((usuarioData.puntosAcumulados || 0) < promocionData.puntosRequeridos) {
@@ -573,16 +581,16 @@ export const canjearPuntosPromocion = functions.https.onCall(async (data, contex
           usosDisponibles: admin.firestore.FieldValue.increment(-1),
         });
       }
-      
-      await logActivity(usuarioId, "usuario", "PUNTOS_FIDELIDAD_CANJEADOS", `Usuario canjeó ${promocionData.puntosRequeridos} puntos por promoción '${promocionData.descripcion}'.`, { tipo: "promocion_fidelidad", id: promocionId }, { puntosGastados: promocionData.puntosRequeridos, promocionId });
+
+      await logActivity(usuarioId, "usuario", "PUNTOS_FIDELIDAD_CANJEADOS", `Usuario canjeó ${promocionData.puntosRequeridos} puntos por promoción '${promocionData.descripcion}'.`, {tipo: "promocion_fidelidad", id: promocionId}, {puntosGastados: promocionData.puntosRequeridos, promocionId});
 
       return {
         success: true,
         message: `¡Promoción "${promocionData.descripcion}" canjeada exitosamente!`,
         descuentoAplicable: {
-            tipo: promocionData.tipoDescuento,
-            valor: promocionData.valorDescuento,
-            codigo: promocionData.codigoPromocional, 
+          tipo: promocionData.tipoDescuento,
+          valor: promocionData.valorDescuento,
+          codigo: promocionData.codigoPromocional,
         },
       };
     });
@@ -593,3 +601,50 @@ export const canjearPuntosPromocion = functions.https.onCall(async (data, contex
   }
 });
 
+export const obtenerTraduccion = functions.https.onCall(async (data, context) => {
+  const {claveUnica, idiomaSolicitado} = data;
+
+  if (!claveUnica || typeof claveUnica !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'claveUnica' (string).");
+  }
+  if (!idiomaSolicitado || typeof idiomaSolicitado !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idiomaSolicitado' (string, ej: 'es', 'en').");
+  }
+
+  const logActorId = context.auth?.uid || "sistema_anonimo";
+  const logActorRol = context.auth?.uid ? "usuario" : "sistema";
+
+  try {
+    const idiomaRef = db.collection("idiomas").doc(idiomaSolicitado);
+    const docSnap = await idiomaRef.get();
+    let textoTraducido: string | undefined = undefined;
+
+    if (docSnap.exists) {
+      const idiomaData = docSnap.data() as IdiomaDocumentoFirestore;
+      textoTraducido = idiomaData.recursos?.[claveUnica];
+    }
+
+    if (textoTraducido === undefined && idiomaSolicitado !== DEFAULT_LANGUAGE_CODE) {
+      functions.logger.warn(`[obtenerTraduccion] Clave '${claveUnica}' no encontrada en idioma '${idiomaSolicitado}'. Intentando con idioma por defecto '${DEFAULT_LANGUAGE_CODE}'.`);
+      const defaultIdiomaRef = db.collection("idiomas").doc(DEFAULT_LANGUAGE_CODE);
+      const defaultDocSnap = await defaultIdiomaRef.get();
+      if (defaultDocSnap.exists) {
+        const defaultIdiomaData = defaultDocSnap.data() as IdiomaDocumentoFirestore;
+        textoTraducido = defaultIdiomaData.recursos?.[claveUnica];
+      }
+    }
+
+    if (textoTraducido === undefined) {
+      functions.logger.error(`[obtenerTraduccion] Clave '${claveUnica}' no encontrada en idioma '${idiomaSolicitado}' ni en el idioma por defecto.`);
+      await logActivity(logActorId, logActorRol, "TRADUCCION_SOLICITADA", `Clave de traducción no encontrada: ${claveUnica} para idioma ${idiomaSolicitado}.`, {tipo: "idioma", id: idiomaSolicitado}, {clave: claveUnica, resultado: "no_encontrada"});
+      return {traduccion: `[${claveUnica}]`, idiomaDevuelto: null, error: "Clave de traducción no encontrada."};
+    }
+
+    await logActivity(logActorId, logActorRol, "TRADUCCION_SOLICITADA", `Traducción solicitada para clave: ${claveUnica}, idioma: ${idiomaSolicitado}.`, {tipo: "idioma", id: idiomaSolicitado}, {clave: claveUnica, resultado: "encontrada"});
+    return {traduccion: textoTraducido, idiomaDevuelto: idiomaSolicitado};
+  } catch (error: any) {
+    functions.logger.error(`[obtenerTraduccion] Error al obtener traducción para clave '${claveUnica}', idioma '${idiomaSolicitado}':`, error);
+    await logActivity(logActorId, logActorRol, "TRADUCCION_SOLICITADA", `Error al obtener traducción para clave: ${claveUnica}, idioma: ${idiomaSolicitado}.`, {tipo: "idioma", id: idiomaSolicitado}, {clave: claveUnica, error: error.message});
+    throw new functions.https.HttpsError("internal", "Error al procesar la solicitud de traducción.", error.message);
+  }
+});

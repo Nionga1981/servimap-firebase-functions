@@ -103,6 +103,16 @@ export interface HistorialPuntoUsuario {
   descripcion?: string;
 }
 
+export interface IdiomaRecursos {
+  [key: string]: string;
+}
+
+export interface IdiomaDocumento {
+  codigo: string;
+  nombre: string;
+  recursos: IdiomaRecursos;
+}
+
 export interface DemoUser {
   id: string;
   isPremium: boolean;
@@ -113,6 +123,7 @@ export interface DemoUser {
   puntosAcumulados?: number;
   historialPuntos?: HistorialPuntoUsuario[];
 }
+
 
 interface DetallesFinancieros {
   montoTotalPagadoPorUsuario?: number;
@@ -166,7 +177,7 @@ interface BaseServiceRequest {
   miembroEmpresaUid?: string;
   titulo?: string;
   originatingQuotationId?: string;
-  precio?: number; 
+  precio?: number;
   montoCobrado?: number; // Can be used as montoTotalPagadoPorUsuario
   detallesFinancieros?: DetallesFinancieros;
 }
@@ -174,7 +185,7 @@ interface BaseServiceRequest {
 export interface FixedServiceRequest extends BaseServiceRequest {
   serviceType: 'fixed';
   selectedFixedServices?: { serviceId: string, title: string, price: number }[];
-  totalAmount?: number; 
+  totalAmount?: number;
   serviceTime: string;
 }
 
@@ -187,7 +198,7 @@ export interface HourlyServiceRequest extends BaseServiceRequest {
   actualStartTime?: number;
   actualEndTime?: number;
   actualDurationHours?: number;
-  finalTotal?: number; 
+  finalTotal?: number;
 }
 
 export type ServiceRequest = FixedServiceRequest | HourlyServiceRequest;
@@ -281,7 +292,8 @@ export type ActivityLogAction =
   | 'PUNTOS_FIDELIDAD_GANADOS'
   | 'PUNTOS_FIDELIDAD_CANJEADOS'
   | 'FONDO_FIDELIDAD_APORTE'
-  | 'PAGO_PROCESADO_DETALLES';
+  | 'PAGO_PROCESADO_DETALLES'
+  | 'TRADUCCION_SOLICITADA';
 
 
 export interface ActivityLog {
@@ -292,7 +304,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad';
+    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -373,11 +385,11 @@ export interface PromocionFidelidad {
   id?: string;
   descripcion: string;
   puntosRequeridos: number;
-  tipoDescuento: 'porcentaje' | 'monto_fijo'; 
+  tipoDescuento: 'porcentaje' | 'monto_fijo';
   valorDescuento: number;
   activo: boolean;
-  codigoPromocional?: string; 
-  usosDisponibles?: number; 
-  fechaExpiracion?: number; 
-  serviciosAplicables?: string[]; 
+  codigoPromocional?: string;
+  usosDisponibles?: number; // Firestore FieldValue.increment(-1)
+  fechaExpiracion?: number; // timestamp
+  serviciosAplicables?: string[];
 }
