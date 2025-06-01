@@ -147,6 +147,22 @@ export interface DetallesFinancieros {
   fechaLiberacion?: number; // timestamp
 }
 
+export interface IndicadoresRendimiento {
+  puntualidad?: number; // e.g., 1-5 scale
+  calidadServicio?: number; // e.g., 1-5 scale
+  comunicacion?: number; // e.g., 1-5 scale
+  cumplimientoRequerimientos?: number; // e.g., 1-5 scale
+}
+
+interface CalificacionDetallada {
+  estrellas: number;
+  comentario?: string;
+  fecha: number;
+  indicadoresRendimiento?: IndicadoresRendimiento;
+  aspectosPositivos?: string[];
+  areasDeMejora?: string[];
+}
+
 interface BaseServiceRequest {
   id: string;
   userId: string;
@@ -162,16 +178,8 @@ interface BaseServiceRequest {
   providerMarkedCompleteAt?: number;
   userConfirmedCompletionAt?: number;
   ratingWindowExpiresAt?: number;
-  calificacionUsuario?: {
-    estrellas: number;
-    comentario?: string;
-    fecha: number;
-  };
-  calificacionPrestador?: {
-    estrellas: number;
-    comentario?: string;
-    fecha: number;
-  };
+  calificacionUsuario?: CalificacionDetallada;
+  calificacionPrestador?: CalificacionDetallada; // Assuming provider can also give detailed feedback
   mutualRatingCompleted?: boolean;
   paymentStatus?: PaymentStatus;
   paymentIntentId?: string;
@@ -495,3 +503,5 @@ export interface SoporteTicketData {
   referenciaId?: string; // e.g., servicioId, pagoId if related to a specific entity
   adjuntosUrls?: string[]; // URLs to uploaded files (e.g., screenshots)
 }
+
+    
