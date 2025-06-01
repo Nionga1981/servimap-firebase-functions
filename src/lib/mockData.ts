@@ -169,8 +169,8 @@ export const mockProviderGalleries: ProviderGallery[] = [
 ];
 
 export const mockDemoUsers: DemoUser[] = [
-  { id: 'currentUserDemoId', isPremium: true, name: 'Usuario Premium Demo', idiomaPreferido: 'es', ubicacionExacta: USER_FIXED_LOCATION, puntosAcumulados: 150, historialPuntos: [{ tipo: 'ganados', puntos: 150, fecha: Date.now() - 86400000, servicioId: 'serv123', descripcion: 'Servicio Plomería Urgente' }] },
-  { id: 'standardUserDemoId', isPremium: false, name: 'Usuario Estándar Demo', idiomaPreferido: 'en', puntosAcumulados: 20, historialPuntos: [{ tipo: 'ganados', puntos: 20, fecha: Date.now() - 86400000*2, servicioId: 'serv456', descripcion: 'Consulta Eléctrica' }] },
+  { id: 'currentUserDemoId', isPremium: true, name: 'Usuario Premium Demo', idiomaPreferido: 'es', ubicacionExacta: USER_FIXED_LOCATION, puntosAcumulados: 150, historialPuntos: [{ tipo: 'ganados', puntos: 150, fecha: Date.now() - 86400000, servicioId: 'serv123', descripcion: 'Servicio Plomería Urgente' }], favoritos: ['plumber1', 'gardener1'] },
+  { id: 'standardUserDemoId', isPremium: false, name: 'Usuario Estándar Demo', idiomaPreferido: 'en', puntosAcumulados: 20, historialPuntos: [{ tipo: 'ganados', puntos: 20, fecha: Date.now() - 86400000*2, servicioId: 'serv456', descripcion: 'Consulta Eléctrica' }], favoritos: ['electrician1'] },
 ];
 
 export const mockBannersPublicitarios: BannerPublicitario[] = [
@@ -344,3 +344,4 @@ export const mockIdiomas: IdiomaDocumento[] = [
     }
   }
 ];
+

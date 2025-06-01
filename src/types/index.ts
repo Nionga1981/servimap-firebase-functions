@@ -130,6 +130,7 @@ export interface DemoUser {
   fcmTokens?: string[];
   puntosAcumulados?: number;
   historialPuntos?: HistorialPuntoUsuario[];
+  favoritos?: string[]; // Array of provider IDs
 }
 
 
