@@ -13,8 +13,10 @@ const COMISION_APP_SERVICIOMAP_PORCENTAJE = 0.06; // 6% ServiMap app commission 
 const PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD = 0.10; // 10% of ServiMap's commission goes to loyalty
 const FACTOR_CONVERSION_PUNTOS = 10; // $10 MXN (or monetary unit) per 1 loyalty point
 const DEFAULT_LANGUAGE_CODE = "es";
+const HORAS_ANTES_RECORDATORIO_SERVICIO = 24;
 
-// --- INTERFACES (Ideally from a shared types file, simplified here) ---
+
+// --- INTERFACES (Locally defined for Cloud Functions context) ---
 export type ServiceRequestStatus =
   | "agendado" | "pendiente_confirmacion" | "confirmada_prestador" | "pagada"
   | "en_camino_proveedor" | "servicio_iniciado" | "completado_por_prestador"
@@ -94,6 +96,8 @@ export interface ServiceRequest {
   montoCobrado?: number;
   paymentReleasedToProviderAt?: admin.firestore.Timestamp | number;
   detallesFinancieros?: admin.firestore.FieldValue | DetallesFinancieros;
+  serviceDate?: string; // YYYY-MM-DD
+  serviceTime?: string; // HH:MM
 }
 
 export type SolicitudCotizacionEstado =
@@ -141,7 +145,8 @@ export type ActivityLogAction =
   | "CONFIG_CAMBIADA" | "COTIZACION_CREADA" | "COTIZACION_PRECIO_PROPUESTO"
   | "COTIZACION_ACEPTADA_USUARIO" | "COTIZACION_RECHAZADA" | "CHAT_CREADO"
   | "PUNTOS_FIDELIDAD_GANADOS" | "PUNTOS_FIDELIDAD_CANJEADOS" | "FONDO_FIDELIDAD_APORTE"
-  | "PAGO_PROCESADO_DETALLES" | "TRADUCCION_SOLICITADA";
+  | "PAGO_PROCESADO_DETALLES" | "TRADUCCION_SOLICITADA"
+  | "NOTIFICACION_RECORDATORIO_PROGRAMADA" | "NOTIFICACION_RECORDATORIO_ENVIADA";
 
 export interface PromocionFidelidad {
   id?: string;
@@ -163,6 +168,32 @@ interface IdiomaDocumentoFirestore {
   codigo: string;
   nombre: string;
   recursos: IdiomaRecursosFirestore;
+}
+
+export type RecordatorioTipo =
+  | "recordatorio_servicio"
+  | "alerta_cancelacion"
+  | "alerta_cambio_servicio"
+  | "alerta_pago_proximo"
+  | "alerta_promocion";
+
+export interface Recordatorio {
+  id?: string;
+  usuarioId: string;
+  servicioId: string;
+  tipo: RecordatorioTipo;
+  mensaje: string;
+  fechaProgramada: admin.firestore.Timestamp;
+  enviado: boolean;
+  fechaEnvio?: admin.firestore.Timestamp;
+  intentosEnvio?: number;
+  errorEnvio?: string;
+  datosAdicionales?: {
+    tituloServicio?: string;
+    nombrePrestador?: string;
+    fechaHoraServicioIso?: string;
+    [key: string]: any;
+  };
 }
 
 
@@ -238,6 +269,7 @@ export const onServiceStatusChangeSendNotification = functions.firestore
     let targetUserId: string | null = null;
     let targetUserType: "usuario" | "prestador" | null = null;
     const serviceTitle = newValue.titulo || "un servicio";
+    let sendStdNotification = true;
 
     if (newValue.status !== previousValue.status) {
       switch (newValue.status) {
@@ -248,11 +280,46 @@ export const onServiceStatusChangeSendNotification = functions.firestore
       case "confirmada_prestador":
         targetUserId = usuarioId; targetUserType = "usuario";
         tituloNotif = "¡Cita Confirmada!"; cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido confirmada.`;
+
+        // Schedule a reminder
+        if (newValue.serviceDate && newValue.serviceTime) {
+          try {
+            const [year, month, day] = newValue.serviceDate.split("-").map(Number);
+            const [hour, minute] = newValue.serviceTime.split(":").map(Number);
+            const serviceDateTime = new Date(year, month - 1, day, hour, minute);
+            const reminderTime = new Date(serviceDateTime.getTime() - HORAS_ANTES_RECORDATORIO_SERVICIO * 60 * 60 * 1000);
+
+            if (reminderTime.getTime() > Date.now()) {
+              const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
+              const nombrePrestador = prestadorDoc.exists ? (prestadorDoc.data() as ProviderData)?.nombre || "El prestador" : "El prestador";
+
+              const reminderData: Omit<Recordatorio, "id"> = {
+                usuarioId: usuarioId,
+                servicioId: solicitudId,
+                tipo: "recordatorio_servicio",
+                mensaje: `Recordatorio: Tu servicio "${serviceTitle}" con ${nombrePrestador} es mañana a las ${newValue.serviceTime}.`,
+                fechaProgramada: admin.firestore.Timestamp.fromDate(reminderTime),
+                enviado: false,
+                datosAdicionales: {
+                  tituloServicio: serviceTitle,
+                  nombrePrestador: nombrePrestador,
+                  fechaHoraServicioIso: serviceDateTime.toISOString(),
+                },
+              };
+              const reminderRef = await db.collection("recordatorios").add(reminderData);
+              functions.logger.info(`[Reminder Scheduled] Recordatorio programado para servicio ${solicitudId} en ${reminderTime.toISOString()}. ID: ${reminderRef.id}`);
+              await logActivity("sistema", "sistema", "NOTIFICACION_RECORDATORIO_PROGRAMADA", `Recordatorio programado para servicio ${solicitudId}.`, {tipo: "recordatorio", id: reminderRef.id});
+            }
+          } catch (e) {
+            functions.logger.error(`[Reminder Scheduling Error] Error al parsear fecha/hora para servicio ${solicitudId}: ${newValue.serviceDate} ${newValue.serviceTime}`, e);
+          }
+        }
         break;
       case "rechazada_prestador": case "cancelada_prestador":
         targetUserId = usuarioId; targetUserType = "usuario";
         tituloNotif = `Cita ${newValue.status === "rechazada_prestador" ? "Rechazada" : "Cancelada"}`;
         cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido ${newValue.status === "rechazada_prestador" ? "rechazada" : "cancelada"} por el prestador.`;
+        // Potentially create an "alerta_cancelacion" type reminder/notification
         break;
       case "cancelada_usuario":
         targetUserId = prestadorId; targetUserType = "prestador";
@@ -280,12 +347,13 @@ export const onServiceStatusChangeSendNotification = functions.firestore
     if (newValue.paymentStatus !== previousValue.paymentStatus && newValue.paymentStatus === "liberado_al_proveedor") {
       targetUserId = prestadorId; targetUserType = "prestador";
       tituloNotif = "¡Pago Liberado!";
-      const montoLiberado = (newValue.detallesFinancieros as DetallesFinancieros)?.montoFinalLiberadoAlPrestador?.toFixed(2) || (newValue.precio || newValue.montoCobrado || 0).toFixed(2);
-      cuerpoNotif = `El pago para el servicio "${serviceTitle}" ha sido liberado a tu cuenta. Monto: $${montoLiberado}.`;
+      const montoFinalLiberado = (newValue.detallesFinancieros as DetallesFinancieros)?.montoFinalLiberadoAlPrestador;
+      const montoParaMensaje = montoFinalLiberado !== undefined ? montoFinalLiberado.toFixed(2) : (newValue.montoCobrado || newValue.precio || 0).toFixed(2);
+      cuerpoNotif = `El pago para el servicio "${serviceTitle}" ha sido liberado a tu cuenta. Monto: $${montoParaMensaje}.`;
+      sendStdNotification = true; // Ensure this notification is sent
     }
 
-
-    if (targetUserId && targetUserType && tituloNotif && cuerpoNotif) {
+    if (sendStdNotification && targetUserId && targetUserType && tituloNotif && cuerpoNotif) {
       await sendNotification(targetUserId, targetUserType, tituloNotif, cuerpoNotif, {solicitudId, nuevoEstado: newValue.status, nuevoEstadoPago: newValue.paymentStatus || "N/A"});
     }
     return null;
@@ -308,7 +376,6 @@ export const logSolicitudServicioChanges = functions.firestore
     const now = admin.firestore.Timestamp.now();
     const updatesToServiceRequest: Partial<ServiceRequest> & {updatedAt: admin.firestore.Timestamp} = {updatedAt: now};
 
-
     if (beforeData.status !== afterData.status) {
       const descLog = `Solicitud ${solicitudId} cambió de ${beforeData.status} a ${afterData.status} por ${actorRol} ${actorId}.`;
       await logActivity(actorId, actorRol, "CAMBIO_ESTADO_SOLICITUD", descLog, {tipo: "solicitud_servicio", id: solicitudId}, {estadoAnterior: beforeData.status, estadoNuevo: afterData.status});
@@ -316,7 +383,6 @@ export const logSolicitudServicioChanges = functions.firestore
         updatesToServiceRequest.fechaFinalizacionEfectiva = now;
       }
     }
-
 
     if (!beforeData.calificacionUsuario && afterData.calificacionUsuario) {
       const descLog = `Usuario ${afterData.usuarioId} calificó servicio ${solicitudId} (Prestador: ${afterData.prestadorId}) con ${afterData.calificacionUsuario.estrellas} estrellas.`;
@@ -331,25 +397,20 @@ export const logSolicitudServicioChanges = functions.firestore
     const isFinalizedState = ESTADOS_FINALES_SERVICIO.includes(afterData.status as EstadoFinalServicio);
     const wasNotFinalizedBefore = !ESTADOS_FINALES_SERVICIO.includes(beforeData.status as EstadoFinalServicio);
 
-
-    const shouldReleasePayment = (beforeData.paymentStatus === "retenido_para_liberacion" && isFinalizedState && wasNotFinalizedBefore) ||
-                                (afterData.paymentStatus === "retenido_para_liberacion" && isFinalizedState && !wasNotFinalizedBefore);
-
-    if (shouldReleasePayment || (isFinalizedState && wasNotFinalizedBefore && afterData.paymentStatus === "retenido_para_liberacion")) {
+    if ((isFinalizedState && wasNotFinalizedBefore && afterData.paymentStatus === "retenido_para_liberacion") ||
+        (beforeData.paymentStatus === "retenido_para_liberacion" && afterData.paymentStatus === "liberado_al_proveedor" && isFinalizedState)) {
       const montoTotalPagadoPorUsuario = afterData.montoCobrado || afterData.precio || 0;
-      let detallesFinancierosNuevos: DetallesFinancieros = {montoTotalPagadoPorUsuario};
+      let detallesFinancierosNuevos: DetallesFinancieros = {...(afterData.detallesFinancieros as DetallesFinancieros || {})};
+      detallesFinancierosNuevos.montoTotalPagadoPorUsuario = montoTotalPagadoPorUsuario;
 
-      if (montoTotalPagadoPorUsuario > 0) {
+      if (montoTotalPagadoPorUsuario > 0 && !detallesFinancierosNuevos.montoFinalLiberadoAlPrestador) { // Solo calcular si no se ha hecho antes
         detallesFinancierosNuevos.comisionSistemaPagoPct = COMISION_SISTEMA_PAGO_PORCENTAJE;
         detallesFinancierosNuevos.comisionSistemaPagoMonto = montoTotalPagadoPorUsuario * COMISION_SISTEMA_PAGO_PORCENTAJE;
         detallesFinancierosNuevos.montoNetoProcesador = montoTotalPagadoPorUsuario - detallesFinancierosNuevos.comisionSistemaPagoMonto;
-
         detallesFinancierosNuevos.comisionAppPct = COMISION_APP_SERVICIOMAP_PORCENTAJE;
         detallesFinancierosNuevos.comisionAppMonto = montoTotalPagadoPorUsuario * COMISION_APP_SERVICIOMAP_PORCENTAJE;
-
-        detallesFinancierosNuevos.aporteFondoFidelidadMonto = detallesFinancierosNuevos.comisionAppMonto * PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD;
-
-        detallesFinancierosNuevos.montoBrutoParaPrestador = detallesFinancierosNuevos.montoNetoProcesador - detallesFinancierosNuevos.comisionAppMonto;
+        detallesFinancierosNuevos.aporteFondoFidelidadMonto = (detallesFinancierosNuevos.comisionAppMonto || 0) * PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD;
+        detallesFinancierosNuevos.montoBrutoParaPrestador = (detallesFinancierosNuevos.montoNetoProcesador || 0) - (detallesFinancierosNuevos.comisionAppMonto || 0);
         detallesFinancierosNuevos.montoFinalLiberadoAlPrestador = detallesFinancierosNuevos.montoBrutoParaPrestador;
         detallesFinancierosNuevos.fechaLiberacion = now;
 
@@ -364,10 +425,7 @@ export const logSolicitudServicioChanges = functions.firestore
         if (pointsEarned > 0) {
           const userRef = db.collection("usuarios").doc(afterData.usuarioId);
           const userHistoryEntry: HistorialPuntoUsuario = {
-            servicioId: solicitudId,
-            tipo: "ganados",
-            puntos: pointsEarned,
-            fecha: now,
+            servicioId: solicitudId, tipo: "ganados", puntos: pointsEarned, fecha: now,
             descripcion: `Puntos por servicio: ${afterData.titulo || solicitudId.substring(0, 6)}`,
           };
           const userDoc = await userRef.get();
@@ -378,22 +436,19 @@ export const logSolicitudServicioChanges = functions.firestore
             });
           } else {
             await userRef.set({
-              puntosAcumulados: pointsEarned,
-              historialPuntos: [userHistoryEntry],
-              nombre: `Usuario ${afterData.usuarioId.substring(0, 5)}`,
-            });
+              puntosAcumulados: pointsEarned, historialPuntos: [userHistoryEntry],
+              nombre: `Usuario ${afterData.usuarioId.substring(0, 5)}`, fcmTokens: [], isPremium: false,
+            }, {merge: true});
           }
           await logActivity(afterData.usuarioId, "usuario", "PUNTOS_FIDELIDAD_GANADOS", `Usuario ganó ${pointsEarned} puntos por servicio ${solicitudId}.`, {tipo: "usuario", id: afterData.usuarioId}, {puntos: pointsEarned, servicioId});
         }
 
-        if (detallesFinancierosNuevos.aporteFondoFidelidadMonto > 0) {
+        if (detallesFinancierosNuevos.aporteFondoFidelidadMonto && detallesFinancierosNuevos.aporteFondoFidelidadMonto > 0) {
           const fundRef = db.collection("fondoFidelidad").doc("global");
           const fundHistoryEntry = {
-            servicioId: solicitudId,
-            montoServicio: montoTotalPagadoPorUsuario,
+            servicioId: solicitudId, montoServicio: montoTotalPagadoPorUsuario,
             comisionPlataformaCalculada: detallesFinancierosNuevos.comisionAppMonto,
-            montoAportadoAlFondo: detallesFinancierosNuevos.aporteFondoFidelidadMonto,
-            fecha: now,
+            montoAportadoAlFondo: detallesFinancierosNuevos.aporteFondoFidelidadMonto, fecha: now,
           };
           const fundDoc = await fundRef.get();
           if (fundDoc.exists) {
@@ -412,7 +467,7 @@ export const logSolicitudServicioChanges = functions.firestore
       }
     }
 
-    if (Object.keys(updatesToServiceRequest).length > 1 || updatesToServiceRequest.fechaFinalizacionEfectiva) {
+    if (Object.keys(updatesToServiceRequest).length > 1 || updatesToServiceRequest.fechaFinalizacionEfectiva || updatesToServiceRequest.detallesFinancieros) {
       await change.after.ref.update(updatesToServiceRequest);
     }
 
@@ -473,16 +528,25 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
 
       const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
       const ahora = admin.firestore.Timestamp.now();
+
+      // Simulate serviceDate and serviceTime for the new ServiceRequest
+      // For demo, let's assume it's scheduled for "tomorrow" at a default time like 10:00
+      const tomorrow = new Date(ahora.toDate());
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const serviceDateStr = `${tomorrow.getFullYear()}-${(tomorrow.getMonth() + 1).toString().padStart(2, "0")}-${tomorrow.getDate().toString().padStart(2, "0")}`;
+      const serviceTimeStr = "10:00";
+
       const nuevaSolicitudData: Omit<ServiceRequest, "id"> = {
         usuarioId: usuarioId, prestadorId: cotizacionData.prestadorId, status: "confirmada_prestador",
         createdAt: ahora, updatedAt: ahora, titulo: cotizacionData.tituloServicio || `Servicio de cotización ${cotizacionId.substring(0, 5)}`,
-        // @ts-ignore
         precio: cotizacionData.precioSugerido,
         montoCobrado: cotizacionData.precioSugerido,
         paymentStatus: "retenido_para_liberacion", // Asumimos que se paga/retiene al aceptar la cotización
         originatingQuotationId: cotizacionId,
         actorDelCambioId: usuarioId,
         actorDelCambioRol: "usuario",
+        serviceDate: serviceDateStr,
+        serviceTime: serviceTimeStr,
       };
       transaction.set(nuevaSolicitudRef, nuevaSolicitudData);
       transaction.update(cotizacionRef, {estado: "convertida_a_servicio", fechaRespuestaUsuario: ahora});
@@ -670,5 +734,75 @@ export const obtenerTraduccion = functions.https.onCall(async (data, context) =>
   }
 });
 
+// --- Scheduled Function to Send Reminders ---
+export const enviarRecordatoriosProgramados = functions.pubsub
+  .schedule("every 15 minutes")
+  .onRun(async (context) => {
+    const now = admin.firestore.Timestamp.now();
+    const remindersQuery = db.collection("recordatorios")
+      .where("enviado", "==", false)
+      .where("fechaProgramada", "<=", now);
 
-    
+    const snapshot = await remindersQuery.get();
+    if (snapshot.empty) {
+      functions.logger.log("[EnviarRecordatorios] No hay recordatorios para enviar.");
+      return null;
+    }
+
+    const promises = snapshot.docs.map(async (doc) => {
+      const reminder = doc.data() as Recordatorio;
+      const reminderId = doc.id;
+
+      try {
+        // Fetch user data for FCM tokens
+        const userDoc = await db.collection("usuarios").doc(reminder.usuarioId).get();
+        if (!userDoc.exists) {
+          functions.logger.error(`[EnviarRecordatorios] Usuario ${reminder.usuarioId} no encontrado para recordatorio ${reminderId}.`);
+          await doc.ref.update({enviado: true, errorEnvio: "Usuario no encontrado"}); // Mark as "sent" to avoid retries for this error
+          return;
+        }
+        const userData = userDoc.data() as UserData;
+        const tokens = userData.fcmTokens;
+
+        if (tokens && tokens.length > 0) {
+          // Customize message if needed from reminder.datosAdicionales
+          let finalMessage = reminder.mensaje;
+          if (reminder.datosAdicionales?.tituloServicio && reminder.datosAdicionales?.nombrePrestador && reminder.datosAdicionales?.fechaHoraServicioIso) {
+            const serviceDateTime = new Date(reminder.datosAdicionales.fechaHoraServicioIso);
+            const formattedTime = serviceDateTime.toLocaleTimeString("es-MX", {hour: "2-digit", minute: "2-digit"});
+            finalMessage = `Recordatorio: Tu servicio "${reminder.datosAdicionales.tituloServicio}" con ${reminder.datosAdicionales.nombrePrestador} es hoy a las ${formattedTime}.`;
+          }
+
+
+          const payload = {
+            notification: {
+              title: "Recordatorio de Servicio",
+              body: finalMessage,
+            },
+            data: {
+              servicioId: reminder.servicioId,
+              tipoRecordatorio: reminder.tipo,
+            },
+          };
+          await admin.messaging().sendToDevice(tokens, payload);
+          await doc.ref.update({enviado: true, fechaEnvio: admin.firestore.Timestamp.now(), errorEnvio: null, intentosEnvio: admin.firestore.FieldValue.increment(1)});
+          functions.logger.info(`[EnviarRecordatorios] Recordatorio ${reminderId} enviado a usuario ${reminder.usuarioId}.`);
+          await logActivity("sistema", "sistema", "NOTIFICACION_RECORDATORIO_ENVIADA", `Recordatorio ${reminder.tipo} enviado a usuario ${reminder.usuarioId} para servicio ${reminder.servicioId}.`, {tipo: "recordatorio", id: reminderId});
+        } else {
+          functions.logger.warn(`[EnviarRecordatorios] Usuario ${reminder.usuarioId} no tiene tokens FCM para recordatorio ${reminderId}.`);
+          await doc.ref.update({enviado: true, errorEnvio: "Sin tokens FCM", fechaEnvio: admin.firestore.Timestamp.now()}); // Mark as "sent" if no tokens
+        }
+      } catch (error: any) {
+        functions.logger.error(`[EnviarRecordatorios] Error enviando recordatorio ${reminderId}:`, error);
+        const intentos = (reminder.intentosEnvio || 0) + 1;
+        if (intentos >= 3) {
+          await doc.ref.update({enviado: true, errorEnvio: `Error tras ${intentos} intentos: ${error.message}`, intentosEnvio: intentos});
+        } else {
+          await doc.ref.update({errorEnvio: error.message, intentosEnvio: intentos});
+        }
+      }
+    });
+
+    await Promise.all(promises);
+    return null;
+  });

@@ -152,7 +152,8 @@ interface BaseServiceRequest {
   userId: string;
   providerId: string;
   location?: ProviderLocation | { customAddress: string };
-  serviceDate: string;
+  serviceDate: string; // YYYY-MM-DD
+  serviceTime: string; // HH:MM
   notes?: string;
   status: ServiceRequestStatus;
   createdAt: number;
@@ -198,12 +199,12 @@ export interface FixedServiceRequest extends BaseServiceRequest {
   serviceType: 'fixed';
   selectedFixedServices?: { serviceId: string, title: string, price: number }[];
   totalAmount?: number;
-  serviceTime: string;
+  // serviceTime is already in BaseServiceRequest
 }
 
 export interface HourlyServiceRequest extends BaseServiceRequest {
   serviceType: 'hourly';
-  startTime: string;
+  // startTime is serviceTime in BaseServiceRequest
   durationHours: number;
   hourlyRate: number;
   estimatedTotal: number;
@@ -305,7 +306,9 @@ export type ActivityLogAction =
   | 'PUNTOS_FIDELIDAD_CANJEADOS'
   | 'FONDO_FIDELIDAD_APORTE'
   | 'PAGO_PROCESADO_DETALLES'
-  | 'TRADUCCION_SOLICITADA';
+  | 'TRADUCCION_SOLICITADA'
+  | 'NOTIFICACION_RECORDATORIO_PROGRAMADA'
+  | 'NOTIFICACION_RECORDATORIO_ENVIADA';
 
 
 export interface ActivityLog {
@@ -316,7 +319,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma';
+    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -406,5 +409,29 @@ export interface PromocionFidelidad {
   serviciosAplicables?: string[];
 }
 
+// Reminder System Types
+export type RecordatorioTipo =
+  | "recordatorio_servicio"
+  | "alerta_cancelacion"
+  | "alerta_cambio_servicio"
+  | "alerta_pago_proximo"
+  | "alerta_promocion";
 
-    
+export interface Recordatorio {
+  id?: string;
+  usuarioId: string;
+  servicioId: string;
+  tipo: RecordatorioTipo;
+  mensaje: string;
+  fechaProgramada: number; // Timestamp
+  enviado: boolean;
+  fechaEnvio?: number; // Timestamp
+  intentosEnvio?: number;
+  errorEnvio?: string;
+  datosAdicionales?: {
+    tituloServicio?: string;
+    nombrePrestador?: string;
+    fechaHoraServicioIso?: string; // ISO string for easy formatting
+    [key: string]: any; // Allow other relevant data
+  };
+}
