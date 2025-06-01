@@ -308,7 +308,9 @@ export type ActivityLogAction =
   | 'PAGO_PROCESADO_DETALLES'
   | 'TRADUCCION_SOLICITADA'
   | 'NOTIFICACION_RECORDATORIO_PROGRAMADA'
-  | 'NOTIFICACION_RECORDATORIO_ENVIADA';
+  | 'NOTIFICACION_RECORDATORIO_ENVIADA'
+  | 'REGLAS_ZONA_CONSULTADAS'
+  | 'ADMIN_ZONA_MODIFICADA';
 
 
 export interface ActivityLog {
@@ -319,7 +321,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio';
+    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -435,3 +437,32 @@ export interface Recordatorio {
     [key: string]: any; // Allow other relevant data
   };
 }
+
+// Preferred Zones Types
+export interface Coordenada { // Equivalent to ProviderLocation if needed
+  lat: number;
+  lng: number;
+}
+
+export interface ReglasZona {
+  tarifaFactor?: number; // e.g., 1.1 for +10% (applied to base price), 0.9 for -10%
+  descuentoAbsoluto?: number; // e.g., 5 for $5 off, applied after factor
+  descuentoPorcentual?: number; // e.g., 0.15 for 15% off, applied after factor and absolute
+  serviciosRestringidos?: string[]; // Array of service category IDs not available
+  serviciosConPrioridad?: string[]; // Array of service category IDs to highlight
+  promocionesActivasIds?: string[]; // Specific promotion IDs active in this zone
+  mensajeEspecial?: string; // e.g., "¡Estás en una zona con envío gratis!"
+  disponibilidadAfectada?: 'restringida_total' | 'restringida_parcial' | 'mejorada' | 'sin_cambio';
+}
+
+export interface ZonaPreferente {
+  id?: string;
+  nombre: string;
+  poligono: Coordenada[]; // Array of {lat, lng} defining the polygon vertices in order
+  reglas: ReglasZona;
+  activa: boolean;
+  prioridad?: number; // For overlapping zones, higher number means higher priority
+  descripcion?: string; // Optional internal description
+}
+
+```

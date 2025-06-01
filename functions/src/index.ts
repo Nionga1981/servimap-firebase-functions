@@ -17,6 +17,7 @@ const HORAS_ANTES_RECORDATORIO_SERVICIO = 24;
 
 
 // --- INTERFACES (Locally defined for Cloud Functions context) ---
+// It's better to share these interfaces from a common package or file with your frontend.
 export type ServiceRequestStatus =
   | "agendado" | "pendiente_confirmacion" | "confirmada_prestador" | "pagada"
   | "en_camino_proveedor" | "servicio_iniciado" | "completado_por_prestador"
@@ -146,7 +147,8 @@ export type ActivityLogAction =
   | "COTIZACION_ACEPTADA_USUARIO" | "COTIZACION_RECHAZADA" | "CHAT_CREADO"
   | "PUNTOS_FIDELIDAD_GANADOS" | "PUNTOS_FIDELIDAD_CANJEADOS" | "FONDO_FIDELIDAD_APORTE"
   | "PAGO_PROCESADO_DETALLES" | "TRADUCCION_SOLICITADA"
-  | "NOTIFICACION_RECORDATORIO_PROGRAMADA" | "NOTIFICACION_RECORDATORIO_ENVIADA";
+  | "NOTIFICACION_RECORDATORIO_PROGRAMADA" | "NOTIFICACION_RECORDATORIO_ENVIADA"
+  | "REGLAS_ZONA_CONSULTADAS" | "ADMIN_ZONA_MODIFICADA";
 
 export interface PromocionFidelidad {
   id?: string;
@@ -194,6 +196,32 @@ export interface Recordatorio {
     fechaHoraServicioIso?: string;
     [key: string]: any;
   };
+}
+
+interface CoordenadaFirestore {
+  lat: number;
+  lng: number;
+}
+
+interface ReglasZonaFirestore {
+  tarifaFactor?: number;
+  descuentoAbsoluto?: number;
+  descuentoPorcentual?: number;
+  serviciosRestringidos?: string[];
+  serviciosConPrioridad?: string[];
+  promocionesActivasIds?: string[];
+  mensajeEspecial?: string;
+  disponibilidadAfectada?: "restringida_total" | "restringida_parcial" | "mejorada" | "sin_cambio";
+}
+
+interface ZonaPreferenteFirestore {
+  id?: string;
+  nombre: string;
+  poligono: CoordenadaFirestore[];
+  reglas: ReglasZonaFirestore;
+  activa: boolean;
+  prioridad?: number;
+  descripcion?: string;
 }
 
 
@@ -281,7 +309,6 @@ export const onServiceStatusChangeSendNotification = functions.firestore
         targetUserId = usuarioId; targetUserType = "usuario";
         tituloNotif = "¡Cita Confirmada!"; cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido confirmada.`;
 
-        // Schedule a reminder
         if (newValue.serviceDate && newValue.serviceTime) {
           try {
             const [year, month, day] = newValue.serviceDate.split("-").map(Number);
@@ -319,7 +346,6 @@ export const onServiceStatusChangeSendNotification = functions.firestore
         targetUserId = usuarioId; targetUserType = "usuario";
         tituloNotif = `Cita ${newValue.status === "rechazada_prestador" ? "Rechazada" : "Cancelada"}`;
         cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido ${newValue.status === "rechazada_prestador" ? "rechazada" : "cancelada"} por el prestador.`;
-        // Potentially create an "alerta_cancelacion" type reminder/notification
         break;
       case "cancelada_usuario":
         targetUserId = prestadorId; targetUserType = "prestador";
@@ -350,7 +376,7 @@ export const onServiceStatusChangeSendNotification = functions.firestore
       const montoFinalLiberado = (newValue.detallesFinancieros as DetallesFinancieros)?.montoFinalLiberadoAlPrestador;
       const montoParaMensaje = montoFinalLiberado !== undefined ? montoFinalLiberado.toFixed(2) : (newValue.montoCobrado || newValue.precio || 0).toFixed(2);
       cuerpoNotif = `El pago para el servicio "${serviceTitle}" ha sido liberado a tu cuenta. Monto: $${montoParaMensaje}.`;
-      sendStdNotification = true; // Ensure this notification is sent
+      sendStdNotification = true;
     }
 
     if (sendStdNotification && targetUserId && targetUserType && tituloNotif && cuerpoNotif) {
@@ -374,7 +400,8 @@ export const logSolicitudServicioChanges = functions.firestore
     const actorId = afterData.actorDelCambioId || "sistema";
     const actorRol: "usuario" | "prestador" | "sistema" | "admin" = afterData.actorDelCambioRol || "sistema";
     const now = admin.firestore.Timestamp.now();
-    const updatesToServiceRequest: Partial<ServiceRequest> & {updatedAt: admin.firestore.Timestamp} = {updatedAt: now};
+    const updatesToServiceRequest: Partial<ServiceRequest> & {updatedAt?: admin.firestore.Timestamp} = {updatedAt: now};
+
 
     if (beforeData.status !== afterData.status) {
       const descLog = `Solicitud ${solicitudId} cambió de ${beforeData.status} a ${afterData.status} por ${actorRol} ${actorId}.`;
@@ -398,15 +425,15 @@ export const logSolicitudServicioChanges = functions.firestore
     const wasNotFinalizedBefore = !ESTADOS_FINALES_SERVICIO.includes(beforeData.status as EstadoFinalServicio);
 
     if ((isFinalizedState && wasNotFinalizedBefore && afterData.paymentStatus === "retenido_para_liberacion") ||
-        (beforeData.paymentStatus === "retenido_para_liberacion" && afterData.paymentStatus === "liberado_al_proveedor" && isFinalizedState)) {
+        (beforeData.paymentStatus === "retenido_para_liberacion" && afterData.paymentStatus === "liberado_al_proveedor" && isFinalizedState && beforeData.status !== afterData.status)) {
       const montoTotalPagadoPorUsuario = afterData.montoCobrado || afterData.precio || 0;
       let detallesFinancierosNuevos: DetallesFinancieros = {...(afterData.detallesFinancieros as DetallesFinancieros || {})};
-      detallesFinancierosNuevos.montoTotalPagadoPorUsuario = montoTotalPagadoPorUsuario;
 
-      if (montoTotalPagadoPorUsuario > 0 && !detallesFinancierosNuevos.montoFinalLiberadoAlPrestador) { // Solo calcular si no se ha hecho antes
+      if (montoTotalPagadoPorUsuario > 0 && !detallesFinancierosNuevos.montoFinalLiberadoAlPrestador) {
+        detallesFinancierosNuevos.montoTotalPagadoPorUsuario = montoTotalPagadoPorUsuario;
         detallesFinancierosNuevos.comisionSistemaPagoPct = COMISION_SISTEMA_PAGO_PORCENTAJE;
         detallesFinancierosNuevos.comisionSistemaPagoMonto = montoTotalPagadoPorUsuario * COMISION_SISTEMA_PAGO_PORCENTAJE;
-        detallesFinancierosNuevos.montoNetoProcesador = montoTotalPagadoPorUsuario - detallesFinancierosNuevos.comisionSistemaPagoMonto;
+        detallesFinancierosNuevos.montoNetoProcesador = montoTotalPagadoPorUsuario - (detallesFinancierosNuevos.comisionSistemaPagoMonto || 0);
         detallesFinancierosNuevos.comisionAppPct = COMISION_APP_SERVICIOMAP_PORCENTAJE;
         detallesFinancierosNuevos.comisionAppMonto = montoTotalPagadoPorUsuario * COMISION_APP_SERVICIOMAP_PORCENTAJE;
         detallesFinancierosNuevos.aporteFondoFidelidadMonto = (detallesFinancierosNuevos.comisionAppMonto || 0) * PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD;
@@ -529,8 +556,6 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
       const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
       const ahora = admin.firestore.Timestamp.now();
 
-      // Simulate serviceDate and serviceTime for the new ServiceRequest
-      // For demo, let's assume it's scheduled for "tomorrow" at a default time like 10:00
       const tomorrow = new Date(ahora.toDate());
       tomorrow.setDate(tomorrow.getDate() + 1);
       const serviceDateStr = `${tomorrow.getFullYear()}-${(tomorrow.getMonth() + 1).toString().padStart(2, "0")}-${tomorrow.getDate().toString().padStart(2, "0")}`;
@@ -541,7 +566,7 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
         createdAt: ahora, updatedAt: ahora, titulo: cotizacionData.tituloServicio || `Servicio de cotización ${cotizacionId.substring(0, 5)}`,
         precio: cotizacionData.precioSugerido,
         montoCobrado: cotizacionData.precioSugerido,
-        paymentStatus: "retenido_para_liberacion", // Asumimos que se paga/retiene al aceptar la cotización
+        paymentStatus: "retenido_para_liberacion",
         originatingQuotationId: cotizacionId,
         actorDelCambioId: usuarioId,
         actorDelCambioRol: "usuario",
@@ -734,7 +759,6 @@ export const obtenerTraduccion = functions.https.onCall(async (data, context) =>
   }
 });
 
-// --- Scheduled Function to Send Reminders ---
 export const enviarRecordatoriosProgramados = functions.pubsub
   .schedule("every 15 minutes")
   .onRun(async (context) => {
@@ -754,25 +778,22 @@ export const enviarRecordatoriosProgramados = functions.pubsub
       const reminderId = doc.id;
 
       try {
-        // Fetch user data for FCM tokens
         const userDoc = await db.collection("usuarios").doc(reminder.usuarioId).get();
         if (!userDoc.exists) {
           functions.logger.error(`[EnviarRecordatorios] Usuario ${reminder.usuarioId} no encontrado para recordatorio ${reminderId}.`);
-          await doc.ref.update({enviado: true, errorEnvio: "Usuario no encontrado"}); // Mark as "sent" to avoid retries for this error
+          await doc.ref.update({enviado: true, errorEnvio: "Usuario no encontrado"});
           return;
         }
         const userData = userDoc.data() as UserData;
         const tokens = userData.fcmTokens;
 
         if (tokens && tokens.length > 0) {
-          // Customize message if needed from reminder.datosAdicionales
           let finalMessage = reminder.mensaje;
           if (reminder.datosAdicionales?.tituloServicio && reminder.datosAdicionales?.nombrePrestador && reminder.datosAdicionales?.fechaHoraServicioIso) {
             const serviceDateTime = new Date(reminder.datosAdicionales.fechaHoraServicioIso);
             const formattedTime = serviceDateTime.toLocaleTimeString("es-MX", {hour: "2-digit", minute: "2-digit"});
             finalMessage = `Recordatorio: Tu servicio "${reminder.datosAdicionales.tituloServicio}" con ${reminder.datosAdicionales.nombrePrestador} es hoy a las ${formattedTime}.`;
           }
-
 
           const payload = {
             notification: {
@@ -790,7 +811,7 @@ export const enviarRecordatoriosProgramados = functions.pubsub
           await logActivity("sistema", "sistema", "NOTIFICACION_RECORDATORIO_ENVIADA", `Recordatorio ${reminder.tipo} enviado a usuario ${reminder.usuarioId} para servicio ${reminder.servicioId}.`, {tipo: "recordatorio", id: reminderId});
         } else {
           functions.logger.warn(`[EnviarRecordatorios] Usuario ${reminder.usuarioId} no tiene tokens FCM para recordatorio ${reminderId}.`);
-          await doc.ref.update({enviado: true, errorEnvio: "Sin tokens FCM", fechaEnvio: admin.firestore.Timestamp.now()}); // Mark as "sent" if no tokens
+          await doc.ref.update({enviado: true, errorEnvio: "Sin tokens FCM", fechaEnvio: admin.firestore.Timestamp.now()});
         }
       } catch (error: any) {
         functions.logger.error(`[EnviarRecordatorios] Error enviando recordatorio ${reminderId}:`, error);
@@ -806,3 +827,100 @@ export const enviarRecordatoriosProgramados = functions.pubsub
     await Promise.all(promises);
     return null;
   });
+
+// Helper function for point-in-polygon check (Ray Casting Algorithm)
+function isPointInPolygon(point: CoordenadaFirestore, polygon: CoordenadaFirestore[]): boolean {
+  let crossings = 0;
+  const n = polygon.length;
+  if (n < 3) return false; // A polygon must have at least 3 vertices
+
+  for (let i = 0; i < n; i++) {
+    const p1 = polygon[i];
+    const p2 = polygon[(i + 1) % n]; // Next vertex, wraps around to the first
+
+    // Check if the ray crosses the edge (p1, p2)
+    if (((p1.lat <= point.lat && point.lat < p2.lat) || (p2.lat <= point.lat && point.lat < p1.lat)) &&
+        (point.lng < (p2.lng - p1.lng) * (point.lat - p1.lat) / (p2.lat - p1.lat) + p1.lng)) {
+      crossings++;
+    }
+  }
+  return crossings % 2 === 1; // Odd number of crossings means point is inside
+}
+
+export const verificarReglasDeZona = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para verificar reglas de zona.");
+  }
+  const actorId = context.auth.uid;
+  const {lat, lng} = data;
+
+  if (typeof lat !== "number" || typeof lng !== "number") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requieren coordenadas 'lat' y 'lng' numéricas.");
+  }
+  const puntoUsuario: CoordenadaFirestore = {lat, lng};
+
+  try {
+    const zonasSnapshot = await db.collection("zonas_preferentes").where("activa", "==", true).orderBy("prioridad", "desc").get();
+    let zonaAplicada: ZonaPreferenteFirestore | null = null;
+
+    if (!zonasSnapshot.empty) {
+      for (const doc of zonasSnapshot.docs) {
+        const zona = doc.data() as ZonaPreferenteFirestore;
+        if (zona.poligono && zona.poligono.length >= 3) {
+          if (isPointInPolygon(puntoUsuario, zona.poligono)) {
+            zonaAplicada = {id: doc.id, ...zona}; // Asignar la primera zona de mayor prioridad encontrada
+            break;
+          }
+        }
+      }
+    }
+
+    if (zonaAplicada) {
+      await logActivity(actorId, "usuario", "REGLAS_ZONA_CONSULTADAS", `Usuario en zona preferente '${zonaAplicada.nombre}' (ID: ${zonaAplicada.id}).`, {tipo: "zona_preferente", id: zonaAplicada.id || "N/A"}, {lat, lng});
+      return {
+        enZona: true,
+        zonaId: zonaAplicada.id,
+        nombreZona: zonaAplicada.nombre,
+        reglas: zonaAplicada.reglas,
+        descripcion: zonaAplicada.descripcion,
+      };
+    } else {
+      await logActivity(actorId, "usuario", "REGLAS_ZONA_CONSULTADAS", "Usuario no se encuentra en ninguna zona preferente activa.", undefined, {lat, lng});
+      return {enZona: false, zonaId: null, nombreZona: null, reglas: null};
+    }
+  } catch (error: any) {
+    functions.logger.error("Error al verificar reglas de zona:", error);
+    await logActivity(actorId, "usuario", "REGLAS_ZONA_CONSULTADAS", `Error al verificar zona para ${lat},${lng}: ${error.message}`, undefined, {lat, lng, error: error.message});
+    throw new functions.https.HttpsError("internal", "Error al procesar la verificación de zona.", error.message);
+  }
+});
+
+export const onZoneChangeLog = functions.firestore
+  .document("zonas_preferentes/{zonaId}")
+  .onWrite(async (change, context) => {
+    const zonaId = context.params.zonaId;
+    // Para obtener el UID del admin que hizo el cambio, necesitarías que el cliente
+    // pase esta información o que la función se llame como parte de un flujo de admin.
+    // Si es un cambio directo en la consola de Firebase, el UID de admin no estará directamente aquí.
+    // Asumimos que se podría inferir o que el log es más genérico.
+    const adminActorId = "admin_sistema"; // Placeholder
+
+    if (!change.before.exists) {
+      // Documento creado
+      const newData = change.after.data() as ZonaPreferenteFirestore;
+      await logActivity(adminActorId, "admin", "ADMIN_ZONA_MODIFICADA", `Nueva zona preferente creada: '${newData.nombre}' (ID: ${zonaId}).`, {tipo: "zona_preferente", id: zonaId}, {accionRealizada: "creacion", detalles: newData});
+    } else if (!change.after.exists) {
+      // Documento eliminado
+      const oldData = change.before.data() as ZonaPreferenteFirestore;
+      await logActivity(adminActorId, "admin", "ADMIN_ZONA_MODIFICADA", `Zona preferente eliminada: '${oldData.nombre}' (ID: ${zonaId}).`, {tipo: "zona_preferente", id: zonaId}, {accionRealizada: "eliminacion"});
+    } else {
+      // Documento actualizado
+      const newData = change.after.data() as ZonaPreferenteFirestore;
+      const oldData = change.before.data() as ZonaPreferenteFirestore;
+      // Se podrían comparar campos específicos para un log más detallado si es necesario
+      await logActivity(adminActorId, "admin", "ADMIN_ZONA_MODIFICADA", `Zona preferente actualizada: '${newData.nombre}' (ID: ${zonaId}). Activa: ${newData.activa}.`, {tipo: "zona_preferente", id: zonaId}, {accionRealizada: "actualizacion", cambios: {old: oldData, new: newData}});
+    }
+    return null;
+  });
+
+```

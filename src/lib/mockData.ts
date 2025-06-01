@@ -1,6 +1,6 @@
 
 // src/lib/mockData.ts
-import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad, IdiomaDocumento } from '@/types';
+import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad, IdiomaDocumento, ZonaPreferente } from '@/types';
 import { SERVICE_CATEGORIES as LUCIDE_SERVICE_CATEGORIES } from './constants';
 
 const getApproximateLocation = (exactLoc: ProviderLocation, factor = 0.01): ProviderLocation => {
@@ -291,10 +291,10 @@ export const mockPromocionesFidelidad: PromocionFidelidad[] = [
     id: 'promo_sorteo_premium',
     descripcion: 'Participa en el sorteo de 1 mes de Membresía Premium',
     puntosRequeridos: 50,
-    tipoDescuento: 'monto_fijo', 
-    valorDescuento: 0,        
+    tipoDescuento: 'monto_fijo',
+    valorDescuento: 0,
     activo: true,
-    codigoPromocional: 'SORTEOPREMIUM24' 
+    codigoPromocional: 'SORTEOPREMIUM24'
   },
   {
     id: 'promo_inactiva_test',
@@ -345,3 +345,42 @@ export const mockIdiomas: IdiomaDocumento[] = [
   }
 ];
 
+export const mockZonasPreferentes: ZonaPreferente[] = [
+  {
+    id: 'zona_centro_promo',
+    nombre: 'Promoción Centro Histórico',
+    poligono: [ // Ejemplo de un cuadrado simple alrededor de USER_FIXED_LOCATION
+      { lat: USER_FIXED_LOCATION.lat - 0.01, lng: USER_FIXED_LOCATION.lng - 0.01 },
+      { lat: USER_FIXED_LOCATION.lat + 0.01, lng: USER_FIXED_LOCATION.lng - 0.01 },
+      { lat: USER_FIXED_LOCATION.lat + 0.01, lng: USER_FIXED_LOCATION.lng + 0.01 },
+      { lat: USER_FIXED_LOCATION.lat - 0.01, lng: USER_FIXED_LOCATION.lng + 0.01 },
+    ],
+    reglas: {
+      descuentoPorcentual: 0.10, // 10% de descuento
+      mensajeEspecial: '¡Estás en la Zona Centro con 10% de descuento en servicios de plomería!',
+      serviciosConPrioridad: ['plumbing'],
+      promocionesActivasIds: ['promo_desc_10']
+    },
+    activa: true,
+    prioridad: 10,
+    descripcion: 'Zona promocional para el centro de la ciudad con descuentos en plomería.'
+  },
+  {
+    id: 'zona_norte_tarifa_alta',
+    nombre: 'Zona Norte - Tarifa Especial',
+    poligono: [ // Otro ejemplo de polígono
+      { lat: USER_FIXED_LOCATION.lat + 0.02, lng: USER_FIXED_LOCATION.lng - 0.02 },
+      { lat: USER_FIXED_LOCATION.lat + 0.04, lng: USER_FIXED_LOCATION.lng - 0.02 },
+      { lat: USER_FIXED_LOCATION.lat + 0.04, lng: USER_FIXED_LOCATION.lng + 0.02 },
+      { lat: USER_FIXED_LOCATION.lat + 0.02, lng: USER_FIXED_LOCATION.lng + 0.02 },
+    ],
+    reglas: {
+      tarifaFactor: 1.15, // 15% de incremento en tarifa base
+      mensajeEspecial: 'Servicios en Zona Norte pueden tener una tarifa ajustada.',
+      disponibilidadAfectada: 'sin_cambio'
+    },
+    activa: true,
+    prioridad: 5,
+    descripcion: 'Zona con ajuste de tarifa debido a distancia o demanda.'
+  }
+];
