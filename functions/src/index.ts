@@ -22,6 +22,19 @@ export type ServiceRequestStatus =
   | "rechazada_prestador" | "en_disputa" | "cerrado_automaticamente"
   | "cerrado_con_calificacion" | "cerrado_con_disputa_resuelta";
 
+export type EstadoFinalServicio =
+  | "cerrado_automaticamente"
+  | "cerrado_con_calificacion"
+  | "cerrado_con_disputa_resuelta"
+  | "cancelada_usuario"
+  | "cancelada_prestador"
+  | "rechazada_prestador";
+
+const ESTADOS_FINALES_SERVICIO: EstadoFinalServicio[] = [
+  "cerrado_automaticamente", "cerrado_con_calificacion", "cerrado_con_disputa_resuelta",
+  "cancelada_usuario", "cancelada_prestador", "rechazada_prestador",
+];
+
 export type PaymentStatus =
   | "pendiente_confirmacion_usuario" | "retenido_para_liberacion" | "liberado_al_proveedor"
   | "congelado_por_disputa" | "reembolsado_parcial" | "reembolsado_total"
@@ -69,6 +82,7 @@ export interface ServiceRequest {
   status: ServiceRequestStatus;
   createdAt: admin.firestore.Timestamp | number;
   updatedAt?: admin.firestore.Timestamp | number;
+  fechaFinalizacionEfectiva?: admin.firestore.Timestamp | number;
   titulo?: string;
   actorDelCambioId?: string;
   actorDelCambioRol?: "usuario" | "prestador" | "sistema";
@@ -298,7 +312,11 @@ export const logSolicitudServicioChanges = functions.firestore
     if (beforeData.status !== afterData.status) {
       const descLog = `Solicitud ${solicitudId} cambió de ${beforeData.status} a ${afterData.status} por ${actorRol} ${actorId}.`;
       await logActivity(actorId, actorRol, "CAMBIO_ESTADO_SOLICITUD", descLog, {tipo: "solicitud_servicio", id: solicitudId}, {estadoAnterior: beforeData.status, estadoNuevo: afterData.status});
+      if (ESTADOS_FINALES_SERVICIO.includes(afterData.status as EstadoFinalServicio) && !ESTADOS_FINALES_SERVICIO.includes(beforeData.status as EstadoFinalServicio)) {
+        updatesToServiceRequest.fechaFinalizacionEfectiva = now;
+      }
     }
+
 
     if (!beforeData.calificacionUsuario && afterData.calificacionUsuario) {
       const descLog = `Usuario ${afterData.usuarioId} calificó servicio ${solicitudId} (Prestador: ${afterData.prestadorId}) con ${afterData.calificacionUsuario.estrellas} estrellas.`;
@@ -310,8 +328,9 @@ export const logSolicitudServicioChanges = functions.firestore
       await logActivity(afterData.prestadorId, "prestador", "CALIFICACION_PRESTADOR", descLog, {tipo: "solicitud_servicio", id: solicitudId}, {estrellas: afterData.calificacionPrestador.estrellas, comentario: afterData.calificacionPrestador.comentario || ""});
     }
 
-    const isFinalizedState = (afterData.status === "cerrado_con_calificacion" || afterData.status === "cerrado_automaticamente");
-    const wasNotFinalizedBefore = (beforeData.status !== "cerrado_con_calificacion" && beforeData.status !== "cerrado_automaticamente");
+    const isFinalizedState = ESTADOS_FINALES_SERVICIO.includes(afterData.status as EstadoFinalServicio);
+    const wasNotFinalizedBefore = !ESTADOS_FINALES_SERVICIO.includes(beforeData.status as EstadoFinalServicio);
+
 
     const shouldReleasePayment = (beforeData.paymentStatus === "retenido_para_liberacion" && isFinalizedState && wasNotFinalizedBefore) ||
                                 (afterData.paymentStatus === "retenido_para_liberacion" && isFinalizedState && !wasNotFinalizedBefore);
@@ -393,7 +412,7 @@ export const logSolicitudServicioChanges = functions.firestore
       }
     }
 
-    if (Object.keys(updatesToServiceRequest).length > 1) {
+    if (Object.keys(updatesToServiceRequest).length > 1 || updatesToServiceRequest.fechaFinalizacionEfectiva) {
       await change.after.ref.update(updatesToServiceRequest);
     }
 
@@ -460,8 +479,10 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
         // @ts-ignore
         precio: cotizacionData.precioSugerido,
         montoCobrado: cotizacionData.precioSugerido,
-        paymentStatus: "retenido_para_liberacion",
+        paymentStatus: "retenido_para_liberacion", // Asumimos que se paga/retiene al aceptar la cotización
         originatingQuotationId: cotizacionId,
+        actorDelCambioId: usuarioId,
+        actorDelCambioRol: "usuario",
       };
       transaction.set(nuevaSolicitudRef, nuevaSolicitudData);
       transaction.update(cotizacionRef, {estado: "convertida_a_servicio", fechaRespuestaUsuario: ahora});
@@ -648,3 +669,6 @@ export const obtenerTraduccion = functions.https.onCall(async (data, context) =>
     throw new functions.https.HttpsError("internal", "Error al procesar la solicitud de traducción.", error.message);
   }
 });
+
+
+    

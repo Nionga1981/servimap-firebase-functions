@@ -81,6 +81,14 @@ export type ServiceRequestStatus =
   | 'cerrado_con_calificacion'
   | 'cerrado_con_disputa_resuelta';
 
+export type EstadoFinalServicio =
+  | 'cerrado_automaticamente'
+  | 'cerrado_con_calificacion'
+  | 'cerrado_con_disputa_resuelta'
+  | 'cancelada_usuario'
+  | 'cancelada_prestador'
+  | 'rechazada_prestador';
+
 export type PaymentStatus =
   | 'pendiente_confirmacion_usuario'
   | 'retenido_para_liberacion'
@@ -125,7 +133,7 @@ export interface DemoUser {
 }
 
 
-interface DetallesFinancieros {
+export interface DetallesFinancieros {
   montoTotalPagadoPorUsuario?: number;
   comisionSistemaPagoPct?: number;
   comisionSistemaPagoMonto?: number;
@@ -135,7 +143,7 @@ interface DetallesFinancieros {
   aporteFondoFidelidadMonto?: number;
   montoBrutoParaPrestador?: number;
   montoFinalLiberadoAlPrestador?: number;
-  fechaLiberacion?: number;
+  fechaLiberacion?: number; // timestamp
 }
 
 interface BaseServiceRequest {
@@ -148,6 +156,7 @@ interface BaseServiceRequest {
   status: ServiceRequestStatus;
   createdAt: number;
   updatedAt?: number;
+  fechaFinalizacionEfectiva?: number; // Timestamp of when it reached a terminal state
   providerMarkedCompleteAt?: number;
   userConfirmedCompletionAt?: number;
   ratingWindowExpiresAt?: number;
@@ -180,6 +189,8 @@ interface BaseServiceRequest {
   precio?: number;
   montoCobrado?: number; // Can be used as montoTotalPagadoPorUsuario
   detallesFinancieros?: DetallesFinancieros;
+  actorDelCambioId?: string; // Who triggered the last relevant change
+  actorDelCambioRol?: 'usuario' | 'prestador' | 'sistema'; // Role of the actor
 }
 
 export interface FixedServiceRequest extends BaseServiceRequest {
@@ -393,3 +404,6 @@ export interface PromocionFidelidad {
   fechaExpiracion?: number; // timestamp
   serviciosAplicables?: string[];
 }
+
+
+    
