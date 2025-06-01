@@ -148,7 +148,8 @@ export type ActivityLogAction =
   | "PUNTOS_FIDELIDAD_GANADOS" | "PUNTOS_FIDELIDAD_CANJEADOS" | "FONDO_FIDELIDAD_APORTE"
   | "PAGO_PROCESADO_DETALLES" | "TRADUCCION_SOLICITADA"
   | "NOTIFICACION_RECORDATORIO_PROGRAMADA" | "NOTIFICACION_RECORDATORIO_ENVIADA"
-  | "REGLAS_ZONA_CONSULTADAS" | "ADMIN_ZONA_MODIFICADA";
+  | "REGLAS_ZONA_CONSULTADAS" | "ADMIN_ZONA_MODIFICADA"
+  | "TICKET_SOPORTE_CREADO" | "TICKET_SOPORTE_ACTUALIZADO";
 
 export interface PromocionFidelidad {
   id?: string;
@@ -222,6 +223,34 @@ interface ZonaPreferenteFirestore {
   activa: boolean;
   prioridad?: number;
   descripcion?: string;
+}
+
+export type EstadoSolicitudSoporte =
+  | "pendiente"
+  | "en_proceso"
+  | "esperando_respuesta_usuario"
+  | "resuelto"
+  | "cerrado";
+
+export interface SoporteTicketData {
+  id?: string;
+  solicitanteId: string;
+  rolSolicitante: "usuario" | "prestador";
+  categoria: string;
+  prioridad?: "baja" | "normal" | "alta" | "urgente";
+  estado: EstadoSolicitudSoporte;
+  descripcion: string;
+  etiquetas?: string[];
+  historialMensajes?: {
+    remitenteId: string;
+    mensaje: string;
+    timestamp: admin.firestore.Timestamp;
+  }[];
+  fechaCreacion: admin.firestore.Timestamp;
+  fechaActualizacion: admin.firestore.Timestamp;
+  asignadoA?: string;
+  referenciaId?: string;
+  adjuntosUrls?: string[];
 }
 
 
@@ -923,4 +952,80 @@ export const onZoneChangeLog = functions.firestore
     return null;
   });
 
-```
+export const crearSolicitudSoporte = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
+  }
+  const solicitanteId = context.auth.uid;
+  const {
+    categoria,
+    descripcion,
+    rolSolicitante, // 'usuario' o 'prestador'
+    prioridad, // opcional
+    referenciaId, // opcional
+    adjuntosUrls, // opcional
+  } = data;
+
+  if (!categoria || typeof categoria !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "El campo 'categoria' es requerido.");
+  }
+  if (!descripcion || typeof descripcion !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "El campo 'descripcion' es requerido.");
+  }
+  if (!rolSolicitante || (rolSolicitante !== "usuario" && rolSolicitante !== "prestador")) {
+    throw new functions.https.HttpsError("invalid-argument", "El campo 'rolSolicitante' debe ser 'usuario' o 'prestador'.");
+  }
+
+  const now = admin.firestore.Timestamp.now();
+
+  const nuevaSolicitudData: Omit<SoporteTicketData, "id" | "etiquetas"> = {
+    solicitanteId: solicitanteId,
+    rolSolicitante: rolSolicitante as "usuario" | "prestador",
+    categoria: categoria,
+    estado: "pendiente",
+    descripcion: descripcion, // Esta es la descripción inicial
+    historialMensajes: [
+      {
+        remitenteId: solicitanteId,
+        mensaje: descripcion, // El primer mensaje es la descripción del problema
+        timestamp: now,
+      },
+    ],
+    fechaCreacion: now,
+    fechaActualizacion: now,
+    ...(prioridad && {prioridad: prioridad as SoporteTicketData["prioridad"]}),
+    ...(referenciaId && {referenciaId: referenciaId as string}),
+    ...(adjuntosUrls && Array.isArray(adjuntosUrls) && {adjuntosUrls: adjuntosUrls as string[]}),
+  };
+
+  try {
+    const solicitudRef = await db.collection("tickets_soporte").add(nuevaSolicitudData);
+    await logActivity(
+      solicitanteId,
+      rolSolicitante as "usuario" | "prestador",
+      "TICKET_SOPORTE_CREADO",
+      `Nuevo ticket de soporte #${solicitudRef.id} creado por ${rolSolicitante} ${solicitanteId}. Categoría: ${categoria}.`,
+      {tipo: "ticket_soporte", id: solicitudRef.id},
+      {categoria, prioridad: prioridad || "normal"}
+    );
+
+    // TODO: Notificar al equipo de soporte/admins sobre el nuevo ticket.
+
+    return {
+      success: true,
+      message: "Tu solicitud de soporte ha sido enviada. Nuestro equipo te contactará pronto.",
+      ticketId: solicitudRef.id,
+    };
+  } catch (error: any) {
+    functions.logger.error(`Error al crear ticket de soporte para ${solicitanteId}:`, error);
+    await logActivity(
+      solicitanteId,
+      rolSolicitante as "usuario" | "prestador",
+      "TICKET_SOPORTE_CREADO",
+      `Error al crear ticket de soporte. Categoría: ${categoria}. Error: ${error.message}`,
+      undefined,
+      {categoria, error: error.message}
+    );
+    throw new functions.https.HttpsError("internal", "No se pudo registrar tu solicitud de soporte.", error.message);
+  }
+});

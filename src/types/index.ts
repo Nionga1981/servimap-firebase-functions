@@ -310,7 +310,9 @@ export type ActivityLogAction =
   | 'NOTIFICACION_RECORDATORIO_PROGRAMADA'
   | 'NOTIFICACION_RECORDATORIO_ENVIADA'
   | 'REGLAS_ZONA_CONSULTADAS'
-  | 'ADMIN_ZONA_MODIFICADA';
+  | 'ADMIN_ZONA_MODIFICADA'
+  | 'TICKET_SOPORTE_CREADO'
+  | 'TICKET_SOPORTE_ACTUALIZADO';
 
 
 export interface ActivityLog {
@@ -321,7 +323,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente';
+    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -465,4 +467,31 @@ export interface ZonaPreferente {
   descripcion?: string; // Optional internal description
 }
 
-```
+// Support Ticket System Types
+export type EstadoSolicitudSoporte =
+  | 'pendiente'
+  | 'en_proceso'
+  | 'esperando_respuesta_usuario'
+  | 'resuelto'
+  | 'cerrado';
+
+export interface SoporteTicketData {
+  id?: string;
+  solicitanteId: string;
+  rolSolicitante: 'usuario' | 'prestador';
+  categoria: string; // User-selected category, e.g., "Pagos", "Calificaciones", "Técnico", "Cuenta", "Otro"
+  prioridad?: 'baja' | 'normal' | 'alta' | 'urgente';
+  estado: EstadoSolicitudSoporte;
+  descripcion: string; // Initial problem description from user
+  etiquetas?: string[]; // Keywords for AI, e.g., ["pago no procesado", "error_tarjeta"]
+  historialMensajes?: {
+    remitenteId: string; // UID of user, provider, or admin
+    mensaje: string;
+    timestamp: number;
+  }[];
+  fechaCreacion: number; // Timestamp
+  fechaActualizacion: number; // Timestamp
+  asignadoA?: string; // UID of admin/agent assigned
+  referenciaId?: string; // e.g., servicioId, pagoId if related to a specific entity
+  adjuntosUrls?: string[]; // URLs to uploaded files (e.g., screenshots)
+}
