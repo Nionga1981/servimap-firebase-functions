@@ -1,6 +1,6 @@
 
 // src/lib/mockData.ts
-import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat } from '@/types';
+import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad } from '@/types';
 import { SERVICE_CATEGORIES as LUCIDE_SERVICE_CATEGORIES } from './constants';
 
 const getApproximateLocation = (exactLoc: ProviderLocation, factor = 0.01): ProviderLocation => {
@@ -169,8 +169,8 @@ export const mockProviderGalleries: ProviderGallery[] = [
 ];
 
 export const mockDemoUsers: DemoUser[] = [
-  { id: 'currentUserDemoId', isPremium: true, name: 'Usuario Premium Demo', idiomaPreferido: 'es', ubicacionExacta: USER_FIXED_LOCATION },
-  { id: 'standardUserDemoId', isPremium: false, name: 'Usuario Estándar Demo', idiomaPreferido: 'en' },
+  { id: 'currentUserDemoId', isPremium: true, name: 'Usuario Premium Demo', idiomaPreferido: 'es', ubicacionExacta: USER_FIXED_LOCATION, puntosAcumulados: 150, historialPuntos: [{ tipo: 'ganados', puntos: 150, fecha: Date.now() - 86400000, servicioId: 'serv123', descripcion: 'Servicio Plomería Urgente' }] },
+  { id: 'standardUserDemoId', isPremium: false, name: 'Usuario Estándar Demo', idiomaPreferido: 'en', puntosAcumulados: 20, historialPuntos: [{ tipo: 'ganados', puntos: 20, fecha: Date.now() - 86400000*2, servicioId: 'serv456', descripcion: 'Consulta Eléctrica' }] },
 ];
 
 export const mockBannersPublicitarios: BannerPublicitario[] = [
@@ -221,16 +221,15 @@ export const mockCategoriasServicio: CategoriaServicio[] = [
   { id: 'child_care', nombre: 'Niñeras', iconoUrl: 'https://placehold.co/80x80/7E57C2/FFFFFF.png?text=NIN', keywords: ['cuidado de niños', 'niñera'], icon: LUCIDE_SERVICE_CATEGORIES.find(c => c.id === 'child_care')?.icon },
 ];
 
-// Mock data for quotations
 export const mockSolicitudesCotizacion: SolicitudCotizacion[] = [
   {
     id: 'cotizacion1',
     usuarioId: 'currentUserDemoId',
     prestadorId: 'plumber1',
     descripcionProblema: 'Tengo una fuga grande en la tubería principal del baño, necesito ayuda urgente. Adjunto video mostrando el problema.',
-    videoUrl: 'https://storage.googleapis.com/servimap-videos/mock_fuga_video.mp4', // Placeholder
+    videoUrl: 'https://storage.googleapis.com/servimap-videos/mock_fuga_video.mp4',
     estado: 'pendiente_revision_prestador',
-    fechaCreacion: Date.now() - (2 * 60 * 60 * 1000), // Hace 2 horas
+    fechaCreacion: Date.now() - (2 * 60 * 60 * 1000),
     tituloServicio: 'Fuga en tubería de baño',
     categoriaServicioId: 'plumbing',
   },
@@ -242,25 +241,24 @@ export const mockSolicitudesCotizacion: SolicitudCotizacion[] = [
     estado: 'precio_propuesto_al_usuario',
     precioSugerido: 75,
     notasPrestador: 'Revisión de interruptor y posible recableado. El precio incluye diagnóstico y mano de obra para reparación simple. Si se requiere cambiar todo el interruptor o hay daño mayor, el precio podría ajustarse.',
-    fechaCreacion: Date.now() - (24 * 60 * 60 * 1000), // Ayer
-    fechaRespuestaPrestador: Date.now() - (12 * 60 * 60 * 1000), // Hace 12 horas
+    fechaCreacion: Date.now() - (24 * 60 * 60 * 1000),
+    fechaRespuestaPrestador: Date.now() - (12 * 60 * 60 * 1000),
     tituloServicio: 'Interruptor defectuoso',
     categoriaServicioId: 'electrical',
   }
 ];
 
-// Mock data for chats (simple examples)
 export const mockChats: Chat[] = [
   {
-    id: 'chat_serv123', // Assume this ID matches a solicitudServicioId
-    solicitudServicioId: 'serv123_accepted', // A mock service ID that is "accepted"
+    id: 'chat_serv123',
+    solicitudServicioId: 'serv123_accepted',
     participantesUids: ['currentUserDemoId', 'plumber1'],
     participantesInfo: {
       'currentUserDemoId': { nombre: 'Usuario Premium Demo', rol: 'usuario' },
       'plumber1': { nombre: 'Mario Fontanería Express', rol: 'prestador' }
     },
-    fechaCreacion: Date.now() - (3 * 60 * 60 * 1000), // Hace 3 horas
-    ultimaActualizacion: Date.now() - (1 * 60 * 1000), // Hace 1 minuto
+    fechaCreacion: Date.now() - (3 * 60 * 60 * 1000),
+    ultimaActualizacion: Date.now() - (1 * 60 * 1000),
     ultimoMensaje: {
       texto: 'Perfecto, estaré allí en unos 20 minutos.',
       remitenteId: 'plumber1',
@@ -268,14 +266,43 @@ export const mockChats: Chat[] = [
     },
     estadoChat: 'activo',
     conteoNoLeido: { 'currentUserDemoId': 0, 'plumber1': 0 }
-    // Mensajes would be a subcollection
   }
 ];
 
-// You might also have a separate array for mockMensajes if you decide to populate them here
-// For example:
-// export const mockMensajesChat_serv123: MensajeChat[] = [
-//   { id: 'msg1', remitenteId: 'currentUserDemoId', texto: 'Hola Mario, ¿confirmado para las 3 PM?', timestamp: Date.now() - (60 * 60 * 1000) },
-//   { id: 'msg2', remitenteId: 'plumber1', texto: '¡Hola! Sí, confirmado. ¿Alguna instrucción especial para llegar?', timestamp: Date.now() - (58 * 60 * 1000) },
-// ];
-
+// Mock data for loyalty promotions
+export const mockPromocionesFidelidad: PromocionFidelidad[] = [
+  {
+    id: 'promo_desc_10',
+    descripcion: '10% de descuento en tu próximo servicio de Plomería',
+    puntosRequeridos: 100,
+    tipoDescuento: 'porcentaje',
+    valorDescuento: 10,
+    activo: true,
+    serviciosAplicables: ['plumbing'],
+  },
+  {
+    id: 'promo_desc_50_mxn',
+    descripcion: '$50 MXN de descuento en cualquier servicio',
+    puntosRequeridos: 200,
+    tipoDescuento: 'monto_fijo',
+    valorDescuento: 50,
+    activo: true,
+  },
+  {
+    id: 'promo_sorteo_premium',
+    descripcion: 'Participa en el sorteo de 1 mes de Membresía Premium',
+    puntosRequeridos: 50,
+    tipoDescuento: 'monto_fijo', // N/A for raffles, but structure needs it
+    valorDescuento: 0,         // N/A
+    activo: true,
+    codigoPromocional: 'SORTEOPREMIUM24' // Example
+  },
+  {
+    id: 'promo_inactiva_test',
+    descripcion: 'Test de promoción inactiva',
+    puntosRequeridos: 10,
+    tipoDescuento: 'monto_fijo',
+    valorDescuento: 5,
+    activo: false,
+  },
+];

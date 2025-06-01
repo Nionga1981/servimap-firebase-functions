@@ -6,12 +6,12 @@ export interface Service {
   id: string;
   title: string;
   description: string;
-  price: number;
+  price: number; // Assuming this is the final service amount paid by user
   category: string;
   imageUrl?: string;
   dataAiHint?: string;
   providerId: string;
-  hourlyRate?: never; // Ensure this is not present for fixed-price services
+  hourlyRate?: never;
 }
 
 export interface GalleryItem {
@@ -41,8 +41,8 @@ export interface Provider {
   ratingCount: number;
   ratingSum: number;
   services: Service[];
-  isAvailable: boolean; // General availability toggle by provider
-  estadoOnline: boolean; // Real-time online status for immediate services
+  isAvailable: boolean;
+  estadoOnline: boolean;
   ubicacionAproximada: ProviderLocation;
   ubicacionExacta?: ProviderLocation;
   currentLocation?: ProviderLocation | null;
@@ -52,7 +52,7 @@ export interface Provider {
   hourlyRate?: number;
   idiomasHablados?: string[];
   fcmTokens?: string[];
-  aceptaCotizacion?: boolean; // New field for quotations
+  aceptaCotizacion?: boolean;
 }
 
 export interface ChatMessage {
@@ -93,6 +93,16 @@ export type PaymentStatus =
   | 'fallido'
   | 'no_aplica';
 
+export interface HistorialPuntoUsuario {
+  id?: string;
+  servicioId?: string;
+  promocionId?: string;
+  tipo: 'ganados' | 'canjeados';
+  puntos: number;
+  fecha: number; // timestamp
+  descripcion?: string;
+}
+
 export interface DemoUser {
   id: string;
   isPremium: boolean;
@@ -100,7 +110,10 @@ export interface DemoUser {
   idiomaPreferido?: 'es' | 'en';
   ubicacionExacta?: ProviderLocation;
   fcmTokens?: string[];
+  puntosAcumulados?: number;
+  historialPuntos?: HistorialPuntoUsuario[];
 }
+
 
 interface BaseServiceRequest {
   id: string;
@@ -140,13 +153,15 @@ interface BaseServiceRequest {
   solicitadoPorEmpresaId?: string;
   miembroEmpresaUid?: string;
   titulo?: string;
-  originatingQuotationId?: string; // Link back to quotation if created from one
+  originatingQuotationId?: string;
+  precio?: number; // Assuming 'price' on ServiceRequest might hold the final service amount.
+                  // Or a more specific field like 'montoFinalPagadoPorUsuario' would be better.
 }
 
 export interface FixedServiceRequest extends BaseServiceRequest {
   serviceType: 'fixed';
   selectedFixedServices?: { serviceId: string, title: string, price: number }[];
-  totalAmount?: number;
+  totalAmount?: number; // This could be the amount to base points on if it's the final user payment
   serviceTime: string;
 }
 
@@ -159,7 +174,7 @@ export interface HourlyServiceRequest extends BaseServiceRequest {
   actualStartTime?: number;
   actualEndTime?: number;
   actualDurationHours?: number;
-  finalTotal?: number;
+  finalTotal?: number; // This should be the amount to base points on for hourly services
 }
 
 export type ServiceRequest = FixedServiceRequest | HourlyServiceRequest;
@@ -249,7 +264,11 @@ export type ActivityLogAction =
   | 'COTIZACION_PRECIO_PROPUESTO'
   | 'COTIZACION_ACEPTADA_USUARIO'
   | 'COTIZACION_RECHAZADA'
-  | 'CHAT_CREADO';
+  | 'CHAT_CREADO'
+  | 'PUNTOS_FIDELIDAD_GANADOS'
+  | 'PUNTOS_FIDELIDAD_CANJEADOS'
+  | 'FONDO_FIDELIDAD_APORTE';
+
 
 export interface ActivityLog {
   id?: string;
@@ -257,67 +276,94 @@ export interface ActivityLog {
   actorRol: 'usuario' | 'prestador' | 'sistema' | 'admin';
   accion: ActivityLogAction;
   descripcion: string;
-  fecha: number;
+  fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat';
+    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
 }
 
-// --- New Types for Quotation and Chat ---
 export type SolicitudCotizacionEstado =
-  | "pendiente_revision_prestador" // User submitted, provider needs to review
-  | "precio_propuesto_al_usuario" // Provider reviewed, proposed a price, user needs to accept/reject
-  | "rechazada_prestador"          // Provider rejected the quote request
-  | "aceptada_por_usuario"         // User accepted the proposed price, ready to become service_request
-  | "rechazada_usuario"            // User rejected the proposed price
-  | "convertida_a_servicio"      // Quotation has been successfully converted to a service_request
-  | "expirada";                    // Quotation expired before action was taken
+  | "pendiente_revision_prestador"
+  | "precio_propuesto_al_usuario"
+  | "rechazada_prestador"
+  | "aceptada_por_usuario"
+  | "rechazada_usuario"
+  | "convertida_a_servicio"
+  | "expirada";
 
 export interface SolicitudCotizacion {
-  id?: string; // Firestore auto-ID
+  id?: string;
   usuarioId: string;
   prestadorId: string;
-  descripcionProblema: string; // User's description
-  videoUrl?: string; // Optional URL to video in Firebase Storage
+  descripcionProblema: string;
+  videoUrl?: string;
   estado: SolicitudCotizacionEstado;
-  precioSugerido?: number; // Set by provider
-  notasPrestador?: string; // Provider's notes on the quote
-  fechaCreacion: number; // Timestamp
-  fechaRespuestaPrestador?: number; // Timestamp
-  fechaRespuestaUsuario?: number; // Timestamp
-  tituloServicio?: string; // e.g., "Cotización para reparación de techo"
-  categoriaServicioId?: string; // Optional, if user selected a category
+  precioSugerido?: number;
+  notasPrestador?: string;
+  fechaCreacion: number;
+  fechaRespuestaPrestador?: number;
+  fechaRespuestaUsuario?: number;
+  tituloServicio?: string;
+  categoriaServicioId?: string;
 }
 
 export interface MensajeChat {
-  id?: string; // Firestore auto-ID
-  remitenteId: string; // userId or providerId
+  id?: string;
+  remitenteId: string;
   texto: string;
-  timestamp: number; // Timestamp
-  tipo?: "texto" | "imagen" | "video_link"; // Optional, for rich messages
-  urlAdjunto?: string; // Optional, for images/videos
-  leidoPor?: string[]; // Array of UIDs who have read the message
+  timestamp: number;
+  tipo?: "texto" | "imagen" | "video_link";
+  urlAdjunto?: string;
+  leidoPor?: string[];
 }
 
 export interface Chat {
-  id?: string; // Can be the solicitudServicioId
+  id?: string;
   solicitudServicioId: string;
-  participantesUids: string[]; // [userId, providerId]
-  participantesInfo?: { // Optional, for quicker display of names/avatars
+  participantesUids: string[];
+  participantesInfo?: {
     [uid: string]: { nombre?: string; avatarUrl?: string; rol: 'usuario' | 'prestador' };
   };
-  fechaCreacion: number; // Timestamp
-  ultimaActualizacion: number; // Timestamp for the last message or status change
-  ultimoMensaje?: { // For previews in chat lists
+  fechaCreacion: number;
+  ultimaActualizacion: number;
+  ultimoMensaje?: {
     texto: string;
     remitenteId: string;
     timestamp: number;
   };
   estadoChat?: "activo" | "archivado_usuario" | "archivado_prestador" | "finalizado_servicio";
-  conteoNoLeido?: { // Unread count for each participant
+  conteoNoLeido?: {
     [uid: string]: number;
   };
-  // Subcollection: mensajes (MensajeChat[])
+}
+
+// Loyalty Program Types
+export interface FondoFidelidad {
+  id?: 'global'; // Singleton document
+  totalAcumulado: number;
+  // registros?: RegistroFondoFidelidad[]; // Could be a subcollection
+}
+
+export interface RegistroFondoFidelidad {
+  id?: string;
+  servicioId: string;
+  montoServicio: number;
+  comisionPlataformaCalculada: number;
+  montoAportadoAlFondo: number;
+  fecha: number; // timestamp
+}
+
+export interface PromocionFidelidad {
+  id?: string;
+  descripcion: string;
+  puntosRequeridos: number;
+  tipoDescuento: 'porcentaje' | 'monto_fijo'; // e.g., 10 for 10% or 50 for $50
+  valorDescuento: number;
+  activo: boolean;
+  codigoPromocional?: string; // If the redemption generates a unique code
+  usosDisponibles?: number; // Optional limit on total uses
+  fechaExpiracion?: number; // Optional expiration timestamp
+  serviciosAplicables?: string[]; // Optional: array of service category IDs
 }
