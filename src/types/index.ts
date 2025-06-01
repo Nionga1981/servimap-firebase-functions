@@ -114,6 +114,18 @@ export interface DemoUser {
   historialPuntos?: HistorialPuntoUsuario[];
 }
 
+interface DetallesFinancieros {
+  montoTotalPagadoPorUsuario?: number;
+  comisionSistemaPagoPct?: number;
+  comisionSistemaPagoMonto?: number;
+  montoNetoProcesador?: number;
+  comisionAppPct?: number;
+  comisionAppMonto?: number;
+  aporteFondoFidelidadMonto?: number;
+  montoBrutoParaPrestador?: number;
+  montoFinalLiberadoAlPrestador?: number;
+  fechaLiberacion?: number;
+}
 
 interface BaseServiceRequest {
   id: string;
@@ -154,14 +166,15 @@ interface BaseServiceRequest {
   miembroEmpresaUid?: string;
   titulo?: string;
   originatingQuotationId?: string;
-  precio?: number; // Assuming 'price' on ServiceRequest might hold the final service amount.
-                  // Or a more specific field like 'montoFinalPagadoPorUsuario' would be better.
+  precio?: number; 
+  montoCobrado?: number; // Can be used as montoTotalPagadoPorUsuario
+  detallesFinancieros?: DetallesFinancieros;
 }
 
 export interface FixedServiceRequest extends BaseServiceRequest {
   serviceType: 'fixed';
   selectedFixedServices?: { serviceId: string, title: string, price: number }[];
-  totalAmount?: number; // This could be the amount to base points on if it's the final user payment
+  totalAmount?: number; 
   serviceTime: string;
 }
 
@@ -174,7 +187,7 @@ export interface HourlyServiceRequest extends BaseServiceRequest {
   actualStartTime?: number;
   actualEndTime?: number;
   actualDurationHours?: number;
-  finalTotal?: number; // This should be the amount to base points on for hourly services
+  finalTotal?: number; 
 }
 
 export type ServiceRequest = FixedServiceRequest | HourlyServiceRequest;
@@ -267,7 +280,8 @@ export type ActivityLogAction =
   | 'CHAT_CREADO'
   | 'PUNTOS_FIDELIDAD_GANADOS'
   | 'PUNTOS_FIDELIDAD_CANJEADOS'
-  | 'FONDO_FIDELIDAD_APORTE';
+  | 'FONDO_FIDELIDAD_APORTE'
+  | 'PAGO_PROCESADO_DETALLES';
 
 
 export interface ActivityLog {
@@ -359,11 +373,11 @@ export interface PromocionFidelidad {
   id?: string;
   descripcion: string;
   puntosRequeridos: number;
-  tipoDescuento: 'porcentaje' | 'monto_fijo'; // e.g., 10 for 10% or 50 for $50
+  tipoDescuento: 'porcentaje' | 'monto_fijo'; 
   valorDescuento: number;
   activo: boolean;
-  codigoPromocional?: string; // If the redemption generates a unique code
-  usosDisponibles?: number; // Optional limit on total uses
-  fechaExpiracion?: number; // Optional expiration timestamp
-  serviciosAplicables?: string[]; // Optional: array of service category IDs
+  codigoPromocional?: string; 
+  usosDisponibles?: number; 
+  fechaExpiracion?: number; 
+  serviciosAplicables?: string[]; 
 }
