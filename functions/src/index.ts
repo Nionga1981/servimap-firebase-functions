@@ -1,6 +1,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { SERVICE_CATEGORIES } from "./constants"; // Asumiendo que tienes este archivo o lo crearás
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -14,10 +15,10 @@ const PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD = 0.10; // 10% of ServiMap's 
 const FACTOR_CONVERSION_PUNTOS = 10; // $10 MXN (or monetary unit) per 1 loyalty point
 const DEFAULT_LANGUAGE_CODE = "es";
 const HORAS_ANTES_RECORDATORIO_SERVICIO = 24;
+const PLAZO_REPORTE_DIAS = 7;
 
 
 // --- INTERFACES (Locally defined for Cloud Functions context) ---
-// It's better to share these interfaces from a common package or file with your frontend.
 export type ServiceRequestStatus =
   | "agendado" | "pendiente_confirmacion" | "confirmada_prestador" | "pagada"
   | "en_camino_proveedor" | "servicio_iniciado" | "completado_por_prestador"
@@ -86,12 +87,20 @@ export interface UserData {
   historialPuntos?: admin.firestore.FieldValue | HistorialPuntoUsuario[];
   isPremium?: boolean;
   idiomaPreferido?: string;
+  favoritos?: string[];
 }
 
 export interface ProviderData {
   fcmTokens?: string[];
   nombre?: string;
   aceptaCotizacion?: boolean;
+  empresa?: string;
+  services?: { category: string; title: string; description: string; }[];
+  specialties?: string[];
+  isAvailable?: boolean;
+  currentLocation?: { lat: number; lng: number; };
+  rating?: number;
+  avatarUrl?: string;
 }
 
 export interface ServiceRequest {
@@ -115,6 +124,15 @@ export interface ServiceRequest {
   detallesFinancieros?: admin.firestore.FieldValue | DetallesFinancieros;
   serviceDate?: string; // YYYY-MM-DD
   serviceTime?: string; // HH:MM
+  reporteActivoId?: string;
+  estadoDisputa?: "ninguna" | "abierta" | "resuelta";
+  // Otros campos específicos de FixedServiceRequest o HourlyServiceRequest
+  serviceType?: "fixed" | "hourly";
+  selectedFixedServices?: { serviceId: string, title: string, price: number }[];
+  totalAmount?: number;
+  durationHours?: number;
+  hourlyRate?: number;
+  estimatedTotal?: number;
 }
 
 export type SolicitudCotizacionEstado =
@@ -165,7 +183,8 @@ export type ActivityLogAction =
   | "PAGO_PROCESADO_DETALLES" | "TRADUCCION_SOLICITADA"
   | "NOTIFICACION_RECORDATORIO_PROGRAMADA" | "NOTIFICACION_RECORDATORIO_ENVIADA"
   | "REGLAS_ZONA_CONSULTADAS" | "ADMIN_ZONA_MODIFICADA"
-  | "TICKET_SOPORTE_CREADO" | "TICKET_SOPORTE_ACTUALIZADO";
+  | "TICKET_SOPORTE_CREADO" | "TICKET_SOPORTE_ACTUALIZADO"
+  | "BUSQUEDA_PRESTADORES" | "REPORTE_PROBLEMA_CREADO" | "GARANTIA_REGISTRADA";
 
 export interface PromocionFidelidad {
   id?: string;
@@ -265,8 +284,47 @@ export interface SoporteTicketData {
   fechaCreacion: admin.firestore.Timestamp;
   fechaActualizacion: admin.firestore.Timestamp;
   asignadoA?: string;
-  referenciaId?: string;
+  referenciaId?: string; // e.g., servicioId, pagoId
   adjuntosUrls?: string[];
+}
+
+interface PrestadorBuscado {
+  id: string;
+  nombre: string;
+  empresa?: string;
+  distanciaKm: number;
+  calificacion: number;
+  avatarUrl?: string;
+  categoriaPrincipal?: string;
+}
+
+interface ReporteServicioData {
+  id?: string;
+  idServicio: string;
+  idUsuarioReportante: string;
+  rolReportante: "usuario" | "prestador";
+  descripcionProblema: string;
+  archivoAdjuntoURL?: string;
+  fechaReporte: admin.firestore.Timestamp;
+  estadoReporte: "pendiente_revision_admin" | "en_investigacion" | "resuelto_compensacion" | "resuelto_sin_compensacion" | "rechazado_reporte";
+  idServicioOriginalData?: Partial<ServiceRequest>;
+  garantiaActivada?: boolean;
+  idGarantiaPendiente?: string;
+}
+
+interface GarantiaPendienteData {
+  id?: string;
+  idServicio: string;
+  idUsuario: string;
+  idPrestador: string;
+  idReporte: string;
+  fechaSolicitudGarantia: admin.firestore.Timestamp;
+  estadoGarantia: "pendiente_revision" | "aprobada_compensacion" | "aprobada_re_servicio" | "rechazada_garantia";
+  detallesServicioOriginal?: Partial<ServiceRequest>;
+  descripcionProblemaOriginal: string;
+  fechaResolucion?: admin.firestore.Timestamp;
+  notasResolucion?: string;
+  resueltaPorAdminId?: string;
 }
 
 
@@ -279,7 +337,7 @@ async function sendNotification(userId: string, userType: "usuario" | "prestador
     return;
   }
   const userData = userDoc.data() as (UserData | ProviderData);
-  const tokens = (userData as UserData).fcmTokens || (userData as ProviderData).fcmTokens;
+  const tokens = userData.fcmTokens;
 
   if (tokens && tokens.length > 0) {
     const payload = {notification: {title, body}, data};
@@ -358,6 +416,7 @@ export const onServiceStatusChangeSendNotification = functions.firestore
           try {
             const [year, month, day] = newValue.serviceDate.split("-").map(Number);
             const [hour, minute] = newValue.serviceTime.split(":").map(Number);
+            // Asegurarse de que month es 0-indexed para el constructor de Date
             const serviceDateTime = new Date(year, month - 1, day, hour, minute);
             const reminderTime = new Date(serviceDateTime.getTime() - HORAS_ANTES_RECORDATORIO_SERVICIO * 60 * 60 * 1000);
 
@@ -421,7 +480,7 @@ export const onServiceStatusChangeSendNotification = functions.firestore
       const montoFinalLiberado = (newValue.detallesFinancieros as DetallesFinancieros)?.montoFinalLiberadoAlPrestador;
       const montoParaMensaje = montoFinalLiberado !== undefined ? montoFinalLiberado.toFixed(2) : (newValue.montoCobrado || newValue.precio || 0).toFixed(2);
       cuerpoNotif = `El pago para el servicio "${serviceTitle}" ha sido liberado a tu cuenta. Monto: $${montoParaMensaje}.`;
-      sendStdNotification = true; // Asegurar que esta notificación se envíe, incluso si hubo otra por cambio de estado.
+      sendStdNotification = true;
     }
 
     if (sendStdNotification && targetUserId && targetUserType && tituloNotif && cuerpoNotif) {
@@ -472,14 +531,12 @@ export const logSolicitudServicioChanges = functions.firestore
       await logActivity(afterData.prestadorId, "prestador", "CALIFICACION_PRESTADOR", descLog, {tipo: "solicitud_servicio", id: solicitudId}, {
         estrellas: afterData.calificacionPrestador.estrellas,
         comentario: afterData.calificacionPrestador.comentario || "",
-        // Podríamos añadir indicadores para la calificación del prestador al usuario también si se desea.
       });
     }
 
     const isFinalizedState = ESTADOS_FINALES_SERVICIO.includes(afterData.status as EstadoFinalServicio);
     const wasNotFinalizedBefore = !ESTADOS_FINALES_SERVICIO.includes(beforeData.status as EstadoFinalServicio);
 
-    // Lógica de liberación de pago, cálculo de comisiones y puntos de fidelidad
     if ((isFinalizedState && wasNotFinalizedBefore && afterData.paymentStatus === "retenido_para_liberacion") ||
         (beforeData.paymentStatus === "retenido_para_liberacion" && afterData.paymentStatus === "liberado_al_proveedor" && isFinalizedState && beforeData.status !== afterData.status && afterData.status !== "en_disputa")) {
       const montoTotalPagadoPorUsuario = afterData.montoCobrado || afterData.precio || 0;
@@ -494,7 +551,7 @@ export const logSolicitudServicioChanges = functions.firestore
         detallesFinancierosNuevos.comisionAppMonto = montoTotalPagadoPorUsuario * COMISION_APP_SERVICIOMAP_PORCENTAJE;
         detallesFinancierosNuevos.aporteFondoFidelidadMonto = (detallesFinancierosNuevos.comisionAppMonto || 0) * PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD;
         detallesFinancierosNuevos.montoBrutoParaPrestador = (detallesFinancierosNuevos.montoNetoProcesador || 0) - (detallesFinancierosNuevos.comisionAppMonto || 0);
-        detallesFinancierosNuevos.montoFinalLiberadoAlPrestador = detallesFinancierosNuevos.montoBrutoParaPrestador; // Podría ajustarse más adelante por disputas, etc.
+        detallesFinancierosNuevos.montoFinalLiberadoAlPrestador = detallesFinancierosNuevos.montoBrutoParaPrestador;
         detallesFinancierosNuevos.fechaLiberacion = now;
 
         updatesToServiceRequest.paymentStatus = "liberado_al_proveedor";
@@ -504,7 +561,6 @@ export const logSolicitudServicioChanges = functions.firestore
         await logActivity("sistema", "sistema", "PAGO_LIBERADO", `Pago para servicio ${solicitudId} liberado. Prestador recibe $${detallesFinancierosNuevos.montoFinalLiberadoAlPrestador?.toFixed(2)}.`, {tipo: "solicitud_servicio", id: solicitudId}, detallesFinancierosNuevos);
         await logActivity("sistema", "sistema", "PAGO_PROCESADO_DETALLES", `Detalles financieros procesados para ${solicitudId}.`, {tipo: "solicitud_servicio", id: solicitudId}, detallesFinancierosNuevos);
 
-        // Otorgar puntos de fidelidad al usuario
         const pointsEarned = Math.floor(montoTotalPagadoPorUsuario / FACTOR_CONVERSION_PUNTOS);
         if (pointsEarned > 0) {
           const userRef = db.collection("usuarios").doc(afterData.usuarioId);
@@ -518,7 +574,7 @@ export const logSolicitudServicioChanges = functions.firestore
               puntosAcumulados: admin.firestore.FieldValue.increment(pointsEarned),
               historialPuntos: admin.firestore.FieldValue.arrayUnion(userHistoryEntry),
             });
-          } else { // Crear usuario si no existe (caso raro, pero defensivo)
+          } else {
             await userRef.set({
               puntosAcumulados: pointsEarned, historialPuntos: [userHistoryEntry],
               nombre: `Usuario ${afterData.usuarioId.substring(0, 5)}`, fcmTokens: [], isPremium: false,
@@ -527,7 +583,6 @@ export const logSolicitudServicioChanges = functions.firestore
           await logActivity(afterData.usuarioId, "usuario", "PUNTOS_FIDELIDAD_GANADOS", `Usuario ganó ${pointsEarned} puntos por servicio ${solicitudId}.`, {tipo: "usuario", id: afterData.usuarioId}, {puntos: pointsEarned, servicioId});
         }
 
-        // Aportar al fondo de fidelidad
         if (detallesFinancierosNuevos.aporteFondoFidelidadMonto && detallesFinancierosNuevos.aporteFondoFidelidadMonto > 0) {
           const fundRef = db.collection("fondoFidelidad").doc("global");
           const fundHistoryEntry = {
@@ -541,7 +596,7 @@ export const logSolicitudServicioChanges = functions.firestore
               totalAcumulado: admin.firestore.FieldValue.increment(detallesFinancierosNuevos.aporteFondoFidelidadMonto),
               registros: admin.firestore.FieldValue.arrayUnion(fundHistoryEntry),
             });
-          } else { // Crear fondo si no existe
+          } else {
             await fundRef.set({
               totalAcumulado: detallesFinancierosNuevos.aporteFondoFidelidadMonto,
               registros: [fundHistoryEntry],
@@ -614,24 +669,23 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
       const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
       const ahora = admin.firestore.Timestamp.now();
 
-      // Simular fecha y hora del servicio (ej: mañana a las 10:00)
-      // En una app real, el usuario seleccionaría esto al aceptar la cotización o se acordaría.
       const tomorrow = new Date(ahora.toDate());
       tomorrow.setDate(tomorrow.getDate() + 1);
       const serviceDateStr = `${tomorrow.getFullYear()}-${(tomorrow.getMonth() + 1).toString().padStart(2, "0")}-${tomorrow.getDate().toString().padStart(2, "0")}`;
-      const serviceTimeStr = "10:00"; // Ejemplo
+      const serviceTimeStr = "10:00";
 
       const nuevaSolicitudData: Omit<ServiceRequest, "id"> = {
-        usuarioId: usuarioId, prestadorId: cotizacionData.prestadorId, status: "confirmada_prestador", // Asumimos que al aceptar cotización, el prestador ya está OK.
+        usuarioId: usuarioId, prestadorId: cotizacionData.prestadorId, status: "confirmada_prestador",
         createdAt: ahora, updatedAt: ahora, titulo: cotizacionData.tituloServicio || `Servicio de cotización ${cotizacionId.substring(0, 5)}`,
-        precio: cotizacionData.precioSugerido, // Precio base del servicio
-        montoCobrado: cotizacionData.precioSugerido, // Asumimos que este es el monto que se intentará cobrar al usuario
-        paymentStatus: "retenido_para_liberacion", // Asumimos que el pago se procesa y retiene al aceptar la cotización
+        precio: cotizacionData.precioSugerido,
+        montoCobrado: cotizacionData.precioSugerido,
+        paymentStatus: "retenido_para_liberacion",
         originatingQuotationId: cotizacionId,
         actorDelCambioId: usuarioId,
         actorDelCambioRol: "usuario",
         serviceDate: serviceDateStr,
         serviceTime: serviceTimeStr,
+        serviceType: "fixed", // Asumiendo que la cotización es para un servicio de precio fijo
       };
       transaction.set(nuevaSolicitudRef, nuevaSolicitudData);
       transaction.update(cotizacionRef, {estado: "convertida_a_servicio", fechaRespuestaUsuario: ahora});
@@ -888,23 +942,21 @@ export const enviarRecordatoriosProgramados = functions.pubsub
     return null;
   });
 
-// Helper function for point-in-polygon check (Ray Casting Algorithm)
 function isPointInPolygon(point: CoordenadaFirestore, polygon: CoordenadaFirestore[]): boolean {
   let crossings = 0;
   const n = polygon.length;
-  if (n < 3) return false; // A polygon must have at least 3 vertices
+  if (n < 3) return false;
 
   for (let i = 0; i < n; i++) {
     const p1 = polygon[i];
-    const p2 = polygon[(i + 1) % n]; // Next vertex, wraps around to the first
+    const p2 = polygon[(i + 1) % n];
 
-    // Check if the ray crosses the edge (p1, p2)
     if (((p1.lat <= point.lat && point.lat < p2.lat) || (p2.lat <= point.lat && point.lat < p1.lat)) &&
         (point.lng < (p2.lng - p1.lng) * (point.lat - p1.lat) / (p2.lat - p1.lat) + p1.lng)) {
       crossings++;
     }
   }
-  return crossings % 2 === 1; // Odd number of crossings means point is inside
+  return crossings % 2 === 1;
 }
 
 export const verificarReglasDeZona = functions.https.onCall(async (data, context) => {
@@ -928,7 +980,7 @@ export const verificarReglasDeZona = functions.https.onCall(async (data, context
         const zona = doc.data() as ZonaPreferenteFirestore;
         if (zona.poligono && zona.poligono.length >= 3) {
           if (isPointInPolygon(puntoUsuario, zona.poligono)) {
-            zonaAplicada = {id: doc.id, ...zona}; // Asignar la primera zona de mayor prioridad encontrada
+            zonaAplicada = {id: doc.id, ...zona};
             break;
           }
         }
@@ -959,7 +1011,7 @@ export const onZoneChangeLog = functions.firestore
   .document("zonas_preferentes/{zonaId}")
   .onWrite(async (change, context) => {
     const zonaId = context.params.zonaId;
-    const adminActorId = "admin_sistema"; // Placeholder
+    const adminActorId = "admin_sistema";
 
     if (!change.before.exists) {
       const newData = change.after.data() as ZonaPreferenteFirestore;
@@ -983,10 +1035,10 @@ export const crearSolicitudSoporte = functions.https.onCall(async (data, context
   const {
     categoria,
     descripcion,
-    rolSolicitante, // 'usuario' o 'prestador'
-    prioridad, // opcional
-    referenciaId, // opcional
-    adjuntosUrls, // opcional
+    rolSolicitante,
+    prioridad,
+    referenciaId,
+    adjuntosUrls,
   } = data;
 
   if (!categoria || typeof categoria !== "string") {
@@ -1051,7 +1103,6 @@ export const crearSolicitudSoporte = functions.https.onCall(async (data, context
   }
 });
 
-// --- USER RATING SERVICE FUNCTIONS ---
 export const rateServiceByUser = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
@@ -1061,9 +1112,9 @@ export const rateServiceByUser = functions.https.onCall(async (data, context) =>
     servicioId,
     estrellas,
     comentario,
-    indicadoresRendimiento, // { puntualidad: 1-5, calidadServicio: 1-5, ... }
-    aspectosPositivos,      // string[]
-    areasDeMejora,          // string[]
+    indicadoresRendimiento,
+    aspectosPositivos,
+    areasDeMejora,
   } = data;
 
   if (!servicioId || typeof servicioId !== "string") {
@@ -1092,10 +1143,6 @@ export const rateServiceByUser = functions.https.onCall(async (data, context) =>
       if (servicioData.calificacionUsuario) {
         throw new functions.https.HttpsError("already-exists", "Ya has calificado este servicio.");
       }
-      // Considerar si la ventana de calificación (ratingWindowExpiresAt) debe ser un hard stop.
-      // if (servicioData.ratingWindowExpiresAt && servicioData.ratingWindowExpiresAt.toMillis() < Date.now()) {
-      //   throw new functions.https.HttpsError("failed-precondition", "El período para calificar este servicio ha expirado.");
-      // }
 
       const now = admin.firestore.Timestamp.now();
       const nuevaCalificacion: CalificacionDetallada = {
@@ -1114,25 +1161,241 @@ export const rateServiceByUser = functions.https.onCall(async (data, context) =>
 
       if (servicioData.calificacionPrestador) {
         updates.mutualRatingCompleted = true;
-        if (servicioData.status !== "en_disputa") {
-          updates.status = "cerrado_con_calificacion";
-        }
-      } else if (servicioData.status !== "en_disputa") {
-        updates.status = "cerrado_con_calificacion"; // Si no hay disputa, calificar cierra el servicio.
+      }
+      // Siempre que un usuario califica, y no hay disputa, el servicio se considera cerrado con calificación.
+      if (servicioData.status !== "en_disputa") {
+        updates.status = "cerrado_con_calificacion";
       }
 
+
       transaction.update(servicioRef, updates);
-
-      // El log de actividad ya se maneja en el trigger `logSolicitudServicioChanges`
-      // pero si quisiéramos un log específico aquí, podríamos añadirlo.
-      // Ejemplo: await logActivity(userId, "usuario", "CALIFICACION_USUARIO", `Usuario calificó servicio ${servicioId}`, {tipo: "solicitud_servicio", id: servicioId}, nuevaCalificacion);
-
       return {success: true, message: "Calificación registrada exitosamente."};
     });
   } catch (error: any) {
     functions.logger.error(`Error al calificar servicio ${servicioId} por usuario ${userId}:`, error);
     if (error instanceof functions.https.HttpsError) throw error;
     throw new functions.https.HttpsError("internal", "Error al procesar la calificación.", error.message);
+  }
+});
+
+export const buscarPrestadoresInteligente = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const {textoBusqueda, latUsuario, lngUsuario} = data;
+
+  if (!textoBusqueda || typeof textoBusqueda !== "string" || typeof latUsuario !== "number" || typeof lngUsuario !== "number") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'textoBusqueda', 'latUsuario' y 'lngUsuario'.");
+  }
+
+  const textoBusquedaLower = textoBusqueda.toLowerCase();
+
+  try {
+    const prestadoresSnapshot = await db.collection("prestadores").get();
+    const prestadoresCandidatos: PrestadorBuscado[] = [];
+
+    for (const doc of prestadoresSnapshot.docs) {
+      const provider = doc.data() as ProviderData;
+      if (!provider.isAvailable || !provider.currentLocation) continue;
+
+      let match = false;
+      if (provider.nombre?.toLowerCase().includes(textoBusquedaLower)) match = true;
+      if (!match && provider.empresa?.toLowerCase().includes(textoBusquedaLower)) match = true;
+      if (!match && provider.specialties?.some((s) => s.toLowerCase().includes(textoBusquedaLower))) match = true;
+
+      if (!match && provider.services) {
+        for (const service of provider.services) {
+          if (service.title.toLowerCase().includes(textoBusquedaLower)) {
+            match = true; break;
+          }
+          if (service.description.toLowerCase().includes(textoBusquedaLower)) {
+            match = true; break;
+          }
+          const categoryInfo = SERVICE_CATEGORIES.find((c) => c.id === service.category);
+          if (categoryInfo?.name.toLowerCase().includes(textoBusquedaLower)) {
+            match = true; break;
+          }
+          if (categoryInfo?.keywords.some((k) => k.toLowerCase().includes(textoBusquedaLower))) {
+            match = true; break;
+          }
+        }
+      }
+
+      if (match) {
+        const distanciaKm = calculateDistance(
+          latUsuario,
+          lngUsuario,
+          provider.currentLocation.lat,
+          provider.currentLocation.lng
+        );
+
+        prestadoresCandidatos.push({
+          id: doc.id,
+          nombre: provider.nombre || "N/A",
+          empresa: provider.empresa,
+          distanciaKm: parseFloat(distanciaKm.toFixed(1)),
+          calificacion: provider.rating || 0,
+          avatarUrl: provider.avatarUrl,
+          categoriaPrincipal: provider.services?.[0]?.category ? (SERVICE_CATEGORIES.find(c=>c.id === provider.services?.[0]?.category)?.name || provider.services?.[0]?.category) : "General",
+        });
+      }
+    }
+
+    prestadoresCandidatos.sort((a, b) => {
+      if (a.distanciaKm < b.distanciaKm) return -1;
+      if (a.distanciaKm > b.distanciaKm) return 1;
+      if (a.calificacion > b.calificacion) return -1;
+      if (a.calificacion < b.calificacion) return 1;
+      return 0;
+    });
+
+    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó: "${textoBusqueda}". Resultados: ${prestadoresCandidatos.length}.`, undefined, {texto: textoBusqueda, lat: latUsuario, lng: lngUsuario});
+
+    return prestadoresCandidatos;
+  } catch (error: any) {
+    functions.logger.error("Error en buscarPrestadoresInteligente:", error);
+    throw new functions.https.HttpsError("internal", "Error al buscar prestadores.", error.message);
+  }
+});
+
+
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371; // Radius of the earth in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+
+export const reportarProblemaServicio = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const idUsuarioReportante = context.auth.uid;
+  const { idServicio, rol, descripcionProblema, archivoAdjuntoURL } = data;
+
+  if (!idServicio || typeof idServicio !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idServicio'.");
+  }
+  if (!rol || (rol !== "usuario" && rol !== "prestador")) {
+    throw new functions.https.HttpsError("invalid-argument", "El 'rol' del reportante ('usuario' o 'prestador') es requerido.");
+  }
+  if (!descripcionProblema || typeof descripcionProblema !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'descripcionProblema'.");
+  }
+
+  const servicioRef = db.collection("solicitudes_servicio").doc(idServicio);
+  const reportesRef = db.collection("reportes");
+  const garantiasRef = db.collection("garantiasPendientes");
+  const now = admin.firestore.Timestamp.now();
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const servicioDoc = await transaction.get(servicioRef);
+      if (!servicioDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Servicio con ID ${idServicio} no encontrado.`);
+      }
+      const servicioData = servicioDoc.data() as ServiceRequest;
+
+      if (idUsuarioReportante !== servicioData.usuarioId && idUsuarioReportante !== servicioData.prestadorId) {
+        throw new functions.https.HttpsError("permission-denied", "No participaste en este servicio.");
+      }
+      if (rol === "usuario" && idUsuarioReportante !== servicioData.usuarioId) {
+        throw new functions.https.HttpsError("permission-denied", "Tu rol no coincide con tu participación en este servicio.");
+      }
+      if (rol === "prestador" && idUsuarioReportante !== servicioData.prestadorId) {
+        throw new functions.https.HttpsError("permission-denied", "Tu rol no coincide con tu participación en este servicio.");
+      }
+
+      if (!servicioData.fechaFinalizacionEfectiva) {
+        throw new functions.https.HttpsError("failed-precondition", "El servicio aún no ha finalizado para poder reportar un problema.");
+      }
+
+      const fechaFinalizacion = (servicioData.fechaFinalizacionEfectiva as admin.firestore.Timestamp).toDate();
+      const plazoMaximoReporte = new Date(fechaFinalizacion.getTime() + PLAZO_REPORTE_DIAS * 24 * 60 * 60 * 1000);
+
+      if (now.toDate() > plazoMaximoReporte) {
+        return {status: "error", message: "El plazo para reportar problemas para este servicio ha expirado."};
+      }
+
+      if (servicioData.reporteActivoId) {
+        const reporteExistenteDoc = await transaction.get(reportesRef.doc(servicioData.reporteActivoId));
+        if (reporteExistenteDoc.exists) {
+           return {status: "error", message: "Ya existe un reporte activo para este servicio."};
+        }
+      }
+
+      const nuevoReporteRef = reportesRef.doc();
+      const reporteData: ReporteServicioData = {
+        idServicio: idServicio,
+        idUsuarioReportante: idUsuarioReportante,
+        rolReportante: rol as "usuario" | "prestador",
+        descripcionProblema: descripcionProblema,
+        fechaReporte: now,
+        estadoReporte: "pendiente_revision_admin",
+        garantiaActivada: false,
+        ...(archivoAdjuntoURL && {archivoAdjuntoURL: archivoAdjuntoURL as string}),
+        idServicioOriginalData: { // Snapshot de algunos datos del servicio
+          titulo: servicioData.titulo,
+          status: servicioData.status,
+          paymentStatus: servicioData.paymentStatus,
+          montoCobrado: servicioData.montoCobrado
+        }
+      };
+      transaction.set(nuevoReporteRef, reporteData);
+
+      const updateServicio: Partial<ServiceRequest> = {
+        reporteActivoId: nuevoReporteRef.id,
+        estadoDisputa: "abierta",
+        updatedAt: now,
+      };
+      if (servicioData.paymentStatus === "retenido_para_liberacion" || servicioData.paymentStatus === "liberado_al_proveedor") {
+        updateServicio.paymentStatus = "congelado_por_disputa";
+      }
+      transaction.update(servicioRef, updateServicio);
+
+      await logActivity(idUsuarioReportante, rol as "usuario" | "prestador", "REPORTE_PROBLEMA_CREADO", `Reporte #${nuevoReporteRef.id} creado para servicio ${idServicio} por ${rol} ${idUsuarioReportante}.`, {tipo: "reporte_servicio", id: nuevoReporteRef.id}, {descripcion: descripcionProblema});
+
+      // Notificar a la contraparte
+      const contraparteId = rol === "usuario" ? servicioData.prestadorId : servicioData.usuarioId;
+      const contraparteRol = rol === "usuario" ? "prestador" : "usuario";
+      await sendNotification(contraparteId, contraparteRol, "Reporte de Problema Recibido", `Se ha registrado un reporte para el servicio "${servicioData.titulo || idServicio}". Un administrador lo revisará pronto.`, {servicioId: idServicio, reporteId: nuevoReporteRef.id});
+      // TODO: Notificar al admin/equipo de soporte
+
+      if (rol === "usuario") {
+        const usuarioDoc = await db.collection("usuarios").doc(idUsuarioReportante).get();
+        const esPremium = (usuarioDoc.data() as UserData)?.isPremium || false;
+
+        if (esPremium) {
+          const nuevaGarantiaRef = garantiasRef.doc();
+          const garantiaData: GarantiaPendienteData = {
+            idServicio: idServicio,
+            idUsuario: idUsuarioReportante,
+            idPrestador: servicioData.prestadorId,
+            idReporte: nuevoReporteRef.id,
+            fechaSolicitudGarantia: now,
+            estadoGarantia: "pendiente_revision",
+            descripcionProblemaOriginal: descripcionProblema,
+            detallesServicioOriginal: { titulo: servicioData.titulo, status: servicioData.status }
+          };
+          transaction.set(nuevaGarantiaRef, garantiaData);
+          transaction.update(nuevoReporteRef, { garantiaActivada: true, idGarantiaPendiente: nuevaGarantiaRef.id });
+
+          await logActivity(idUsuarioReportante, "usuario", "GARANTIA_REGISTRADA", `Garantía #${nuevaGarantiaRef.id} registrada para reporte ${nuevoReporteRef.id} de usuario premium.`, {tipo: "garantia", id: nuevaGarantiaRef.id});
+          return { status: "garantiaActivada", reporteId: nuevoReporteRef.id, garantiaId: nuevaGarantiaRef.id };
+        }
+      }
+      return { status: "reporteRegistrado", reporteId: nuevoReporteRef.id };
+    });
+  } catch (error: any) {
+    functions.logger.error(`Error al reportar problema para servicio ${idServicio}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar el reporte.", error.message);
   }
 });
 

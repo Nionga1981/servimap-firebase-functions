@@ -53,6 +53,7 @@ export interface Provider {
   idiomasHablados?: string[];
   fcmTokens?: string[];
   aceptaCotizacion?: boolean;
+  empresa?: string;
 }
 
 export interface ChatMessage {
@@ -154,7 +155,7 @@ export interface IndicadoresRendimiento {
   cumplimientoRequerimientos?: number; // e.g., 1-5 scale
 }
 
-interface CalificacionDetallada {
+export interface CalificacionDetallada {
   estrellas: number;
   comentario?: string;
   fecha: number;
@@ -179,17 +180,19 @@ interface BaseServiceRequest {
   userConfirmedCompletionAt?: number;
   ratingWindowExpiresAt?: number;
   calificacionUsuario?: CalificacionDetallada;
-  calificacionPrestador?: CalificacionDetallada; // Assuming provider can also give detailed feedback
+  calificacionPrestador?: CalificacionDetallada;
   mutualRatingCompleted?: boolean;
   paymentStatus?: PaymentStatus;
   paymentIntentId?: string;
   paymentReleasedToProviderAt?: number;
-  disputeDetails?: {
+  disputeDetails?: { // Kept for simple dispute info on service
     reportedAt: number;
     reason: string;
     resolution?: string;
     resolvedAt?: number;
   };
+  reporteActivoId?: string; // Link to a detailed report in 'reportes' collection
+  estadoDisputa?: 'ninguna' | 'abierta' | 'resuelta'; // More granular dispute state
   warrantyEndDate?: string;
   garantiaActiva?: boolean;
   solicitadoPorEmpresaId?: string;
@@ -207,12 +210,10 @@ export interface FixedServiceRequest extends BaseServiceRequest {
   serviceType: 'fixed';
   selectedFixedServices?: { serviceId: string, title: string, price: number }[];
   totalAmount?: number;
-  // serviceTime is already in BaseServiceRequest
 }
 
 export interface HourlyServiceRequest extends BaseServiceRequest {
   serviceType: 'hourly';
-  // startTime is serviceTime in BaseServiceRequest
   durationHours: number;
   hourlyRate: number;
   estimatedTotal: number;
@@ -320,7 +321,10 @@ export type ActivityLogAction =
   | 'REGLAS_ZONA_CONSULTADAS'
   | 'ADMIN_ZONA_MODIFICADA'
   | 'TICKET_SOPORTE_CREADO'
-  | 'TICKET_SOPORTE_ACTUALIZADO';
+  | 'TICKET_SOPORTE_ACTUALIZADO'
+  | 'BUSQUEDA_PRESTADORES'
+  | 'REPORTE_PROBLEMA_CREADO'
+  | 'GARANTIA_REGISTRADA';
 
 
 export interface ActivityLog {
@@ -331,7 +335,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte';
+    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -392,11 +396,9 @@ export interface Chat {
   };
 }
 
-// Loyalty Program Types
 export interface FondoFidelidad {
-  id?: 'global'; // Singleton document
+  id?: 'global';
   totalAcumulado: number;
-  // registros?: RegistroFondoFidelidad[]; // Could be a subcollection
 }
 
 export interface RegistroFondoFidelidad {
@@ -405,7 +407,7 @@ export interface RegistroFondoFidelidad {
   montoServicio: number;
   comisionPlataformaCalculada: number;
   montoAportadoAlFondo: number;
-  fecha: number; // timestamp
+  fecha: number;
 }
 
 export interface PromocionFidelidad {
@@ -416,12 +418,11 @@ export interface PromocionFidelidad {
   valorDescuento: number;
   activo: boolean;
   codigoPromocional?: string;
-  usosDisponibles?: number; // Firestore FieldValue.increment(-1)
-  fechaExpiracion?: number; // timestamp
+  usosDisponibles?: number;
+  fechaExpiracion?: number;
   serviciosAplicables?: string[];
 }
 
-// Reminder System Types
 export type RecordatorioTipo =
   | "recordatorio_servicio"
   | "alerta_cancelacion"
@@ -435,47 +436,45 @@ export interface Recordatorio {
   servicioId: string;
   tipo: RecordatorioTipo;
   mensaje: string;
-  fechaProgramada: number; // Timestamp
+  fechaProgramada: number;
   enviado: boolean;
-  fechaEnvio?: number; // Timestamp
+  fechaEnvio?: number;
   intentosEnvio?: number;
   errorEnvio?: string;
   datosAdicionales?: {
     tituloServicio?: string;
     nombrePrestador?: string;
-    fechaHoraServicioIso?: string; // ISO string for easy formatting
-    [key: string]: any; // Allow other relevant data
+    fechaHoraServicioIso?: string;
+    [key: string]: any;
   };
 }
 
-// Preferred Zones Types
-export interface Coordenada { // Equivalent to ProviderLocation if needed
+export interface Coordenada {
   lat: number;
   lng: number;
 }
 
 export interface ReglasZona {
-  tarifaFactor?: number; // e.g., 1.1 for +10% (applied to base price), 0.9 for -10%
-  descuentoAbsoluto?: number; // e.g., 5 for $5 off, applied after factor
-  descuentoPorcentual?: number; // e.g., 0.15 for 15% off, applied after factor and absolute
-  serviciosRestringidos?: string[]; // Array of service category IDs not available
-  serviciosConPrioridad?: string[]; // Array of service category IDs to highlight
-  promocionesActivasIds?: string[]; // Specific promotion IDs active in this zone
-  mensajeEspecial?: string; // e.g., "¡Estás en una zona con envío gratis!"
+  tarifaFactor?: number;
+  descuentoAbsoluto?: number;
+  descuentoPorcentual?: number;
+  serviciosRestringidos?: string[];
+  serviciosConPrioridad?: string[];
+  promocionesActivasIds?: string[];
+  mensajeEspecial?: string;
   disponibilidadAfectada?: 'restringida_total' | 'restringida_parcial' | 'mejorada' | 'sin_cambio';
 }
 
 export interface ZonaPreferente {
   id?: string;
   nombre: string;
-  poligono: Coordenada[]; // Array of {lat, lng} defining the polygon vertices in order
+  poligono: Coordenada[];
   reglas: ReglasZona;
   activa: boolean;
-  prioridad?: number; // For overlapping zones, higher number means higher priority
-  descripcion?: string; // Optional internal description
+  prioridad?: number;
+  descripcion?: string;
 }
 
-// Support Ticket System Types
 export type EstadoSolicitudSoporte =
   | 'pendiente'
   | 'en_proceso'
@@ -487,21 +486,60 @@ export interface SoporteTicketData {
   id?: string;
   solicitanteId: string;
   rolSolicitante: 'usuario' | 'prestador';
-  categoria: string; // User-selected category, e.g., "Pagos", "Calificaciones", "Técnico", "Cuenta", "Otro"
+  categoria: string;
   prioridad?: 'baja' | 'normal' | 'alta' | 'urgente';
   estado: EstadoSolicitudSoporte;
-  descripcion: string; // Initial problem description from user
-  etiquetas?: string[]; // Keywords for AI, e.g., ["pago no procesado", "error_tarjeta"]
+  descripcion: string;
+  etiquetas?: string[];
   historialMensajes?: {
-    remitenteId: string; // UID of user, provider, or admin
+    remitenteId: string;
     mensaje: string;
     timestamp: number;
   }[];
-  fechaCreacion: number; // Timestamp
-  fechaActualizacion: number; // Timestamp
-  asignadoA?: string; // UID of admin/agent assigned
-  referenciaId?: string; // e.g., servicioId, pagoId if related to a specific entity
-  adjuntosUrls?: string[]; // URLs to uploaded files (e.g., screenshots)
+  fechaCreacion: number;
+  fechaActualizacion: number;
+  asignadoA?: string;
+  referenciaId?: string;
+  adjuntosUrls?: string[];
+}
+
+export interface PrestadorBuscado {
+  id: string;
+  nombre: string;
+  empresa?: string;
+  distanciaKm: number;
+  calificacion: number;
+  avatarUrl?: string;
+  categoriaPrincipal?: string;
+}
+
+export interface ReporteServicio {
+  id?: string;
+  idServicio: string;
+  idUsuarioReportante: string;
+  rolReportante: 'usuario' | 'prestador';
+  descripcionProblema: string;
+  archivoAdjuntoURL?: string;
+  fechaReporte: number; // Timestamp
+  estadoReporte: 'pendiente_revision_admin' | 'en_investigacion' | 'resuelto_compensacion' | 'resuelto_sin_compensacion' | 'rechazado_reporte'; // 'rechazado' renombrado para evitar confusión con 'rechazada_prestador'
+  idServicioOriginalData?: Partial<ServiceRequest>;
+  garantiaActivada?: boolean;
+  idGarantiaPendiente?: string;
+}
+
+export interface GarantiaPendiente {
+  id?: string;
+  idServicio: string;
+  idUsuario: string; // Usuario que se beneficia de la garantía
+  idPrestador: string;
+  idReporte: string; // ID del documento en 'reportes' que originó esta garantía
+  fechaSolicitudGarantia: number; // Timestamp
+  estadoGarantia: 'pendiente_revision' | 'aprobada_compensacion' | 'aprobada_re_servicio' | 'rechazada_garantia'; // 'rechazada' renombrado
+  detallesServicioOriginal?: Partial<ServiceRequest>; // Snapshot de info relevante del servicio
+  descripcionProblemaOriginal: string;
+  fechaResolucion?: number;
+  notasResolucion?: string;
+  resueltaPorAdminId?: string;
 }
 
     
