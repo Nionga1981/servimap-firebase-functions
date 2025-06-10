@@ -67,7 +67,8 @@ export interface ChatMessage {
 
 export type ServiceRequestStatus =
   | 'agendado'
-  | 'pendiente_confirmacion'
+  | 'pendiente_confirmacion' // Generally implies provider needs to confirm
+  | 'pendiente_confirmacion_usuario' // User needs to confirm (e.g., a provider's offer or reactivation)
   | 'confirmada_prestador'
   | 'pagada'
   | 'en_camino_proveedor'
@@ -169,8 +170,8 @@ interface BaseServiceRequest {
   userId: string;
   providerId: string;
   location?: ProviderLocation | { customAddress: string };
-  serviceDate: string; // YYYY-MM-DD
-  serviceTime: string; // HH:MM
+  serviceDate?: string; // YYYY-MM-DD
+  serviceTime?: string; // HH:MM
   notes?: string;
   status: ServiceRequestStatus;
   createdAt: number;
@@ -185,14 +186,14 @@ interface BaseServiceRequest {
   paymentStatus?: PaymentStatus;
   paymentIntentId?: string;
   paymentReleasedToProviderAt?: number;
-  disputeDetails?: { // Kept for simple dispute info on service
+  disputeDetails?: {
     reportedAt: number;
     reason: string;
     resolution?: string;
     resolvedAt?: number;
   };
-  reporteActivoId?: string; // Link to a detailed report in 'reportes' collection
-  estadoDisputa?: 'ninguna' | 'abierta' | 'resuelta'; // More granular dispute state
+  reporteActivoId?: string;
+  estadoDisputa?: 'ninguna' | 'abierta' | 'resuelta';
   warrantyEndDate?: string;
   garantiaActiva?: boolean;
   solicitadoPorEmpresaId?: string;
@@ -200,10 +201,13 @@ interface BaseServiceRequest {
   titulo?: string;
   originatingQuotationId?: string;
   precio?: number;
-  montoCobrado?: number; // Can be used as montoTotalPagadoPorUsuario
+  montoCobrado?: number;
   detallesFinancieros?: DetallesFinancieros;
-  actorDelCambioId?: string; // Who triggered the last relevant change
-  actorDelCambioRol?: 'usuario' | 'prestador' | 'sistema'; // Role of the actor
+  actorDelCambioId?: string;
+  actorDelCambioRol?: 'usuario' | 'prestador' | 'sistema';
+  originatingServiceId?: string; // ID of the service being reactivated
+  isRecurringAttempt?: boolean;  // Flag for reactivated service
+  reactivationOfferedBy?: 'usuario' | 'prestador'; // Who initiated this reactivation
 }
 
 export interface FixedServiceRequest extends BaseServiceRequest {
@@ -324,7 +328,9 @@ export type ActivityLogAction =
   | 'TICKET_SOPORTE_ACTUALIZADO'
   | 'BUSQUEDA_PRESTADORES'
   | 'REPORTE_PROBLEMA_CREADO'
-  | 'GARANTIA_REGISTRADA';
+  | 'GARANTIA_REGISTRADA'
+  | 'SERVICIO_REACTIVADO_SOLICITUD'
+  | 'SERVICIO_REACTIVADO_OFERTA';
 
 
 export interface ActivityLog {
@@ -521,7 +527,7 @@ export interface ReporteServicio {
   descripcionProblema: string;
   archivoAdjuntoURL?: string;
   fechaReporte: number; // Timestamp
-  estadoReporte: 'pendiente_revision_admin' | 'en_investigacion' | 'resuelto_compensacion' | 'resuelto_sin_compensacion' | 'rechazado_reporte'; // 'rechazado' renombrado para evitar confusión con 'rechazada_prestador'
+  estadoReporte: 'pendiente_revision_admin' | 'en_investigacion' | 'resuelto_compensacion' | 'resuelto_sin_compensacion' | 'rechazado_reporte';
   idServicioOriginalData?: Partial<ServiceRequest>;
   garantiaActivada?: boolean;
   idGarantiaPendiente?: string;
@@ -530,12 +536,12 @@ export interface ReporteServicio {
 export interface GarantiaPendiente {
   id?: string;
   idServicio: string;
-  idUsuario: string; // Usuario que se beneficia de la garantía
+  idUsuario: string;
   idPrestador: string;
-  idReporte: string; // ID del documento en 'reportes' que originó esta garantía
+  idReporte: string;
   fechaSolicitudGarantia: number; // Timestamp
-  estadoGarantia: 'pendiente_revision' | 'aprobada_compensacion' | 'aprobada_re_servicio' | 'rechazada_garantia'; // 'rechazada' renombrado
-  detallesServicioOriginal?: Partial<ServiceRequest>; // Snapshot de info relevante del servicio
+  estadoGarantia: 'pendiente_revision' | 'aprobada_compensacion' | 'aprobada_re_servicio' | 'rechazada_garantia';
+  detallesServicioOriginal?: Partial<ServiceRequest>;
   descripcionProblemaOriginal: string;
   fechaResolucion?: number;
   notasResolucion?: string;

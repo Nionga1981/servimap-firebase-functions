@@ -20,11 +20,22 @@ const PLAZO_REPORTE_DIAS = 7;
 
 // --- INTERFACES (Locally defined for Cloud Functions context) ---
 export type ServiceRequestStatus =
-  | "agendado" | "pendiente_confirmacion" | "confirmada_prestador" | "pagada"
-  | "en_camino_proveedor" | "servicio_iniciado" | "completado_por_prestador"
-  | "completado_por_usuario" | "cancelada_usuario" | "cancelada_prestador"
-  | "rechazada_prestador" | "en_disputa" | "cerrado_automaticamente"
-  | "cerrado_con_calificacion" | "cerrado_con_disputa_resuelta";
+  | "agendado"
+  | "pendiente_confirmacion" // Generally implies provider needs to confirm
+  | "pendiente_confirmacion_usuario" // User needs to confirm (e.g., a provider's offer or reactivation)
+  | "confirmada_prestador"
+  | "pagada"
+  | "en_camino_proveedor"
+  | "servicio_iniciado"
+  | "completado_por_prestador"
+  | "completado_por_usuario"
+  | "cancelada_usuario"
+  | "cancelada_prestador"
+  | "rechazada_prestador"
+  | "en_disputa"
+  | "cerrado_automaticamente"
+  | "cerrado_con_calificacion"
+  | "cerrado_con_disputa_resuelta";
 
 export type EstadoFinalServicio =
   | "cerrado_automaticamente"
@@ -40,9 +51,16 @@ const ESTADOS_FINALES_SERVICIO: EstadoFinalServicio[] = [
 ];
 
 export type PaymentStatus =
-  | "pendiente_confirmacion_usuario" | "retenido_para_liberacion" | "liberado_al_proveedor"
-  | "congelado_por_disputa" | "reembolsado_parcial" | "reembolsado_total"
-  | "pendiente_cobro" | "procesado_exitosamente" | "fallido" | "no_aplica";
+  | "pendiente_confirmacion_usuario"
+  | "retenido_para_liberacion"
+  | "liberado_al_proveedor"
+  | "congelado_por_disputa"
+  | "reembolsado_parcial"
+  | "reembolsado_total"
+  | "pendiente_cobro"
+  | "procesado_exitosamente"
+  | "fallido"
+  | "no_aplica";
 
 interface IndicadoresRendimiento {
   puntualidad?: number;
@@ -95,10 +113,10 @@ export interface ProviderData {
   nombre?: string;
   aceptaCotizacion?: boolean;
   empresa?: string;
-  services?: { category: string; title: string; description: string; }[];
+  services?: { category: string; title: string; description: string; price: number }[];
   specialties?: string[];
   isAvailable?: boolean;
-  currentLocation?: { lat: number; lng: number; };
+  currentLocation?: { lat: number; lng: number; timestamp?: admin.firestore.Timestamp };
   rating?: number;
   avatarUrl?: string;
 }
@@ -126,13 +144,31 @@ export interface ServiceRequest {
   serviceTime?: string; // HH:MM
   reporteActivoId?: string;
   estadoDisputa?: "ninguna" | "abierta" | "resuelta";
-  // Otros campos específicos de FixedServiceRequest o HourlyServiceRequest
   serviceType?: "fixed" | "hourly";
   selectedFixedServices?: { serviceId: string, title: string, price: number }[];
-  totalAmount?: number;
-  durationHours?: number;
-  hourlyRate?: number;
-  estimatedTotal?: number;
+  totalAmount?: number; // For fixed services array
+  durationHours?: number; // For hourly services
+  hourlyRate?: number; // For hourly services
+  estimatedTotal?: number; // For hourly services
+  originatingServiceId?: string;
+  isRecurringAttempt?: boolean;
+  reactivationOfferedBy?: "usuario" | "prestador";
+  mutualRatingCompleted?: boolean; // Local Functions copy
+  location?: ProviderLocation | { customAddress: string }; // Local Functions copy
+  notes?: string; // Local Functions copy
+  providerMarkedCompleteAt?: number; // Local Functions copy
+  userConfirmedCompletionAt?: number; // Local Functions copy
+  ratingWindowExpiresAt?: number; // Local Functions copy
+  warrantyEndDate?: string; // Local Functions copy
+  garantiaActiva?: boolean; // Local Functions copy
+  solicitadoPorEmpresaId?: string; // Local Functions copy
+  miembroEmpresaUid?: string; // Local Functions copy
+  paymentIntentId?: string; // Local Functions copy
+  disputeDetails?: { reportedAt: number; reason: string; resolution?: string; resolvedAt?: number; }; // Local Functions copy
+  actualStartTime?: number; // Local Functions copy for HourlyServiceRequest
+  actualEndTime?: number; // Local Functions copy for HourlyServiceRequest
+  actualDurationHours?: number; // Local Functions copy for HourlyServiceRequest
+  finalTotal?: number; // Local Functions copy for HourlyServiceRequest
 }
 
 export type SolicitudCotizacionEstado =
@@ -184,7 +220,8 @@ export type ActivityLogAction =
   | "NOTIFICACION_RECORDATORIO_PROGRAMADA" | "NOTIFICACION_RECORDATORIO_ENVIADA"
   | "REGLAS_ZONA_CONSULTADAS" | "ADMIN_ZONA_MODIFICADA"
   | "TICKET_SOPORTE_CREADO" | "TICKET_SOPORTE_ACTUALIZADO"
-  | "BUSQUEDA_PRESTADORES" | "REPORTE_PROBLEMA_CREADO" | "GARANTIA_REGISTRADA";
+  | "BUSQUEDA_PRESTADORES" | "REPORTE_PROBLEMA_CREADO" | "GARANTIA_REGISTRADA"
+  | "SERVICIO_REACTIVADO_SOLICITUD" | "SERVICIO_REACTIVADO_OFERTA";
 
 export interface PromocionFidelidad {
   id?: string;
@@ -232,6 +269,11 @@ export interface Recordatorio {
     fechaHoraServicioIso?: string;
     [key: string]: any;
   };
+}
+
+interface ProviderLocation { // Local copy for functions
+  lat: number;
+  lng: number;
 }
 
 interface CoordenadaFirestore {
@@ -405,8 +447,27 @@ export const onServiceStatusChangeSendNotification = functions.firestore
     if (newValue.status !== previousValue.status) {
       switch (newValue.status) {
       case "agendado":
-        targetUserId = prestadorId; targetUserType = "prestador";
-        tituloNotif = "Nueva Solicitud de Servicio"; cuerpoNotif = `Has recibido una nueva solicitud para "${serviceTitle}".`;
+        // If it's a reactivation offer from provider, user already knows. If user reactivated, provider gets notified.
+        if (newValue.isRecurringAttempt && newValue.reactivationOfferedBy === "usuario") {
+            targetUserId = prestadorId; targetUserType = "prestador";
+            tituloNotif = "Solicitud de Reactivación de Servicio";
+            cuerpoNotif = `El usuario ${newValue.usuarioId} quiere reactivar el servicio "${serviceTitle}". Por favor, confirma la nueva fecha/hora.`;
+        } else if (!newValue.isRecurringAttempt) { // Standard new request
+            targetUserId = prestadorId; targetUserType = "prestador";
+            tituloNotif = "Nueva Solicitud de Servicio";
+            cuerpoNotif = `Has recibido una nueva solicitud para "${serviceTitle}".`;
+        } else {
+            sendStdNotification = false; // Offer from provider, user already involved or will be notified by reactivarServicioRecurrente
+        }
+        break;
+      case "pendiente_confirmacion_usuario":
+        if (newValue.isRecurringAttempt && newValue.reactivationOfferedBy === "prestador") {
+            targetUserId = usuarioId; targetUserType = "usuario";
+            tituloNotif = "Oferta de Reactivación de Servicio";
+            cuerpoNotif = `El prestador ${newValue.prestadorId} te ofrece reactivar el servicio "${serviceTitle}". Por favor, confirma si deseas continuar.`;
+        } else {
+             sendStdNotification = false; // Other cases of this status might not need notification from here
+        }
         break;
       case "confirmada_prestador":
         targetUserId = usuarioId; targetUserType = "usuario";
@@ -416,7 +477,6 @@ export const onServiceStatusChangeSendNotification = functions.firestore
           try {
             const [year, month, day] = newValue.serviceDate.split("-").map(Number);
             const [hour, minute] = newValue.serviceTime.split(":").map(Number);
-            // Asegurarse de que month es 0-indexed para el constructor de Date
             const serviceDateTime = new Date(year, month - 1, day, hour, minute);
             const reminderTime = new Date(serviceDateTime.getTime() - HORAS_ANTES_RECORDATORIO_SERVICIO * 60 * 60 * 1000);
 
@@ -480,7 +540,7 @@ export const onServiceStatusChangeSendNotification = functions.firestore
       const montoFinalLiberado = (newValue.detallesFinancieros as DetallesFinancieros)?.montoFinalLiberadoAlPrestador;
       const montoParaMensaje = montoFinalLiberado !== undefined ? montoFinalLiberado.toFixed(2) : (newValue.montoCobrado || newValue.precio || 0).toFixed(2);
       cuerpoNotif = `El pago para el servicio "${serviceTitle}" ha sido liberado a tu cuenta. Monto: $${montoParaMensaje}.`;
-      sendStdNotification = true;
+      sendStdNotification = true; // Ensure this notification is sent
     }
 
     if (sendStdNotification && targetUserId && targetUserType && tituloNotif && cuerpoNotif) {
@@ -685,7 +745,7 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
         actorDelCambioRol: "usuario",
         serviceDate: serviceDateStr,
         serviceTime: serviceTimeStr,
-        serviceType: "fixed", // Asumiendo que la cotización es para un servicio de precio fijo
+        serviceType: "fixed",
       };
       transaction.set(nuevaSolicitudRef, nuevaSolicitudData);
       transaction.update(cotizacionRef, {estado: "convertida_a_servicio", fechaRespuestaUsuario: ahora});
@@ -1162,7 +1222,7 @@ export const rateServiceByUser = functions.https.onCall(async (data, context) =>
       if (servicioData.calificacionPrestador) {
         updates.mutualRatingCompleted = true;
       }
-      // Siempre que un usuario califica, y no hay disputa, el servicio se considera cerrado con calificación.
+
       if (servicioData.status !== "en_disputa") {
         updates.status = "cerrado_con_calificacion";
       }
@@ -1340,7 +1400,7 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
         estadoReporte: "pendiente_revision_admin",
         garantiaActivada: false,
         ...(archivoAdjuntoURL && {archivoAdjuntoURL: archivoAdjuntoURL as string}),
-        idServicioOriginalData: { // Snapshot de algunos datos del servicio
+        idServicioOriginalData: { 
           titulo: servicioData.titulo,
           status: servicioData.status,
           paymentStatus: servicioData.paymentStatus,
@@ -1361,11 +1421,9 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
 
       await logActivity(idUsuarioReportante, rol as "usuario" | "prestador", "REPORTE_PROBLEMA_CREADO", `Reporte #${nuevoReporteRef.id} creado para servicio ${idServicio} por ${rol} ${idUsuarioReportante}.`, {tipo: "reporte_servicio", id: nuevoReporteRef.id}, {descripcion: descripcionProblema});
 
-      // Notificar a la contraparte
       const contraparteId = rol === "usuario" ? servicioData.prestadorId : servicioData.usuarioId;
       const contraparteRol = rol === "usuario" ? "prestador" : "usuario";
       await sendNotification(contraparteId, contraparteRol, "Reporte de Problema Recibido", `Se ha registrado un reporte para el servicio "${servicioData.titulo || idServicio}". Un administrador lo revisará pronto.`, {servicioId: idServicio, reporteId: nuevoReporteRef.id});
-      // TODO: Notificar al admin/equipo de soporte
 
       if (rol === "usuario") {
         const usuarioDoc = await db.collection("usuarios").doc(idUsuarioReportante).get();
@@ -1396,6 +1454,122 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
     functions.logger.error(`Error al reportar problema para servicio ${idServicio}:`, error);
     if (error instanceof functions.https.HttpsError) throw error;
     throw new functions.https.HttpsError("internal", "Error al procesar el reporte.", error.message);
+  }
+});
+
+
+export const reactivarServicioRecurrente = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
+  }
+  const initiatorId = context.auth.uid;
+  const { idServicioAnterior, accion, notasIniciador, nuevaFecha, nuevaHora } = data;
+
+  if (!idServicioAnterior || typeof idServicioAnterior !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idServicioAnterior'.");
+  }
+  if (!accion || (accion !== "solicitar_nuevamente" && accion !== "ofrecer_nuevamente")) {
+    throw new functions.https.HttpsError("invalid-argument", "La 'accion' debe ser 'solicitar_nuevamente' o 'ofrecer_nuevamente'.");
+  }
+
+  const servicioAnteriorRef = db.collection("solicitudes_servicio").doc(idServicioAnterior);
+
+  try {
+    const servicioAnteriorDoc = await servicioAnteriorRef.get();
+    if (!servicioAnteriorDoc.exists) {
+      throw new functions.https.HttpsError("not-found", `Servicio anterior con ID ${idServicioAnterior} no encontrado.`);
+    }
+    const servicioAnteriorData = servicioAnteriorDoc.data() as ServiceRequest;
+
+    let initiatorRoleInOldService: "usuario" | "prestador";
+    if (initiatorId === servicioAnteriorData.usuarioId) {
+      initiatorRoleInOldService = "usuario";
+    } else if (initiatorId === servicioAnteriorData.prestadorId) {
+      initiatorRoleInOldService = "prestador";
+    } else {
+      throw new functions.https.HttpsError("permission-denied", "No participaste en el servicio anterior.");
+    }
+
+    if (accion === "solicitar_nuevamente" && initiatorRoleInOldService !== "usuario") {
+      throw new functions.https.HttpsError("failed-precondition", "Solo el usuario original puede 'solicitar_nuevamente'.");
+    }
+    if (accion === "ofrecer_nuevamente" && initiatorRoleInOldService !== "prestador") {
+      throw new functions.https.HttpsError("failed-precondition", "Solo el prestador original puede 'ofrecer_nuevamente'.");
+    }
+
+    const now = admin.firestore.Timestamp.now();
+    const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
+
+    const newServiceRequestData: Partial<ServiceRequest> = {
+      usuarioId: servicioAnteriorData.usuarioId,
+      prestadorId: servicioAnteriorData.prestadorId,
+      titulo: `Reactivación: ${servicioAnteriorData.titulo || "Servicio Anterior"}`,
+      serviceType: servicioAnteriorData.serviceType,
+      location: servicioAnteriorData.location,
+      notes: notasIniciador || `Reactivación de servicio: ${idServicioAnterior}`,
+      precio: servicioAnteriorData.precio,
+      hourlyRate: servicioAnteriorData.hourlyRate,
+      durationHours: servicioAnteriorData.durationHours,
+      selectedFixedServices: servicioAnteriorData.selectedFixedServices,
+      totalAmount: servicioAnteriorData.totalAmount,
+      estimatedTotal: servicioAnteriorData.estimatedTotal,
+      originatingServiceId: idServicioAnterior,
+      isRecurringAttempt: true,
+      actorDelCambioId: initiatorId,
+      actorDelCambioRol: initiatorRoleInOldService,
+      createdAt: now,
+      updatedAt: now,
+      paymentStatus: "no_aplica", // Se determinará al confirmar
+    };
+
+    if (nuevaFecha) newServiceRequestData.serviceDate = nuevaFecha;
+    if (nuevaHora) newServiceRequestData.serviceTime = nuevaHora;
+
+    let targetNotificationUserId = "";
+    let targetNotificationUserType: "usuario" | "prestador" = "usuario";
+    let notificationTitle = "";
+    let notificationBody = "";
+    let logAction: ActivityLogAction = "SOLICITUD_CREADA";
+
+    if (accion === "solicitar_nuevamente") {
+      newServiceRequestData.status = "agendado";
+      newServiceRequestData.reactivationOfferedBy = "usuario";
+      targetNotificationUserId = servicioAnteriorData.prestadorId;
+      targetNotificationUserType = "prestador";
+      notificationTitle = "Solicitud de Reactivación de Servicio";
+      notificationBody = `El usuario ${initiatorId} desea reactivar el servicio "${servicioAnteriorData.titulo || idServicioAnterior}". Por favor, revisa y confirma los detalles.`;
+      logAction = "SERVICIO_REACTIVADO_SOLICITUD";
+    } else { // ofrecer_nuevamente
+      newServiceRequestData.status = "pendiente_confirmacion_usuario";
+      newServiceRequestData.reactivationOfferedBy = "prestador";
+      targetNotificationUserId = servicioAnteriorData.usuarioId;
+      targetNotificationUserType = "usuario";
+      notificationTitle = "Oferta para Reactivar Servicio";
+      notificationBody = `El prestador ${initiatorId} te ofrece reactivar el servicio "${servicioAnteriorData.titulo || idServicioAnterior}". Por favor, revisa y confirma si deseas proceder.`;
+      logAction = "SERVICIO_REACTIVADO_OFERTA";
+    }
+
+    await nuevaSolicitudRef.set(newServiceRequestData);
+
+    await logActivity(
+      initiatorId,
+      initiatorRoleInOldService,
+      logAction,
+      `Intento de reactivación (${accion}) para servicio anterior ${idServicioAnterior}. Nueva solicitud: ${nuevaSolicitudRef.id}.`,
+      { tipo: "solicitud_servicio", id: nuevaSolicitudRef.id },
+      { idServicioAnterior, notas: notasIniciador }
+    );
+
+    await sendNotification(targetNotificationUserId, targetNotificationUserType, notificationTitle, notificationBody, {
+      newServiceRequestId: nuevaSolicitudRef.id,
+      originatingServiceId: idServicioAnterior,
+    });
+
+    return { success: true, newServiceRequestId: nuevaSolicitudRef.id };
+  } catch (error: any) {
+    functions.logger.error(`Error en reactivarServicioRecurrente para ${idServicioAnterior}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar la reactivación del servicio.", error.message);
   }
 });
 
