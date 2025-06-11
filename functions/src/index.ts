@@ -16,6 +16,7 @@ const FACTOR_CONVERSION_PUNTOS = 10; // $10 MXN (or monetary unit) per 1 loyalty
 const DEFAULT_LANGUAGE_CODE = "es";
 const HORAS_ANTES_RECORDATORIO_SERVICIO = 24;
 const PLAZO_REPORTE_DIAS = 7;
+const MINUTOS_VENTANA_CANCELACION = 10;
 
 
 // --- INTERFACES (Locally defined for Cloud Functions context) ---
@@ -129,6 +130,7 @@ export interface ServiceRequest {
   createdAt: admin.firestore.Timestamp | number;
   updatedAt?: admin.firestore.Timestamp | number;
   fechaFinalizacionEfectiva?: admin.firestore.Timestamp | number;
+  cancellationWindowExpiresAt?: admin.firestore.Timestamp | number;
   titulo?: string;
   actorDelCambioId?: string;
   actorDelCambioRol?: "usuario" | "prestador" | "sistema";
@@ -153,22 +155,22 @@ export interface ServiceRequest {
   originatingServiceId?: string;
   isRecurringAttempt?: boolean;
   reactivationOfferedBy?: "usuario" | "prestador";
-  mutualRatingCompleted?: boolean; // Local Functions copy
-  location?: ProviderLocation | { customAddress: string }; // Local Functions copy
-  notes?: string; // Local Functions copy
-  providerMarkedCompleteAt?: number; // Local Functions copy
-  userConfirmedCompletionAt?: number; // Local Functions copy
-  ratingWindowExpiresAt?: number; // Local Functions copy
-  warrantyEndDate?: string; // Local Functions copy
-  garantiaActiva?: boolean; // Local Functions copy
-  solicitadoPorEmpresaId?: string; // Local Functions copy
-  miembroEmpresaUid?: string; // Local Functions copy
-  paymentIntentId?: string; // Local Functions copy
-  disputeDetails?: { reportedAt: number; reason: string; resolution?: string; resolvedAt?: number; }; // Local Functions copy
-  actualStartTime?: admin.firestore.Timestamp | number; // For HourlyServiceRequest & General start time
-  actualEndTime?: admin.firestore.Timestamp | number; // Local Functions copy for HourlyServiceRequest
-  actualDurationHours?: number; // Local Functions copy for HourlyServiceRequest
-  finalTotal?: number; // Local Functions copy for HourlyServiceRequest
+  mutualRatingCompleted?: boolean;
+  location?: ProviderLocation | { customAddress: string };
+  notes?: string;
+  providerMarkedCompleteAt?: number;
+  userConfirmedCompletionAt?: number;
+  ratingWindowExpiresAt?: number;
+  warrantyEndDate?: string;
+  garantiaActiva?: boolean;
+  solicitadoPorEmpresaId?: string;
+  miembroEmpresaUid?: string;
+  paymentIntentId?: string;
+  disputeDetails?: { reportedAt: number; reason: string; resolution?: string; resolvedAt?: number; };
+  actualStartTime?: admin.firestore.Timestamp | number;
+  actualEndTime?: admin.firestore.Timestamp | number;
+  actualDurationHours?: number;
+  finalTotal?: number;
 }
 
 export type SolicitudCotizacionEstado =
@@ -221,7 +223,8 @@ export type ActivityLogAction =
   | "REGLAS_ZONA_CONSULTADAS" | "ADMIN_ZONA_MODIFICADA"
   | "TICKET_SOPORTE_CREADO" | "TICKET_SOPORTE_ACTUALIZADO"
   | "BUSQUEDA_PRESTADORES" | "REPORTE_PROBLEMA_CREADO" | "GARANTIA_REGISTRADA"
-  | "SERVICIO_REACTIVADO_SOLICITUD" | "SERVICIO_REACTIVADO_OFERTA";
+  | "SERVICIO_REACTIVADO_SOLICITUD" | "SERVICIO_REACTIVADO_OFERTA"
+  | "SERVICIO_CONFIRMADO_PAGADO";
 
 export interface PromocionFidelidad {
   id?: string;
@@ -271,7 +274,7 @@ export interface Recordatorio {
   };
 }
 
-interface ProviderLocation { // Local copy for functions
+interface ProviderLocation {
   lat: number;
   lng: number;
 }
@@ -369,6 +372,26 @@ interface GarantiaPendienteData {
   resueltaPorAdminId?: string;
 }
 
+interface ServicioConfirmadoData {
+  userId: string;
+  providerId: string;
+  serviceDetails?: string;
+  paymentAmount: number;
+  status: "confirmado";
+  confirmadoEn: admin.firestore.Timestamp;
+  puedeCancelarHasta: admin.firestore.Timestamp;
+  iniciado: boolean;
+}
+
+interface PagoPendienteData {
+  userId: string;
+  providerId: string;
+  paymentAmount: number;
+  retenido: boolean;
+  status: "esperando_calificacion";
+  creadoEn: admin.firestore.Timestamp;
+}
+
 
 // --- Helper para enviar notificaciones ---
 async function sendNotification(userId: string, userType: "usuario" | "prestador", title: string, body: string, data?: {[key: string]: string}) {
@@ -451,12 +474,12 @@ export const onServiceStatusChangeSendNotification = functions.firestore
           targetUserId = prestadorId; targetUserType = "prestador";
           tituloNotif = "Solicitud de Reactivación de Servicio";
           cuerpoNotif = `El usuario ${newValue.usuarioId} quiere reactivar el servicio "${serviceTitle}". Por favor, confirma la nueva fecha/hora.`;
-        } else if (!newValue.isRecurringAttempt) { // Standard new request
+        } else if (!newValue.isRecurringAttempt && previousValue.status !== "pendiente_confirmacion_usuario") { // Standard new request, not a response to offer
           targetUserId = prestadorId; targetUserType = "prestador";
           tituloNotif = "Nueva Solicitud de Servicio";
           cuerpoNotif = `Has recibido una nueva solicitud para "${serviceTitle}".`;
         } else {
-          sendStdNotification = false;
+          sendStdNotification = false; // Avoid double notification if reactivation already sent one
         }
         break;
       case "pendiente_confirmacion_usuario":
@@ -464,7 +487,7 @@ export const onServiceStatusChangeSendNotification = functions.firestore
           targetUserId = usuarioId; targetUserType = "usuario";
           tituloNotif = "Oferta de Reactivación de Servicio";
           cuerpoNotif = `El prestador ${newValue.prestadorId} te ofrece reactivar el servicio "${serviceTitle}". Por favor, confirma si deseas continuar.`;
-        } else {
+        } else { // Could be other scenarios leading to this state, handle if needed.
           sendStdNotification = false;
         }
         break;
@@ -738,7 +761,7 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
         createdAt: ahora, updatedAt: ahora, titulo: cotizacionData.tituloServicio || `Servicio de cotización ${cotizacionId.substring(0, 5)}`,
         precio: cotizacionData.precioSugerido,
         montoCobrado: cotizacionData.precioSugerido,
-        paymentStatus: "retenido_para_liberacion",
+        paymentStatus: "retenido_para_liberacion", // Asumimos que aceptar la cotización implica retener el pago
         originatingQuotationId: cotizacionId,
         actorDelCambioId: usuarioId,
         actorDelCambioRol: "usuario",
@@ -1379,13 +1402,15 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
       const plazoMaximoReporte = new Date(fechaFinalizacion.getTime() + PLAZO_REPORTE_DIAS * 24 * 60 * 60 * 1000);
 
       if (now.toDate() > plazoMaximoReporte) {
-        return {status: "error", message: "El plazo para reportar problemas para este servicio ha expirado."};
+        // return {status: "error", message: "El plazo para reportar problemas para este servicio ha expirado."}; // Return for callable
+        throw new functions.https.HttpsError("failed-precondition", "El plazo para reportar problemas para este servicio ha expirado.");
       }
 
       if (servicioData.reporteActivoId) {
         const reporteExistenteDoc = await transaction.get(reportesRef.doc(servicioData.reporteActivoId));
         if (reporteExistenteDoc.exists) {
-           return {status: "error", message: "Ya existe un reporte activo para este servicio."};
+           // return {status: "error", message: "Ya existe un reporte activo para este servicio."};
+           throw new functions.https.HttpsError("already-exists", "Ya existe un reporte activo para este servicio.");
         }
       }
 
@@ -1518,7 +1543,7 @@ export const reactivarServicioRecurrente = functions.https.onCall(async (data, c
       actorDelCambioRol: initiatorRoleInOldService,
       createdAt: now,
       updatedAt: now,
-      paymentStatus: "no_aplica",
+      paymentStatus: "no_aplica", // Payment will be handled upon confirmation
     };
 
     if (nuevaFecha) newServiceRequestData.serviceDate = nuevaFecha;
@@ -1531,15 +1556,15 @@ export const reactivarServicioRecurrente = functions.https.onCall(async (data, c
     let logAction: ActivityLogAction = "SOLICITUD_CREADA";
 
     if (accion === "solicitar_nuevamente") {
-      newServiceRequestData.status = "agendado";
+      newServiceRequestData.status = "agendado"; // Provider needs to confirm
       newServiceRequestData.reactivationOfferedBy = "usuario";
       targetNotificationUserId = servicioAnteriorData.prestadorId;
       targetNotificationUserType = "prestador";
       notificationTitle = "Solicitud de Reactivación de Servicio";
       notificationBody = `El usuario ${initiatorId} desea reactivar el servicio "${servicioAnteriorData.titulo || idServicioAnterior}". Por favor, revisa y confirma los detalles.`;
       logAction = "SERVICIO_REACTIVADO_SOLICITUD";
-    } else {
-      newServiceRequestData.status = "pendiente_confirmacion_usuario";
+    } else { // "ofrecer_nuevamente"
+      newServiceRequestData.status = "pendiente_confirmacion_usuario"; // User needs to confirm
       newServiceRequestData.reactivationOfferedBy = "prestador";
       targetNotificationUserId = servicioAnteriorData.usuarioId;
       targetNotificationUserType = "usuario";
@@ -1626,7 +1651,7 @@ export const startServiceByProvider = functions.https.onCall(async (data, contex
         servicioData.usuarioId,
         "usuario",
         "¡Servicio Iniciado!",
-        `El prestador ${providerId} ha comenzado el servicio "${servicioData.titulo || "reservado"}".`,
+        `El prestador ${providerId} (ID: ${providerId.substring(0,5)}) ha comenzado el servicio "${servicioData.titulo || "reservado"}".`,
         { servicioId: servicioId, nuevoEstado: "servicio_iniciado" }
       );
 
@@ -1636,5 +1661,116 @@ export const startServiceByProvider = functions.https.onCall(async (data, contex
     functions.logger.error(`Error al iniciar servicio ${servicioId} por prestador ${providerId}:`, error);
     if (error instanceof functions.https.HttpsError) throw error;
     throw new functions.https.HttpsError("internal", "Error al iniciar el servicio.", error.message);
+  }
+});
+
+export const confirmServiceAndHandlePayment = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const userId = context.auth.uid;
+  const { serviceId, serviceDetails, paymentAmount } = data;
+
+  if (!serviceId || typeof serviceId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'serviceId'.");
+  }
+  if (typeof paymentAmount !== "number" || paymentAmount <= 0) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'paymentAmount' válido y positivo.");
+  }
+
+  const originalServiceRef = db.collection("solicitudes_servicio").doc(serviceId);
+  const servicioConfirmadoRef = db.collection("serviciosConfirmados").doc(serviceId);
+  const pagoPendienteRef = db.collection("pagosPendientes").doc(serviceId);
+  const now = admin.firestore.Timestamp.now();
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const originalServiceDoc = await transaction.get(originalServiceRef);
+      if (!originalServiceDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Servicio original con ID ${serviceId} no encontrado.`);
+      }
+      const originalServiceData = originalServiceDoc.data() as ServiceRequest;
+
+      if (originalServiceData.usuarioId !== userId) {
+        throw new functions.https.HttpsError("permission-denied", "No eres el usuario de este servicio.");
+      }
+
+      // Validate current state of the original service
+      // Example: Allow confirmation if provider has confirmed and payment is pending
+      if (originalServiceData.status !== "confirmada_prestador" && originalServiceData.status !== "pendiente_confirmacion_usuario") {
+        // If status is 'pendiente_confirmacion_usuario', it means the provider offered a reactivation and user is now accepting.
+        // If 'confirmada_prestador', it means provider confirmed a user's request, and user is now paying/finalizing.
+        throw new functions.https.HttpsError("failed-precondition", `El servicio no está en un estado válido para confirmación y pago. Estado actual: ${originalServiceData.status}`);
+      }
+      if (originalServiceData.paymentStatus !== "pendiente_cobro" && originalServiceData.paymentStatus !== "no_aplica") {
+         // Allow 'no_aplica' if it's a reactivation offer being accepted
+        if (!(originalServiceData.isRecurringAttempt && originalServiceData.reactivationOfferedBy === "prestador" && originalServiceData.paymentStatus === "no_aplica")) {
+             throw new functions.https.HttpsError("failed-precondition", `El estado de pago del servicio no es 'pendiente_cobro' o no es una oferta de reactivación válida. Estado pago: ${originalServiceData.paymentStatus}`);
+        }
+      }
+
+
+      // 1. Create ServicioConfirmado document
+      const servicioConfirmadoPayload: ServicioConfirmadoData = {
+        userId: userId,
+        providerId: originalServiceData.prestadorId,
+        paymentAmount: paymentAmount,
+        status: "confirmado",
+        confirmadoEn: now,
+        puedeCancelarHasta: admin.firestore.Timestamp.fromMillis(now.toMillis() + MINUTOS_VENTANA_CANCELACION * 60 * 1000),
+        iniciado: false, // Service is confirmed, not yet started
+        ...(serviceDetails && { serviceDetails: serviceDetails as string }),
+      };
+      transaction.set(servicioConfirmadoRef, servicioConfirmadoPayload);
+
+      // 2. Create PagoPendiente document
+      const pagoPendientePayload: PagoPendienteData = {
+        userId: userId,
+        providerId: originalServiceData.prestadorId,
+        paymentAmount: paymentAmount,
+        retenido: true,
+        status: "esperando_calificacion",
+        creadoEn: now,
+      };
+      transaction.set(pagoPendienteRef, pagoPendientePayload);
+
+      // 3. Update original ServiceRequest document
+      const updateOriginalService: Partial<ServiceRequest> = {
+        status: "pagada", // Service is now considered paid and confirmed by user
+        paymentStatus: "retenido_para_liberacion",
+        montoCobrado: paymentAmount,
+        updatedAt: now,
+        actorDelCambioId: userId,
+        actorDelCambioRol: "usuario",
+        cancellationWindowExpiresAt: admin.firestore.Timestamp.fromMillis(now.toMillis() + MINUTOS_VENTANA_CANCELACION * 60 * 1000),
+        paymentIntentId: `sim_pi_${serviceId}_${now.toMillis()}`, // Simulated payment intent ID
+      };
+      transaction.update(originalServiceRef, updateOriginalService);
+
+      // 4. Log Activity
+      await logActivity(
+        userId,
+        "usuario",
+        "SERVICIO_CONFIRMADO_PAGADO",
+        `Usuario confirmó y pagó servicio ${serviceId}. Monto: ${paymentAmount}. Detalles: ${serviceDetails || "N/A"}`,
+        { tipo: "solicitud_servicio", id: serviceId },
+        { paymentAmount, serviceDetails: serviceDetails || "N/A" }
+      );
+
+      // 5. Notify Provider
+      await sendNotification(
+        originalServiceData.prestadorId,
+        "prestador",
+        "¡Servicio Confirmado y Pagado!",
+        `El usuario ha confirmado y pagado el servicio "${originalServiceData.titulo || serviceId}". Monto: $${paymentAmount}.`,
+        { serviceId: serviceId, status: "pagada" }
+      );
+
+      return { success: true, message: "Servicio confirmado y pago retenido exitosamente." };
+    });
+  } catch (error: any) {
+    functions.logger.error(`Error en confirmServiceAndHandlePayment para servicio ${serviceId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al confirmar el servicio y procesar el pago.", error.message);
   }
 });

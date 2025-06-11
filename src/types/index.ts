@@ -180,6 +180,7 @@ interface BaseServiceRequest {
   providerMarkedCompleteAt?: number;
   userConfirmedCompletionAt?: number;
   ratingWindowExpiresAt?: number;
+  cancellationWindowExpiresAt?: number; // Timestamp until which cancellation is allowed (e.g., 10 mins after confirmation)
   calificacionUsuario?: CalificacionDetallada;
   calificacionPrestador?: CalificacionDetallada;
   mutualRatingCompleted?: boolean;
@@ -330,7 +331,8 @@ export type ActivityLogAction =
   | 'REPORTE_PROBLEMA_CREADO'
   | 'GARANTIA_REGISTRADA'
   | 'SERVICIO_REACTIVADO_SOLICITUD'
-  | 'SERVICIO_REACTIVADO_OFERTA';
+  | 'SERVICIO_REACTIVADO_OFERTA'
+  | 'SERVICIO_CONFIRMADO_PAGADO';
 
 
 export interface ActivityLog {
@@ -546,4 +548,24 @@ export interface GarantiaPendiente {
   fechaResolucion?: number;
   notasResolucion?: string;
   resueltaPorAdminId?: string;
+}
+
+export interface ServicioConfirmado {
+  userId: string;
+  providerId: string;
+  serviceDetails?: string;
+  paymentAmount: number;
+  status: "confirmado";
+  confirmadoEn: number; // timestamp
+  puedeCancelarHasta: number; // timestamp
+  iniciado: boolean;
+}
+
+export interface PagoPendiente {
+  userId: string;
+  providerId: string;
+  paymentAmount: number;
+  retenido: boolean;
+  status: "esperando_calificacion";
+  creadoEn: number; // timestamp
 }
