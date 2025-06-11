@@ -208,6 +208,8 @@ interface BaseServiceRequest {
   originatingServiceId?: string; // ID of the service being reactivated
   isRecurringAttempt?: boolean;  // Flag for reactivated service
   reactivationOfferedBy?: 'usuario' | 'prestador'; // Who initiated this reactivation
+  actualStartTime?: number; // Timestamp when service actually started
+  actualEndTime?: number; // Timestamp when service actually ended
 }
 
 export interface FixedServiceRequest extends BaseServiceRequest {
@@ -221,10 +223,8 @@ export interface HourlyServiceRequest extends BaseServiceRequest {
   durationHours: number;
   hourlyRate: number;
   estimatedTotal: number;
-  actualStartTime?: number;
-  actualEndTime?: number;
-  actualDurationHours?: number;
-  finalTotal?: number;
+  actualDurationHours?: number; // For hourly services, calculated after completion
+  finalTotal?: number; // For hourly services, calculated after completion based on actualDurationHours
 }
 
 export type ServiceRequest = FixedServiceRequest | HourlyServiceRequest;
@@ -547,5 +547,3 @@ export interface GarantiaPendiente {
   notasResolucion?: string;
   resueltaPorAdminId?: string;
 }
-
-    
