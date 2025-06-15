@@ -1978,5 +1978,78 @@ export const solicitarUnirseAComunidad = functions.https.onCall(async (data, con
   }
 });
 
+export const gestionarSolicitudComunidad = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const embajadorId = context.auth.uid;
+  const { comunidadId, solicitanteUid, accion } = data; // accion: "aprobar" | "rechazar"
 
+  if (!comunidadId || typeof comunidadId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'comunidadId'.");
+  }
+  if (!solicitanteUid || typeof solicitanteUid !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'solicitanteUid'.");
+  }
+  if (!accion || (accion !== "aprobar" && accion !== "rechazar")) {
+    throw new functions.https.HttpsError("invalid-argument", "La 'accion' debe ser 'aprobar' o 'rechazar'.");
+  }
+
+  const comunidadRef = db.collection("comunidades").doc(comunidadId);
+  const now = admin.firestore.Timestamp.now();
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const comunidadDoc = await transaction.get(comunidadRef);
+      if (!comunidadDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Comunidad con ID ${comunidadId} no encontrada.`);
+      }
+      const comunidadData = comunidadDoc.data() as ComunidadData;
+
+      if (comunidadData.embajador_uid !== embajadorId) {
+        throw new functions.https.HttpsError("permission-denied", "No eres el embajador de esta comunidad y no puedes gestionar solicitudes.");
+      }
+
+      if (!comunidadData.solicitudesPendientes?.includes(solicitanteUid)) {
+        throw new functions.https.HttpsError("failed-precondition", `El usuario ${solicitanteUid} no tiene una solicitud pendiente para esta comunidad o ya fue procesada.`);
+      }
+
+      let logMessage = "";
+      let logActionType: ActivityLogAction;
+      let notifTitle = "";
+      let notifBody = "";
+
+      if (accion === "aprobar") {
+        transaction.update(comunidadRef, {
+          solicitudesPendientes: admin.firestore.FieldValue.arrayRemove(solicitanteUid),
+          miembros: admin.firestore.FieldValue.arrayUnion(solicitanteUid),
+          updatedAt: now,
+        });
+        logActionType = "COMUNIDAD_SOLICITUD_APROBADA";
+        logMessage = `Embajador ${embajadorId} aprobó solicitud de ${solicitanteUid} para unirse a comunidad '${comunidadData.nombre}' (ID: ${comunidadId}).`;
+        notifTitle = "¡Solicitud Aprobada!";
+        notifBody = `Tu solicitud para unirte a la comunidad "${comunidadData.nombre}" ha sido aprobada. ¡Bienvenido/a!`;
+      } else { // accion === "rechazar"
+        transaction.update(comunidadRef, {
+          solicitudesPendientes: admin.firestore.FieldValue.arrayRemove(solicitanteUid),
+          updatedAt: now,
+        });
+        logActionType = "COMUNIDAD_SOLICITUD_RECHAZADA";
+        logMessage = `Embajador ${embajadorId} rechazó solicitud de ${solicitanteUid} para unirse a comunidad '${comunidadData.nombre}' (ID: ${comunidadId}).`;
+        notifTitle = "Solicitud Rechazada";
+        notifBody = `Lamentablemente, tu solicitud para unirte a la comunidad "${comunidadData.nombre}" ha sido rechazada.`;
+      }
+
+      await logActivity(embajadorId, "usuario", logActionType, logMessage, { tipo: "comunidad", id: comunidadId }, { solicitanteProcesado: solicitanteUid });
+      await sendNotification(solicitanteUid, "usuario", notifTitle, notifBody, { comunidadId: comunidadId, accionRealizada: accion });
+
+      return { success: true, message: `Solicitud de ${solicitanteUid} ${accion === "aprobar" ? "aprobada" : "rechazada"} exitosamente.` };
+    });
+  } catch (error: any) {
+    functions.logger.error(`Error al gestionar solicitud para comunidad ${comunidadId} por embajador ${embajadorId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar la gestión de la solicitud.", error.message);
+  }
+});
+    
     
