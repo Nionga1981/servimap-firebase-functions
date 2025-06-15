@@ -636,6 +636,9 @@ export interface AvisoComunidad {
   descripcion: string;
   fechaPublicacion: number; // Timestamp
   activo: boolean;
-  autor_uid: string; // Debe coincidir con el embajador_uid de la comunidad
+  anclado: boolean; // Para fijar en la parte superior (solo uno puede ser true a la vez por comunidad)
   fechaExpiracion?: number; // Timestamp, opcional
+  autor_uid: string; // Debe coincidir con el embajador_uid de la comunidad
 }
+
+    
