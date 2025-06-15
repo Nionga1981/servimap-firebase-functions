@@ -1,10 +1,10 @@
 // src/app/page.tsx
-import { MapDisplay } from '@/components/client/MapDisplay';
+import DynamicMapLoader from '@/components/client/DynamicMapLoader';
 
 export default function HomePage() {
   return (
     <div className="h-[calc(100vh-var(--header-height,64px))]"> {/* Ensure MapDisplay has height context */}
-      <MapDisplay />
+      <DynamicMapLoader />
     </div>
   );
 }
