@@ -612,6 +612,17 @@ export interface Comunidad {
   lastActivity?: number; // Timestamp de la última actividad relevante
 }
 
-    
+export interface RespuestaRecomendacion {
+  uid_responde: string;
+  prestador_tagged: string; // ID del proveedor etiquetado/recomendado
+  timestamp: number; // Timestamp de la respuesta
+}
 
-    
+export interface RecomendacionComunidad {
+  id?: string; // ID del documento de recomendación
+  autor_uid: string; // UID del usuario que publica la recomendación
+  texto: string; // El texto de la pregunta o solicitud de recomendación
+  timestamp: number; // Timestamp de cuándo se creó la recomendación
+  respuestas: RespuestaRecomendacion[]; // Array de respuestas
+  estado: "activa" | "cerrada"; // Estado de la solicitud de recomendación
+}
