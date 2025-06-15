@@ -332,7 +332,9 @@ export type ActivityLogAction =
   | 'GARANTIA_REGISTRADA'
   | 'SERVICIO_REACTIVADO_SOLICITUD'
   | 'SERVICIO_REACTIVADO_OFERTA'
-  | 'SERVICIO_CONFIRMADO_PAGADO';
+  | 'SERVICIO_CONFIRMADO_PAGADO'
+  | 'SERVICIO_CANCELADO_CON_PENALIZACION'
+  | 'SERVICIO_CANCELADO_SIN_PENALIZACION';
 
 
 export interface ActivityLog {
@@ -343,7 +345,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia';
+    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -569,3 +571,39 @@ export interface PagoPendiente {
   status: "esperando_calificacion";
   creadoEn: number; // timestamp
 }
+
+export interface Cancelacion {
+  serviceId: string;
+  actor: 'usuario' | 'prestador';
+  penalizacionMonto?: number;
+  penalizacionPorcentaje?: number;
+  fechaCancelacion: number; // timestamp
+  motivo?: string;
+}
+
+interface BannerComunitarioDetails {
+  titulo: string;
+  imagenUrl: string;
+  link?: string;
+  activo: boolean;
+  dataAiHint?: string;
+}
+
+export interface Comunidad {
+  id?: string; // Firestore document ID
+  nombre: string;
+  descripcion: string;
+  tipo: "publica" | "privada";
+  ubicacion: ProviderLocation; // Coordenadas aproximadas de la comunidad
+  bannerComunitario: BannerComunitarioDetails;
+  embajador_uid: string; // UID del usuario creador/embajador
+  miembros: string[]; // Array de UIDs de los miembros
+  solicitudesPendientes: string[]; // Array de UIDs de usuarios que quieren unirse (si es privada)
+  fechaCreacion: number; // Timestamp
+  updatedAt?: number; // Timestamp
+  tags?: string[]; // Para búsqueda y categorización
+  reglasComunidad?: string; // Texto con las reglas
+  lastActivity?: number; // Timestamp de la última actividad relevante
+}
+
+    
