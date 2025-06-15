@@ -2099,18 +2099,11 @@ export const manageCommunityNotice = functions.https.onCall(async (data, context
       let logActionType: ActivityLogAction = "COMUNIDAD_AVISO_CREADO";
       let logMessage = "";
 
-      // Handle active notices limit
       if (noticeData.activo === true) {
         let activeNoticesQuery = avisosComunidadRef.where("activo", "==", true);
-        if (action === "update" && noticeId) {
-          // If updating, exclude the current notice from the count if it was already active
-          // This check is tricky because we don't know its *previous* active state without another read.
-          // Simpler: count all active, if it's >= MAX and current notice isn't one of them OR is being activated, then deactivate oldest.
-        }
         const activeNoticesSnapshot = await transaction.get(activeNoticesQuery);
         let activeNotices = activeNoticesSnapshot.docs.map((doc) => ({id: doc.id, ...doc.data()} as AvisoComunidadDataFirestore & {id: string}));
 
-        // If we are updating a notice to active, and it wasn't active before
         let isBecomingActive = false;
         if (action === "update" && noticeId) {
           const currentNoticeSnap = await transaction.get(avisosComunidadRef.doc(noticeId));
@@ -2119,7 +2112,6 @@ export const manageCommunityNotice = functions.https.onCall(async (data, context
             if (currentNoticeData.activo === false && noticeData.activo === true) {
               isBecomingActive = true;
             }
-            // If it was already active, don't count it towards needing to deactivate another
             if (currentNoticeData.activo === true) {
               activeNotices = activeNotices.filter(n => n.id !== noticeId);
             }
@@ -2131,13 +2123,12 @@ export const manageCommunityNotice = functions.https.onCall(async (data, context
           activeNotices.sort((a, b) => a.fechaPublicacion.toMillis() - b.fechaPublicacion.toMillis());
           const oldestActiveNotice = activeNotices[0];
           if (oldestActiveNotice) {
-            transaction.update(avisosComunidadRef.doc(oldestActiveNotice.id), {activo: false, anclado: false}); // Also unpin if it was pinned
+            transaction.update(avisosComunidadRef.doc(oldestActiveNotice.id), {activo: false, anclado: false});
             functions.logger.info(`[manageCommunityNotice] Desactivado aviso más antiguo ${oldestActiveNotice.id} en comunidad ${comunidadId} para hacer espacio.`);
           }
         }
       }
 
-      // Handle pinned notice limit
       if (noticeData.anclado === true) {
         const ancladosQuery = avisosComunidadRef.where("anclado", "==", true);
         const ancladosSnapshot = await transaction.get(ancladosQuery);
@@ -2167,7 +2158,6 @@ export const manageCommunityNotice = functions.https.onCall(async (data, context
       } else if (action === "update" && noticeId) {
         const noticeToUpdateRef = avisosComunidadRef.doc(noticeId);
         const updatePayload: Partial<AvisoComunidadDataFirestore> = {...noticeData};
-        // Ensure fechaPublicacion and autor_uid are not overwritten on update unless specified
         delete updatePayload.fechaPublicacion;
         delete updatePayload.autor_uid;
         transaction.update(noticeToUpdateRef, updatePayload);
@@ -2233,7 +2223,6 @@ export const onNewCommunityNoticeSendNotifications = functions.firestore
       };
 
       const notificationPromises = miembros.map((miembroUid) => {
-        // Evitar notificar al autor del aviso si es miembro
         if (miembroUid === avisoData.autor_uid) {
           return Promise.resolve();
         }
@@ -2257,9 +2246,5 @@ export const onNewCommunityNoticeSendNotifications = functions.firestore
     return null;
   });
     
-    
-
-
-    
-
+ 
     
