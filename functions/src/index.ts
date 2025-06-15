@@ -1,4 +1,5 @@
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import { SERVICE_CATEGORIES } from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -233,7 +234,11 @@ export type ActivityLogAction =
   | "COMUNIDAD_SOLICITUD_APROBADA"
   | "COMUNIDAD_SOLICITUD_RECHAZADA"
   | "COMUNIDAD_USUARIO_EXPULSADO"
-  | "COMUNIDAD_EMBAJADOR_NOTIFICADO_SOLICITUD";
+  | "COMUNIDAD_EMBAJADOR_NOTIFICADO_SOLICITUD"
+  | "COMUNIDAD_AVISO_CREADO"
+  | "COMUNIDAD_AVISO_ACTUALIZADO"
+  | "COMUNIDAD_AVISO_ELIMINADO"
+  | "COMUNIDAD_NUEVO_AVISO_NOTIFICADO";
 
 export interface PromocionFidelidad {
   id?: string;
@@ -433,6 +438,17 @@ interface ComunidadData {
   tags?: string[];
   reglasComunidad?: string;
   lastActivity?: admin.firestore.Timestamp;
+}
+
+interface AvisoComunidadDataFirestore {
+  id?: string;
+  titulo: string;
+  descripcion: string;
+  fechaPublicacion: admin.firestore.Timestamp;
+  activo: boolean;
+  anclado: boolean;
+  fechaExpiracion?: admin.firestore.Timestamp;
+  autor_uid: string;
 }
 
 
@@ -1279,7 +1295,7 @@ export const rateServiceByUser = functions.https.onCall(async (data, context) =>
         ...(areasDeMejora && Array.isArray(areasDeMejora) && {areasDeMejora: areasDeMejora as string[]}),
       };
 
-      const updates: Partial<ServiceRequest> & {updatedAt: admin.firestore.Timestamp} = {
+      const updates: Partial<ServiceRequest> & { updatedAt: admin.firestore.Timestamp } = {
         calificacionUsuario: nuevaCalificacion,
         updatedAt: now,
       };
@@ -2051,5 +2067,72 @@ export const gestionarSolicitudComunidad = functions.https.onCall(async (data, c
     throw new functions.https.HttpsError("internal", "Error al procesar la gestión de la solicitud.", error.message);
   }
 });
+
+export const onNewCommunityNoticeSendNotifications = functions.firestore
+  .document("comunidades/{comunidadId}/avisos/{avisoId}")
+  .onCreate(async (snapshot, context) => {
+    const avisoData = snapshot.data() as AvisoComunidadDataFirestore | undefined;
+    const comunidadId = context.params.comunidadId;
+    const avisoId = context.params.avisoId;
+
+    if (!avisoData) {
+      functions.logger.error(`[NewAvisoTrigger ${comunidadId}/${avisoId}] No hay datos en el aviso, saliendo.`);
+      return null;
+    }
+
+    if (avisoData.activo !== true) {
+      functions.logger.log(`[NewAvisoTrigger ${comunidadId}/${avisoId}] El aviso no está activo, no se enviarán notificaciones.`);
+      return null;
+    }
+
+    functions.logger.info(`[NewAvisoTrigger ${comunidadId}/${avisoId}] Nuevo aviso activo detectado. Título: "${avisoData.titulo}". Iniciando envío de notificaciones.`);
+
+    try {
+      const comunidadDocRef = db.collection("comunidades").doc(comunidadId);
+      const comunidadDoc = await comunidadDocRef.get();
+
+      if (!comunidadDoc.exists) {
+        functions.logger.error(`[NewAvisoTrigger ${comunidadId}/${avisoId}] Comunidad con ID ${comunidadId} no encontrada.`);
+        return null;
+      }
+      const comunidadData = comunidadDoc.data() as ComunidadData;
+      const miembros = comunidadData.miembros;
+
+      if (!miembros || miembros.length === 0) {
+        functions.logger.log(`[NewAvisoTrigger ${comunidadId}/${avisoId}] La comunidad "${comunidadData.nombre}" no tiene miembros para notificar.`);
+        return null;
+      }
+
+      const notifTitle = `Nuevo aviso en ${comunidadData.nombre}: ${avisoData.titulo}`;
+      const notifBody = `Se ha publicado un nuevo aviso en la comunidad "${comunidadData.nombre}". ¡Échale un vistazo!`;
+      const notifData = {
+        comunidadId: comunidadId,
+        avisoId: avisoId,
+        type: "NEW_COMMUNITY_NOTICE", // Para que el cliente sepa cómo manejarlo
+      };
+
+      const notificationPromises = miembros.map((miembroUid) => {
+        return sendNotification(miembroUid, "usuario", notifTitle, notifBody, notifData);
+      });
+
+      await Promise.all(notificationPromises);
+      functions.logger.info(`[NewAvisoTrigger ${comunidadId}/${avisoId}] Notificaciones enviadas a ${miembros.length} miembros para el aviso.`);
+
+      await logActivity(
+        "sistema",
+        "sistema",
+        "COMUNIDAD_NUEVO_AVISO_NOTIFICADO",
+        `Notificaciones enviadas a ${miembros.length} miembros por nuevo aviso "${avisoData.titulo}" en comunidad "${comunidadData.nombre}".`,
+        {tipo: "aviso_comunidad", id: avisoId},
+        {comunidadId, avisoTitulo: avisoData.titulo, miembrosNotificados: miembros.length}
+      );
+    } catch (error) {
+      functions.logger.error(`[NewAvisoTrigger ${comunidadId}/${avisoId}] Error al enviar notificaciones por nuevo aviso:`, error);
+    }
+    return null;
+  });
     
+    
+
+
     

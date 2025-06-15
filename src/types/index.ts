@@ -343,7 +343,8 @@ export type ActivityLogAction =
   | 'COMUNIDAD_EMBAJADOR_NOTIFICADO_SOLICITUD'
   | 'COMUNIDAD_AVISO_CREADO'
   | 'COMUNIDAD_AVISO_ACTUALIZADO'
-  | 'COMUNIDAD_AVISO_ELIMINADO';
+  | 'COMUNIDAD_AVISO_ELIMINADO'
+  | 'COMUNIDAD_NUEVO_AVISO_NOTIFICADO';
 
 
 export interface ActivityLog {
@@ -636,9 +637,11 @@ export interface AvisoComunidad {
   descripcion: string;
   fechaPublicacion: number; // Timestamp
   activo: boolean;
-  anclado: boolean; // Para fijar en la parte superior (solo uno puede ser true a la vez por comunidad)
+  anclado: boolean; 
   fechaExpiracion?: number; // Timestamp, opcional
   autor_uid: string; // Debe coincidir con el embajador_uid de la comunidad
 }
+
+    
 
     
