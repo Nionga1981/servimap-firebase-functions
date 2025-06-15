@@ -334,7 +334,13 @@ export type ActivityLogAction =
   | 'SERVICIO_REACTIVADO_OFERTA'
   | 'SERVICIO_CONFIRMADO_PAGADO'
   | 'SERVICIO_CANCELADO_CON_PENALIZACION'
-  | 'SERVICIO_CANCELADO_SIN_PENALIZACION';
+  | 'SERVICIO_CANCELADO_SIN_PENALIZACION'
+  | 'COMUNIDAD_SOLICITUD_UNIRSE'
+  | 'COMUNIDAD_USUARIO_UNIDO'
+  | 'COMUNIDAD_SOLICITUD_APROBADA'
+  | 'COMUNIDAD_SOLICITUD_RECHAZADA'
+  | 'COMUNIDAD_USUARIO_EXPULSADO'
+  | 'COMUNIDAD_EMBAJADOR_NOTIFICADO_SOLICITUD';
 
 
 export interface ActivityLog {
@@ -345,7 +351,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion';
+    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -605,5 +611,7 @@ export interface Comunidad {
   reglasComunidad?: string; // Texto con las reglas
   lastActivity?: number; // Timestamp de la última actividad relevante
 }
+
+    
 
     

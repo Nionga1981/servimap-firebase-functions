@@ -17,6 +17,7 @@ const DEFAULT_LANGUAGE_CODE = "es";
 const HORAS_ANTES_RECORDATORIO_SERVICIO = 24;
 const PLAZO_REPORTE_DIAS = 7;
 const MINUTOS_VENTANA_CANCELACION = 10;
+const COMISION_CANCELACION_TARDIA_PORCENTAJE = 0.10; // 10%
 
 
 // --- INTERFACES (Locally defined for Cloud Functions context) ---
@@ -224,7 +225,15 @@ export type ActivityLogAction =
   | "TICKET_SOPORTE_CREADO" | "TICKET_SOPORTE_ACTUALIZADO"
   | "BUSQUEDA_PRESTADORES" | "REPORTE_PROBLEMA_CREADO" | "GARANTIA_REGISTRADA"
   | "SERVICIO_REACTIVADO_SOLICITUD" | "SERVICIO_REACTIVADO_OFERTA"
-  | "SERVICIO_CONFIRMADO_PAGADO";
+  | "SERVICIO_CONFIRMADO_PAGADO"
+  | "SERVICIO_CANCELADO_CON_PENALIZACION"
+  | "SERVICIO_CANCELADO_SIN_PENALIZACION"
+  | "COMUNIDAD_SOLICITUD_UNIRSE"
+  | "COMUNIDAD_USUARIO_UNIDO"
+  | "COMUNIDAD_SOLICITUD_APROBADA"
+  | "COMUNIDAD_SOLICITUD_RECHAZADA"
+  | "COMUNIDAD_USUARIO_EXPULSADO"
+  | "COMUNIDAD_EMBAJADOR_NOTIFICADO_SOLICITUD";
 
 export interface PromocionFidelidad {
   id?: string;
@@ -390,6 +399,40 @@ interface PagoPendienteData {
   retenido: boolean;
   status: "esperando_calificacion";
   creadoEn: admin.firestore.Timestamp;
+}
+
+interface CancelacionData {
+  serviceId: string;
+  actor: "usuario" | "prestador";
+  penalizacionMonto?: number;
+  penalizacionPorcentaje?: number;
+  fechaCancelacion: admin.firestore.Timestamp;
+  motivo?: string;
+}
+
+interface BannerComunitarioDetailsFirestore {
+  titulo: string;
+  imagenUrl: string;
+  link?: string;
+  activo: boolean;
+  dataAiHint?: string;
+}
+
+interface ComunidadData {
+  id?: string;
+  nombre: string;
+  descripcion: string;
+  tipo: "publica" | "privada";
+  ubicacion: ProviderLocation;
+  bannerComunitario: BannerComunitarioDetailsFirestore;
+  embajador_uid: string;
+  miembros: string[];
+  solicitudesPendientes: string[];
+  fechaCreacion: admin.firestore.Timestamp;
+  updatedAt?: admin.firestore.Timestamp;
+  tags?: string[];
+  reglasComunidad?: string;
+  lastActivity?: admin.firestore.Timestamp;
 }
 
 
@@ -1695,22 +1738,15 @@ export const confirmServiceAndHandlePayment = functions.https.onCall(async (data
         throw new functions.https.HttpsError("permission-denied", "No eres el usuario de este servicio.");
       }
 
-      // Validate current state of the original service
-      // Example: Allow confirmation if provider has confirmed and payment is pending
       if (originalServiceData.status !== "confirmada_prestador" && originalServiceData.status !== "pendiente_confirmacion_usuario") {
-        // If status is 'pendiente_confirmacion_usuario', it means the provider offered a reactivation and user is now accepting.
-        // If 'confirmada_prestador', it means provider confirmed a user's request, and user is now paying/finalizing.
         throw new functions.https.HttpsError("failed-precondition", `El servicio no está en un estado válido para confirmación y pago. Estado actual: ${originalServiceData.status}`);
       }
       if (originalServiceData.paymentStatus !== "pendiente_cobro" && originalServiceData.paymentStatus !== "no_aplica") {
-         // Allow 'no_aplica' if it's a reactivation offer being accepted
         if (!(originalServiceData.isRecurringAttempt && originalServiceData.reactivationOfferedBy === "prestador" && originalServiceData.paymentStatus === "no_aplica")) {
              throw new functions.https.HttpsError("failed-precondition", `El estado de pago del servicio no es 'pendiente_cobro' o no es una oferta de reactivación válida. Estado pago: ${originalServiceData.paymentStatus}`);
         }
       }
 
-
-      // 1. Create ServicioConfirmado document
       const servicioConfirmadoPayload: ServicioConfirmadoData = {
         userId: userId,
         providerId: originalServiceData.prestadorId,
@@ -1718,12 +1754,11 @@ export const confirmServiceAndHandlePayment = functions.https.onCall(async (data
         status: "confirmado",
         confirmadoEn: now,
         puedeCancelarHasta: admin.firestore.Timestamp.fromMillis(now.toMillis() + MINUTOS_VENTANA_CANCELACION * 60 * 1000),
-        iniciado: false, // Service is confirmed, not yet started
+        iniciado: false,
         ...(serviceDetails && { serviceDetails: serviceDetails as string }),
       };
       transaction.set(servicioConfirmadoRef, servicioConfirmadoPayload);
 
-      // 2. Create PagoPendiente document
       const pagoPendientePayload: PagoPendienteData = {
         userId: userId,
         providerId: originalServiceData.prestadorId,
@@ -1734,20 +1769,18 @@ export const confirmServiceAndHandlePayment = functions.https.onCall(async (data
       };
       transaction.set(pagoPendienteRef, pagoPendientePayload);
 
-      // 3. Update original ServiceRequest document
       const updateOriginalService: Partial<ServiceRequest> = {
-        status: "pagada", // Service is now considered paid and confirmed by user
+        status: "pagada",
         paymentStatus: "retenido_para_liberacion",
         montoCobrado: paymentAmount,
         updatedAt: now,
         actorDelCambioId: userId,
         actorDelCambioRol: "usuario",
         cancellationWindowExpiresAt: admin.firestore.Timestamp.fromMillis(now.toMillis() + MINUTOS_VENTANA_CANCELACION * 60 * 1000),
-        paymentIntentId: `sim_pi_${serviceId}_${now.toMillis()}`, // Simulated payment intent ID
+        paymentIntentId: `sim_pi_${serviceId}_${now.toMillis()}`,
       };
       transaction.update(originalServiceRef, updateOriginalService);
 
-      // 4. Log Activity
       await logActivity(
         userId,
         "usuario",
@@ -1757,7 +1790,6 @@ export const confirmServiceAndHandlePayment = functions.https.onCall(async (data
         { paymentAmount, serviceDetails: serviceDetails || "N/A" }
       );
 
-      // 5. Notify Provider
       await sendNotification(
         originalServiceData.prestadorId,
         "prestador",
@@ -1774,3 +1806,177 @@ export const confirmServiceAndHandlePayment = functions.https.onCall(async (data
     throw new functions.https.HttpsError("internal", "Error al confirmar el servicio y procesar el pago.", error.message);
   }
 });
+
+export const cancelService = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const callingUserId = context.auth.uid;
+  const { serviceId } = data;
+
+  if (!serviceId || typeof serviceId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'serviceId'.");
+  }
+
+  const servicioConfirmadoRef = db.collection("serviciosConfirmados").doc(serviceId);
+  const cancelacionesRef = db.collection("cancelaciones");
+  // Referencias a otras colecciones que idealmente se actualizarían
+  // const pagoPendienteRef = db.collection("pagosPendientes").doc(serviceId);
+  // const solicitudOriginalRef = db.collection("solicitudes_servicio").doc(serviceId);
+
+  const now = admin.firestore.Timestamp.now();
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const servicioConfirmadoDoc = await transaction.get(servicioConfirmadoRef);
+      if (!servicioConfirmadoDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Servicio confirmado con ID ${serviceId} no encontrado.`);
+      }
+      const servicioConfirmadoData = servicioConfirmadoDoc.data() as ServicioConfirmadoData;
+
+      let actor: "usuario" | "prestador";
+      let otraParteId: string;
+      let otraParteRol: "usuario" | "prestador";
+
+      if (callingUserId === servicioConfirmadoData.userId) {
+        actor = "usuario";
+        otraParteId = servicioConfirmadoData.providerId;
+        otraParteRol = "prestador";
+      } else if (callingUserId === servicioConfirmadoData.providerId) {
+        actor = "prestador";
+        otraParteId = servicioConfirmadoData.userId;
+        otraParteRol = "usuario";
+      } else {
+        throw new functions.https.HttpsError("permission-denied", "No estás autorizado para cancelar este servicio.");
+      }
+
+      if (servicioConfirmadoData.iniciado === true) {
+        throw new functions.https.HttpsError("failed-precondition", "No se puede cancelar un servicio que ya ha comenzado.");
+      }
+
+      let penalizacionMonto = 0;
+      let penalizacionPorcentaje = 0;
+      let logAction: ActivityLogAction = "SERVICIO_CANCELADO_SIN_PENALIZACION";
+      let messageToUser = `Servicio ${serviceId} cancelado exitosamente.`;
+
+      if (now.toMillis() > (servicioConfirmadoData.puedeCancelarHasta as admin.firestore.Timestamp).toMillis()) {
+        penalizacionPorcentaje = COMISION_CANCELACION_TARDIA_PORCENTAJE;
+        penalizacionMonto = servicioConfirmadoData.paymentAmount * penalizacionPorcentaje;
+        logAction = "SERVICIO_CANCELADO_CON_PENALIZACION";
+        messageToUser = `Servicio ${serviceId} cancelado. Se aplicó una penalización de $${penalizacionMonto.toFixed(2)} por cancelación tardía.`;
+        functions.logger.info(`Cancelación tardía para servicio ${serviceId} por ${actor}. Penalización: $${penalizacionMonto.toFixed(2)}`);
+      } else {
+        functions.logger.info(`Cancelación dentro de ventana para servicio ${serviceId} por ${actor}. Sin penalización.`);
+      }
+
+      const cancelacionPayload: CancelacionData = {
+        serviceId: serviceId,
+        actor: actor,
+        penalizacionMonto: penalizacionMonto > 0 ? penalizacionMonto : undefined,
+        penalizacionPorcentaje: penalizacionPorcentaje > 0 ? penalizacionPorcentaje : undefined,
+        fechaCancelacion: now,
+      };
+      transaction.set(cancelacionesRef.doc(), cancelacionPayload);
+      transaction.delete(servicioConfirmadoRef);
+
+      await logActivity(
+        callingUserId,
+        actor,
+        logAction,
+        `Servicio ${serviceId} cancelado por ${actor}. Penalización: $${penalizacionMonto.toFixed(2)}.`,
+        { tipo: "cancelacion", id: serviceId },
+        { montoPenalizacion: penalizacionMonto, porcentajePenalizacion: penalizacionPorcentaje }
+      );
+
+      await sendNotification(
+        otraParteId,
+        otraParteRol,
+        "Servicio Cancelado",
+        `El servicio (ID: ${serviceId.substring(0,6)}) ha sido cancelado por ${actor}. ${penalizacionMonto > 0 ? `Se aplicó una penalización de $${penalizacionMonto.toFixed(2)}.` : "No se aplicó penalización."}`,
+        { serviceId: serviceId, actorCancelacion: actor }
+      );
+      // **DEUDA TÉCNICA IMPORTANTE:**
+      // Aquí se debería actualizar el estado en `pagosPendientes` (ej. reembolsar)
+      // y en `solicitudes_servicio` (marcarla como cancelada).
+      // Por ejemplo:
+      // const pagoPendienteDoc = await transaction.get(pagoPendienteRef);
+      // if(pagoPendienteDoc.exists){ ...lógica de reembolso... transaction.update(pagoPendienteRef, ...)}
+      // transaction.update(solicitudOriginalRef, { status: `cancelada_${actor}`, paymentStatus: 'reembolsado_total' o 'reembolsado_parcial', updatedAt: now, actorDelCambioId: callingUserId, actorDelCambioRol: actor });
+      functions.logger.warn(`[cancelService] DEUDA TÉCNICA: Actualizaciones a 'pagosPendientes' y 'solicitudes_servicio' para ${serviceId} no implementadas en esta función.`);
+
+
+      return { success: true, message: messageToUser, penalizacionAplicada: penalizacionMonto };
+    });
+  } catch (error: any) {
+    functions.logger.error(`Error al cancelar servicio ${serviceId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar la cancelación del servicio.", error.message);
+  }
+});
+
+
+export const solicitarUnirseAComunidad = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const usuarioId = context.auth.uid;
+  const { comunidadId } = data;
+
+  if (!comunidadId || typeof comunidadId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'comunidadId'.");
+  }
+
+  const comunidadRef = db.collection("comunidades").doc(comunidadId);
+  const now = admin.firestore.Timestamp.now();
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const comunidadDoc = await transaction.get(comunidadRef);
+      if (!comunidadDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Comunidad con ID ${comunidadId} no encontrada.`);
+      }
+      const comunidadData = comunidadDoc.data() as ComunidadData;
+
+      if (comunidadData.tipo === "privada") {
+        if (comunidadData.miembros?.includes(usuarioId)) {
+          throw new functions.https.HttpsError("already-exists", "Ya eres miembro de esta comunidad.");
+        }
+        if (comunidadData.solicitudesPendientes?.includes(usuarioId)) {
+          throw new functions.https.HttpsError("already-exists", "Tu solicitud para unirte a esta comunidad ya está pendiente.");
+        }
+        transaction.update(comunidadRef, {
+          solicitudesPendientes: admin.firestore.FieldValue.arrayUnion(usuarioId),
+          updatedAt: now,
+        });
+        await logActivity(usuarioId, "usuario", "COMUNIDAD_SOLICITUD_UNIRSE", `Usuario ${usuarioId} solicitó unirse a comunidad privada '${comunidadData.nombre}' (ID: ${comunidadId}).`, { tipo: "comunidad", id: comunidadId });
+
+        // Notificar al embajador
+        if (comunidadData.embajador_uid && comunidadData.embajador_uid !== usuarioId) {
+          await sendNotification(comunidadData.embajador_uid, "usuario", "Nueva Solicitud de Unión", `El usuario ${usuarioId} desea unirse a tu comunidad "${comunidadData.nombre}".`, { comunidadId: comunidadId, solicitanteId: usuarioId });
+          await logActivity("sistema", "sistema", "COMUNIDAD_EMBAJADOR_NOTIFICADO_SOLICITUD", `Embajador ${comunidadData.embajador_uid} notificado de solicitud de ${usuarioId} para comunidad ${comunidadId}.`, { tipo: "comunidad", id: comunidadId });
+        }
+        return { success: true, message: "Tu solicitud para unirte ha sido enviada. Espera la aprobación del embajador." };
+
+      } else if (comunidadData.tipo === "publica") {
+        if (comunidadData.miembros?.includes(usuarioId)) {
+          throw new functions.https.HttpsError("already-exists", "Ya eres miembro de esta comunidad.");
+        }
+        transaction.update(comunidadRef, {
+          miembros: admin.firestore.FieldValue.arrayUnion(usuarioId),
+          updatedAt: now,
+        });
+        await logActivity(usuarioId, "usuario", "COMUNIDAD_USUARIO_UNIDO", `Usuario ${usuarioId} se unió a comunidad pública '${comunidadData.nombre}' (ID: ${comunidadId}).`, { tipo: "comunidad", id: comunidadId });
+        return { success: true, message: `¡Te has unido a la comunidad "${comunidadData.nombre}"!` };
+      } else {
+        throw new functions.https.HttpsError("failed-precondition", "Tipo de comunidad desconocido o no manejado.");
+      }
+    });
+  } catch (error: any) {
+    functions.logger.error(`Error al solicitar unirse a comunidad ${comunidadId} por usuario ${usuarioId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar la solicitud para unirse a la comunidad.", error.message);
+  }
+});
+
+
+    
