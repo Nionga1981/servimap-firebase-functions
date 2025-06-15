@@ -340,7 +340,10 @@ export type ActivityLogAction =
   | 'COMUNIDAD_SOLICITUD_APROBADA'
   | 'COMUNIDAD_SOLICITUD_RECHAZADA'
   | 'COMUNIDAD_USUARIO_EXPULSADO'
-  | 'COMUNIDAD_EMBAJADOR_NOTIFICADO_SOLICITUD';
+  | 'COMUNIDAD_EMBAJADOR_NOTIFICADO_SOLICITUD'
+  | 'COMUNIDAD_AVISO_CREADO'
+  | 'COMUNIDAD_AVISO_ACTUALIZADO'
+  | 'COMUNIDAD_AVISO_ELIMINADO';
 
 
 export interface ActivityLog {
@@ -351,7 +354,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad';
+    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -625,4 +628,14 @@ export interface RecomendacionComunidad {
   timestamp: number; // Timestamp de cuándo se creó la recomendación
   respuestas: RespuestaRecomendacion[]; // Array de respuestas
   estado: "activa" | "cerrada"; // Estado de la solicitud de recomendación
+}
+
+export interface AvisoComunidad {
+  id?: string; // ID del documento de aviso en Firestore
+  titulo: string;
+  descripcion: string;
+  fechaPublicacion: number; // Timestamp
+  activo: boolean;
+  autor_uid: string; // Debe coincidir con el embajador_uid de la comunidad
+  fechaExpiracion?: number; // Timestamp, opcional
 }
