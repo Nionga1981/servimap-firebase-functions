@@ -2,7 +2,7 @@
 "use client";
 
 import Link from 'next/link';
-import { Menu, Package2, UserCircle, Globe, ChevronDown, Search } from 'lucide-react';
+import { Menu, Package2, UserCircle, Globe, ChevronDown, Search, Users, type LucideIcon } from 'lucide-react'; // Added Users
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import {
@@ -18,10 +18,18 @@ import Image from 'next/image';
 import { DEFAULT_USER_AVATAR, SERVICE_CATEGORIES } from '@/lib/constants';
 import React, { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { mockIdiomas } from '@/lib/mockData'; // For simulated translations
+import { mockIdiomas } from '@/lib/mockData';
 
-const navLinks = [
+interface NavLink {
+  href: string;
+  labelKey: string;
+  icon?: LucideIcon;
+}
+
+const navLinks: NavLink[] = [
   { href: "/provider", labelKey: "label_offer_services" },
+  { href: "/communities", labelKey: "label_communities", icon: Users },
+  { href: "/chat", labelKey: "label_chat", icon: Users } // Added chat link as per app PRD
 ];
 
 type LanguageCode = 'es' | 'en';
@@ -33,7 +41,6 @@ export function AppHeader() {
   const pathname = usePathname();
 
   useEffect(() => {
-    // Simulate fetching translations for the current language
     const langData = mockIdiomas.find(lang => lang.codigo === currentLanguage);
     if (langData) {
       setTranslations(langData.recursos);
@@ -47,8 +54,6 @@ export function AppHeader() {
   const toggleLanguage = () => {
     const newLang = currentLanguage === 'es' ? 'en' : 'es';
     setCurrentLanguage(newLang);
-    // In a real app, you would also save this preference to the user's profile
-    // and potentially reload resources or use an i18n library to update UI.
     console.log(`Simulación: Idioma cambiado a ${newLang}. Preferencia debería guardarse y UI actualizarse con i18n.`);
   };
 
@@ -100,15 +105,19 @@ export function AppHeader() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {navLinks.map((link) => (
-          <Link
-            key={link.href}
-            href={link.href}
-            className="text-foreground/80 transition-colors hover:text-foreground"
-          >
-            {getTranslatedText(link.labelKey, link.labelKey)}
-          </Link>
-        ))}
+        {navLinks.map((link) => {
+          const Icon = link.icon;
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="flex items-center gap-2 text-foreground/80 transition-colors hover:text-foreground"
+            >
+              {Icon && <Icon className="h-4 w-4" />}
+              {getTranslatedText(link.labelKey, link.labelKey.replace('label_','').replace('_', ' '))}
+            </Link>
+          );
+        })}
       </nav>
       <Sheet>
         <SheetTrigger asChild>
@@ -159,15 +168,19 @@ export function AppHeader() {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {navLinks.map((link) => (
+            {navLinks.map((link) => {
+              const Icon = link.icon;
+              return (
               <Link
                 key={link.href}
                 href={link.href}
-                className="text-muted-foreground hover:text-foreground"
+                className="flex items-center gap-3 text-muted-foreground hover:text-foreground"
               >
-                {getTranslatedText(link.labelKey, link.labelKey)}
+                {Icon && <Icon className="h-5 w-5" />}
+                {getTranslatedText(link.labelKey, link.labelKey.replace('label_','').replace('_', ' '))}
               </Link>
-            ))}
+              );
+            })}
           </nav>
         </SheetContent>
       </Sheet>
@@ -204,3 +217,5 @@ export function AppHeader() {
     </header>
   );
 }
+
+    

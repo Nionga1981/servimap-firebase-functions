@@ -318,6 +318,8 @@ export const mockIdiomas: IdiomaDocumento[] = [
       label_categories: 'Categorías',
       label_all_categories: 'Todas las Categorías',
       label_offer_services: 'Ofrecer Servicios',
+      label_communities: 'Comunidades',
+      label_chat: 'Chat',
       error_geolocation: 'Error de Geolocalización. Usando ubicación predeterminada.',
       profile: 'Perfil',
       settings: 'Configuración',
@@ -336,6 +338,8 @@ export const mockIdiomas: IdiomaDocumento[] = [
       label_categories: 'Categories',
       label_all_categories: 'All Categories',
       label_offer_services: 'Offer Services',
+      label_communities: 'Communities',
+      label_chat: 'Chat',
       error_geolocation: 'Geolocation Error. Using default location.',
       profile: 'Profile',
       settings: 'Settings',
@@ -384,3 +388,5 @@ export const mockZonasPreferentes: ZonaPreferente[] = [
     descripcion: 'Zona con ajuste de tarifa debido a distancia o demanda.'
   }
 ];
+
+    
