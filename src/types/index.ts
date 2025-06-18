@@ -232,6 +232,36 @@ export interface HourlyServiceRequest extends BaseServiceRequest {
 
 export type ServiceRequest = FixedServiceRequest | HourlyServiceRequest;
 
+
+// Definición para la nueva colección 'citas'
+export type CitaEstado =
+  | 'pendiente_confirmacion_prestador' // Cita solicitada, pendiente de que el prestador confirme
+  | 'confirmada_prestador'             // Prestador confirmó, lista para proceder (pago podría ser el siguiente paso)
+  | 'rechazada_prestador'              // Prestador no puede tomar la cita
+  | 'cancelada_usuario'                // Usuario canceló la cita
+  | 'pagada'                           // Si hay un pago asociado y se completó
+  | 'completada'                       // Cita finalizada y posiblemente calificada
+  | 'cancelada_prestador'              // Prestador canceló después de confirmar (raro, pero posible)
+  ;
+
+export interface Cita {
+  id?: string; // Firestore document ID
+  cliente_uid: string; // UID del usuario que agenda
+  prestador_uid: string; // UID del prestador al que se solicita
+  servicio_id: string; // ID del servicio específico solicitado (puede ser un identificador de un servicio listado por el proveedor)
+  fecha_cita: number; // Timestamp para la fecha y hora de la cita
+  ubicacion: string; // Dirección literal ingresada por el usuario
+  mensaje?: string; // Campo opcional con observaciones/notas del usuario
+  estado: CitaEstado; // Inicia como 'pendiente_confirmacion_prestador'
+  timestamp_creacion: number; // Timestamp de cuándo se generó la solicitud de cita
+  timestamp_confirmacion_prestador?: number | null; // Timestamp de confirmación del prestador, null inicialmente
+  // Campos adicionales que podrían ser útiles a futuro para el flujo de 'citas':
+  // precio_acordado_cita?: number; // Si el precio se define específicamente para esta cita
+  // notas_prestador?: string; // Notas del prestador al confirmar o rechazar
+  // paymentIntentId_cita?: string; // Si la cita tiene un proceso de pago separado
+}
+
+
 export interface Membresia {
   id: string;
   rol: 'usuario' | 'prestador';
