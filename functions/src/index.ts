@@ -2380,16 +2380,35 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
       return null;
     }
 
-    const usuarioId = afterData.usuarioId;
+    const usuarioId = afterData.usuarioId; // This is the cliente_uid
     const prestadorId = afterData.prestadorId;
-    const nombrePrestador = (await db.collection("prestadores").doc(prestadorId).get()).data()?.nombre || "El prestador";
+    let prestadorNombre = "El prestador";
+    try {
+      const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
+      if (prestadorDoc.exists) {
+        prestadorNombre = (prestadorDoc.data() as ProviderData)?.nombre || "El prestador";
+      }
+    } catch (e) {
+      functions.logger.error(`[onCitaActualizada ${citaId}] Error al obtener nombre del prestador ${prestadorId}:`, e);
+    }
+
     const detallesCita = afterData.detallesServicio || "tu cita";
-    const fechaCitaFormateada = afterData.fechaHoraSolicitada.toDate().toLocaleDateString("es-MX", {weekday: "long", year: "numeric", month: "long", day: "numeric"});
-    const horaCitaFormateada = afterData.fechaHoraSolicitada.toDate().toLocaleTimeString("es-MX", {hour: "2-digit", minute: "2-digit"});
+    let fechaCitaFormateada = "fecha no disponible";
+    let horaCitaFormateada = "hora no disponible";
+
+    if (afterData.fechaHoraSolicitada) {
+      try {
+        const fechaHora = afterData.fechaHoraSolicitada.toDate();
+        fechaCitaFormateada = fechaHora.toLocaleDateString("es-MX", {weekday: "long", year: "numeric", month: "long", day: "numeric"});
+        horaCitaFormateada = fechaHora.toLocaleTimeString("es-MX", {hour: "2-digit", minute: "2-digit"});
+      } catch (e) {
+        functions.logger.error(`[onCitaActualizada ${citaId}] Error al formatear fechaHoraSolicitada:`, e);
+      }
+    }
 
 
     if (afterData.estado === "confirmada_prestador" && beforeData.estado !== "confirmada_prestador") {
-      functions.logger.info(`[onCitaActualizada ${citaId}] Cita confirmada por prestador. Iniciando simulación de pago y notificación.`);
+      functions.logger.info(`[onCitaActualizada ${citaId}] Cita confirmada por prestador. Notificando al cliente.`);
 
       await logActivity(
         "sistema",
@@ -2400,11 +2419,12 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
         {usuarioId, prestadorId, monto: afterData.montoTotalEstimado || afterData.precioServicio || 0}
       );
 
+      const montoCita = (afterData.montoTotalEstimado || afterData.precioServicio || 0).toFixed(2);
       await sendNotification(
         usuarioId,
         "usuario",
         "¡Tu Cita ha sido Confirmada!",
-        `El prestador ${nombrePrestador} ha confirmado tu cita para "${detallesCita}" el ${fechaCitaFormateada} a las ${horaCitaFormateada}. Se procederá con el cobro de $${(afterData.montoTotalEstimado || afterData.precioServicio || 0).toFixed(2)}.`,
+        `El prestador ${prestadorNombre} ha confirmado tu cita para "${detallesCita}" el ${fechaCitaFormateada} a las ${horaCitaFormateada}. Se procederá con el cobro de $${montoCita}.`,
         {citaId, tipo: "CITA_CONFIRMADA"}
       );
     } else if (afterData.estado === "rechazada_prestador" && beforeData.estado !== "rechazada_prestador") {
@@ -2413,11 +2433,10 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
         usuarioId,
         "usuario",
         "Cita Rechazada",
-        `Lamentablemente, el prestador ${nombrePrestador} ha tenido que rechazar tu cita para "${detallesCita}" el ${fechaCitaFormateada} a las ${horaCitaFormateada}.`,
+        `Tu solicitud con ${prestadorNombre} para "${detallesCita}" el ${fechaCitaFormateada} fue rechazada. Puedes buscar otro servicio.`,
         {citaId, tipo: "CITA_RECHAZADA"}
       );
     }
 
     return null;
   });
-
