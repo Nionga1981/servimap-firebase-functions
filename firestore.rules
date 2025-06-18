@@ -1,19 +1,170 @@
+
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // This rule allows anyone with your Firestore database reference to view, edit,
-    // and delete all data in your Firestore database. It is useful for getting
-    // started, but it is configured to expire after 30 days because it
-    // leaves your app open to attackers. At that time, all client
-    // requests to your Firestore database will be denied.
-    //
-    // Make sure to write security rules for your app before that time, or else
-    // all client requests to your Firestore database will be denied until you Update
-    // your rules
-    match /{document=**} {
-      allow read, write: if request.time < timestamp.date(2025, 6, 25);
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
     }
+
+    function isCliente(docData) {
+      return isAuthenticated() && request.auth.uid == docData.clienteUid;
+    }
+
+    function isPrestador(docData) {
+      return isAuthenticated() && request.auth.uid == docData.prestadorUid;
+    }
+
+    // Helper function to check if only allowed keys were changed during an update.
+    // dataAfter is request.resource.data, dataBefore is resource.data
+    function changedKeysOnly(dataAfter, dataBefore, allowedToChange) {
+      let changedKeys = dataAfter.diff(dataBefore).affectedKeys();
+      return changedKeys.hasOnly(allowedToChange);
+    }
+
+    // Rules for the 'citas' collection
+    // Assumed Firestore document fields for a Cita:
+    // - clienteUid (string)
+    // - prestadorUid (string)
+    // - servicioId (string)
+    // - fechaHoraCita (timestamp) - Combined date and time of the appointment
+    // - ubicacion (string)
+    // - mensaje (string, optional)
+    // - estado (string: "pendiente", "confirmada", "rechazada", "cancelada_usuario", etc.)
+    // - timestampCreacion (timestamp)
+    // - timestampConfirmacion (timestamp, nullable) - When provider confirms
+    // - fechaRechazo (timestamp, nullable) - When provider rejects
+    // - paymentStatus (string, nullable) - e.g., "no_aplica", "pendiente_cobro"
+    // - ordenCobroId (string, nullable)
+    // - updatedAt (timestamp, nullable) - For tracking last update
+
+    match /citas/{citaId} {
+      // READ: Cliente or Prestador can read their own cita.
+      allow read: if isAuthenticated() &&
+                     (request.auth.uid == resource.data.clienteUid || request.auth.uid == resource.data.prestadorUid);
+
+      // CREATE: Only the authenticated user who is the clienteUid can create a cita.
+      // The initial state must be "pendiente" and confirm/reject timestamps must be null.
+      allow create: if isCliente(request.resource.data) &&
+                       request.resource.data.estado == "pendiente" &&
+                       request.resource.data.timestampCreacion == request.time &&
+                       request.resource.data.updatedAt == request.time && // Good practice to set on create
+                       request.resource.data.timestampConfirmacion == null &&
+                       request.resource.data.fechaRechazo == null &&
+                       // Initial payment state, assuming Cloud Functions will handle payment processing logic
+                       request.resource.data.paymentStatus == "no_aplica" &&
+                       request.resource.data.ordenCobroId == null &&
+                       // Required fields that the client must provide
+                       request.resource.data.prestadorUid is string &&
+                       request.resource.data.servicioId is string && // Or other identifier for the service
+                       request.resource.data.fechaHoraCita is timestamp &&
+                       request.resource.data.ubicacion is string &&
+                       // Optional 'mensaje' field
+                       (!('mensaje' in request.resource.data) || request.resource.data.mensaje is string) &&
+                       // Ensure no other unexpected fields are set by the client on create
+                       request.resource.data.keys().hasOnly([
+                         'clienteUid', 'prestadorUid', 'servicioId', 'fechaHoraCita', 'ubicacion',
+                         'mensaje', 'estado', 'timestampCreacion', 'updatedAt',
+                         'timestampConfirmacion', 'fechaRechazo', 'paymentStatus', 'ordenCobroId'
+                         // Other fields like serviceType, precioServicio from types are not included
+                         // here as per the simplified field list for rules.
+                         // These would be set by the 'agendarCitaConPrestador' Cloud Function.
+                       ]);
+
+      // UPDATE:
+      // Provider can confirm or reject a 'pendiente' cita.
+      // Client can cancel their own 'pendiente' or 'confirmada' cita (example, not fully implemented here).
+      allow update: if isAuthenticated() &&
+                       // Provider actions (confirm/reject)
+                       (
+                         isPrestador(resource.data) &&
+                         resource.data.estado == "pendiente" && // Action only on "pendiente" citas
+                         request.resource.data.updatedAt == request.time && // Update operations must set updatedAt
+                         // Ensure core immutable fields are not changed by the provider
+                         request.resource.data.clienteUid == resource.data.clienteUid &&
+                         request.resource.data.prestadorUid == resource.data.prestadorUid &&
+                         request.resource.data.servicioId == resource.data.servicioId &&
+                         request.resource.data.fechaHoraCita == resource.data.fechaHoraCita &&
+                         request.resource.data.ubicacion == resource.data.ubicacion &&
+                         request.resource.data.mensaje == resource.data.mensaje && // Provider doesn't change client's initial message here
+                         request.resource.data.timestampCreacion == resource.data.timestampCreacion &&
+                         (
+                           // Scenario 1: Provider confirms the cita
+                           (
+                             request.resource.data.estado == "confirmada" &&
+                             request.resource.data.timestampConfirmacion == request.time &&
+                             request.resource.data.paymentStatus == "pendiente_cobro" && // To be set by the CF
+                             request.resource.data.ordenCobroId is string &&           // To be set by the CF
+                             // Ensure only these specific fields are being modified from their original values by this operation
+                             changedKeysOnly(request.resource.data, resource.data,
+                               ['estado', 'timestampConfirmacion', 'paymentStatus', 'ordenCobroId', 'updatedAt']
+                             )
+                           ) ||
+                           // Scenario 2: Provider rejects the cita
+                           (
+                             request.resource.data.estado == "rechazada" &&
+                             request.resource.data.fechaRechazo == request.time && // To be set by the CF
+                             request.resource.data.timestampConfirmacion == resource.data.timestampConfirmacion && // Should remain null
+                             request.resource.data.paymentStatus == resource.data.paymentStatus && // Should remain "no_aplica"
+                             request.resource.data.ordenCobroId == resource.data.ordenCobroId &&     // Should remain null
+                             changedKeysOnly(request.resource.data, resource.data,
+                               ['estado', 'fechaRechazo', 'updatedAt']
+                             )
+                           )
+                         )
+                       );
+                       // Example for client cancelling (not fully detailed as per primary request but shows structure):
+                       // ||
+                       // (
+                       //   isCliente(resource.data) &&
+                       //   (resource.data.estado == "pendiente" || resource.data.estado == "confirmada") &&
+                       //   request.resource.data.estado == "cancelada_usuario" &&
+                       //   request.resource.data.updatedAt == request.time &&
+                       //   // ... other checks for client cancellation ...
+                       // )
+
+
+      // DELETE: No client-side deletion allowed.
+      allow delete: if false;
+    }
+
+    // --- Default Deny & Placeholders for other collections ---
+    // It's good practice to have default deny for paths not explicitly matched.
+    // Add rules for other collections (usuarios, prestadores, comunidades, etc.) here.
+    // Example:
+    // match /usuarios/{userId} {
+    //   allow read: if isAuthenticated();
+    //   allow write: if isAuthenticated() && request.auth.uid == userId;
+    // }
+    // match /prestadores/{providerId} {
+    //  allow read: if true; // Public profiles
+    //  allow write: if isAuthenticated() && request.auth.uid == providerId;
+    // }
+    // match /comunidades/{communityId} {
+    //  allow read: if true;
+    //  // Example: Only ambassador can update basic community details
+    //  allow update: if isAuthenticated() && resource.data.embajador_uid == request.auth.uid &&
+    //                   request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nombre', 'descripcion', 'tipo', 'ubicacion', 'bannerComunitario', 'tags', 'reglasComunidad', 'updatedAt', 'lastActivity']);
+    //  // Create/delete rules would be more complex, likely handled by Cloud Functions or specific admin roles.
+    // }
+    // match /comunidades/{communityId}/avisos/{avisoId} {
+    //  allow read: if true;
+    //  // Only ambassador can write to their community's notices
+    //  allow write: if isAuthenticated() && get(/databases/$(database)/documents/comunidades/$(communityId)).data.embajador_uid == request.auth.uid;
+    // }
+    // match /comunidades/{communityId}/recomendaciones/{recomendacionId} {
+    //  allow read: if true; // Or if member of community
+    //  allow create: if isAuthenticated(); // And member of community (would require checking parent doc)
+    //  // Update/delete rules would be more specific (e.g., author can edit/delete their post/response)
+    // }
+
+    // Fallback rule to deny access to any path not explicitly matched above
+     match /{document=**} {
+       allow read, write: if false;
+     }
   }
 }
+
+    
