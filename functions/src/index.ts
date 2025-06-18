@@ -22,6 +22,12 @@ const MAX_ACTIVE_COMMUNITY_NOTICES = 3;
 const DOS_HORAS_EN_MS = 2 * 60 * 60 * 1000;
 const TREINTA_MINUTOS_EN_MS = 30 * 60 * 1000;
 
+// --- CONSTANTS FOR CANCELLATION PENALTIES (CITAS) ---
+const PENALIZACION_CLIENTE_CITA_MAS_2H_PCT = 0.10; // 10% of service total, all to platform
+const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_TOTAL = 0.25; // 25% of service total
+const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PLATAFORMA = 0.10; // 10% of service total to platform
+const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PRESTADOR = 0.15; // 15% of service total to provider
+
 
 // --- INTERFACES (Locally defined for Cloud Functions context) ---
 export type ServiceRequestStatus =
@@ -245,6 +251,7 @@ export type ActivityLogAction =
   | "CITA_CONFIRMADA_PRESTADOR"
   | "CITA_RECHAZADA_PRESTADOR"
   | "CITA_CANCELADA_USUARIO"
+  | "CITA_CANCELADA_USUARIO_PENALIZACION"
   | "CITA_PAGO_INICIADO"
   | "CITA_PAGADA"
   | "CITA_COMPLETADA"
@@ -499,6 +506,14 @@ export interface CitaDataFirestore {
   fechaCancelacion?: admin.firestore.Timestamp | null;
   canceladaPor?: string;
   rolCancelador?: "usuario" | "prestador";
+  motivoCancelacion?: string;
+  detallesCancelacion?: {
+    penalizacionTotalCalculada: number;
+    montoParaPlataforma: number;
+    montoParaPrestador: number;
+    montoReembolsoProgramadoUsuario: number;
+    reglaAplicada: '>2h' | '<=2h';
+  };
   serviceType?: "fixed" | "hourly";
   precioServicio?: number;
   tarifaPorHora?: number;
@@ -2374,6 +2389,131 @@ export const confirmarCitaPorPrestador = functions.https.onCall(async (data, con
   }
 });
 
+export const cancelarCitaConfirmadaPorCliente = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para cancelar una cita.");
+  }
+  const clienteUid = context.auth.uid;
+  const {citaId, motivoCancelacion} = data as {citaId: string, motivoCancelacion?: string};
+
+  if (!citaId || typeof citaId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'citaId'.");
+  }
+
+  const citaRef = db.collection("citas").doc(citaId);
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const citaDoc = await transaction.get(citaRef);
+      if (!citaDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Cita con ID ${citaId} no encontrada.`);
+      }
+      const citaData = citaDoc.data() as CitaDataFirestore;
+
+      if (citaData.usuarioId !== clienteUid) {
+        throw new functions.https.HttpsError("permission-denied", "No tienes permiso para cancelar esta cita.");
+      }
+
+      const validPreviousStates: CitaEstadoFirestore[] = ["confirmada_prestador", "pagada"];
+      if (!validPreviousStates.includes(citaData.estado)) {
+        throw new functions.https.HttpsError("failed-precondition", `Solo se pueden cancelar citas con estado '${validPreviousStates.join("' o '")}'. Estado actual: ${citaData.estado}.`);
+      }
+      if (citaData.estado === "servicio_iniciado" || citaData.estado === "completada" || citaData.estado === "completado_por_prestador" || citaData.estado === "completado_por_usuario") {
+        throw new functions.https.HttpsError("failed-precondition", "No se puede cancelar una cita que ya ha iniciado o sido completada.");
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      const fechaHoraCita = citaData.fechaHoraSolicitada.toDate();
+      const horasRestantes = (fechaHoraCita.getTime() - now.toDate().getTime()) / (1000 * 60 * 60);
+
+      const montoTotalServicio = citaData.montoTotalEstimado || citaData.precioServicio || 0;
+      let penalizacionTotalCalculada = 0;
+      let montoParaPlataforma = 0;
+      let montoParaPrestador = 0;
+      let reglaAplicada: '>2h' | '<=2h';
+
+      if (horasRestantes > 2) {
+        reglaAplicada = ">2h";
+        penalizacionTotalCalculada = montoTotalServicio * PENALIZACION_CLIENTE_CITA_MAS_2H_PCT;
+        montoParaPlataforma = penalizacionTotalCalculada;
+        montoParaPrestador = 0;
+      } else {
+        reglaAplicada = "<=2h";
+        penalizacionTotalCalculada = montoTotalServicio * PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_TOTAL;
+        montoParaPlataforma = montoTotalServicio * PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PLATAFORMA;
+        montoParaPrestador = montoTotalServicio * PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PRESTADOR;
+      }
+      const montoReembolsoProgramadoUsuario = Math.max(0, montoTotalServicio - penalizacionTotalCalculada);
+
+      const updates: Partial<CitaDataFirestore> & {updatedAt: admin.firestore.Timestamp} = {
+        estado: "cancelada_usuario",
+        fechaCancelacion: now,
+        canceladaPor: clienteUid,
+        rolCancelador: "usuario",
+        motivoCancelacion: motivoCancelacion || "Cancelación por el usuario.",
+        detallesCancelacion: {
+          penalizacionTotalCalculada,
+          montoParaPlataforma,
+          montoParaPrestador,
+          montoReembolsoProgramadoUsuario,
+          reglaAplicada,
+        },
+        updatedAt: now,
+      };
+
+      // Lógica simulada de ajuste de PaymentStatus
+      if (citaData.paymentStatus === "procesado_exitosamente" || citaData.paymentStatus === "retenido_para_liberacion") {
+        if (montoReembolsoProgramadoUsuario === montoTotalServicio) {
+          updates.paymentStatus = "reembolsado_total"; // No penalty, full refund
+        } else if (montoReembolsoProgramadoUsuario > 0) {
+          updates.paymentStatus = "reembolsado_parcial";
+        } else { // No refund if penalty >= total
+          updates.paymentStatus = "liberado_al_proveedor"; // Assume penalty covers what would be released or more
+        }
+      } else if (citaData.paymentStatus === "pendiente_cobro") {
+        // If payment was pending, it might just not be processed, or a penalty is charged.
+        // For simplicity, we'll assume no charge attempt is made now, or it's adjusted if a penalty applies.
+        // This part needs solid payment gateway integration.
+        updates.paymentStatus = "no_aplica"; // Or a specific "cancelled_before_payment"
+      }
+
+      transaction.update(citaRef, updates);
+
+      await logActivity(
+        clienteUid,
+        "usuario",
+        "CITA_CANCELADA_USUARIO_PENALIZACION",
+        `Cliente canceló cita ${citaId}. Regla: ${reglaAplicada}. Penalización: $${penalizacionTotalCalculada.toFixed(2)}. Reembolso prog.: $${montoReembolsoProgramadoUsuario.toFixed(2)}.`,
+        {tipo: "cita", id: citaId},
+        updates.detallesCancelacion
+      );
+
+      // Notificar al proveedor
+      const prestadorDoc = await db.collection("prestadores").doc(citaData.prestadorId).get();
+      const nombrePrestador = prestadorDoc.exists ? (prestadorDoc.data() as ProviderData)?.nombre || "El prestador" : "El prestador";
+
+      await sendNotification(
+        citaData.prestadorId,
+        "prestador",
+        "Cita Cancelada por Cliente",
+        `La cita para "${citaData.detallesServicio}" con ${nombrePrestador} el ${fechaHoraCita.toLocaleDateString()} ha sido cancelada por el cliente. Compensación (si aplica): $${montoParaPrestador.toFixed(2)}.`,
+        {citaId: citaId, motivo: motivoCancelacion || "Sin motivo especificado"}
+      );
+
+      return {
+        success: true,
+        message: `Cita cancelada. Penalización aplicada: $${penalizacionTotalCalculada.toFixed(2)}. Monto a reembolsar (estimado): $${montoReembolsoProgramadoUsuario.toFixed(2)}.`,
+        detallesCancelacion: updates.detallesCancelacion,
+      };
+    });
+  } catch (error: any) {
+    functions.logger.error(`Error al cancelar cita ${citaId} por cliente ${clienteUid}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar la cancelación de la cita.", error.message);
+  }
+});
+
+
 export const onCitaActualizadaNotificarYProcesar = functions.firestore
   .document("citas/{citaId}")
   .onUpdate(async (change, context) => {
@@ -2463,10 +2603,6 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
         await logActivity("sistema", "sistema", "CITA_PROVEEDOR_NOTIFICADO_ONLINE", `Proveedor ${prestadorId} notificado para estar en línea para cita ${citaId}.`, {tipo: "cita", id: citaId});
       }
       
-      // Actualizar el documento de la cita con los nuevos campos.
-      // Es importante que esta actualización ocurra después de que la función `confirmarCitaPorPrestador`
-      // haya completado su propia transacción. El trigger onUpdate maneja el documento *después* del cambio.
-      // Esta escritura adicional es segura porque onUpdate se dispara sobre el estado *después* de la actualización.
       await change.after.ref.update(updatePayload);
       functions.logger.info(`[onCitaActualizada ${citaId}] Campos de seguimiento actualizados en la cita.`);
 
@@ -2477,6 +2613,10 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
         `Tu solicitud con ${prestadorNombre} para "${detallesCita}" el ${fechaCitaFormateada} fue rechazada. Puedes buscar otro servicio.`,
         {citaId, tipo: "CITA_RECHAZADA"}
       );
+    } else if (afterData.estado === "cancelada_usuario" && beforeData.estado !== "cancelada_usuario") {
+      functions.logger.info(`[onCitaActualizada ${citaId}] Cita cancelada por usuario. Notificación al proveedor ya manejada en la función callable 'cancelarCitaConfirmadaPorCliente'.`);
+      // La notificación al proveedor sobre la cancelación del usuario ya se hace en la función callable `cancelarCitaConfirmadaPorCliente`.
+      // Aquí solo se loguearía el cambio de estado si es necesario por el trigger.
     }
     return null;
   });

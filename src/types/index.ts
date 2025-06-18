@@ -1,3 +1,4 @@
+
 // src/types/index.ts
 import type { LucideIcon } from 'lucide-react';
 
@@ -249,10 +250,11 @@ export type CitaEstado =
 
 export interface Cita {
   id?: string;
-  usuarioId: string;
-  prestadorId: string;
+  usuarioId: string; // Anteriormente cliente_uid
+  prestadorId: string; // Anteriormente prestador_uid
+  // servicio_id: string; // Si es para un servicio específico del catálogo del proveedor
   fechaHoraSolicitada: number; // Timestamp
-  detallesServicio: string;
+  detallesServicio: string; // Descripción del servicio a realizar
   ubicacion?: ProviderLocation | { customAddress: string };
   notasAdicionales?: string;
   estado: CitaEstado;
@@ -269,12 +271,20 @@ export interface Cita {
   fechaCancelacion?: number | null; // Timestamp
   canceladaPor?: string; // UID
   rolCancelador?: 'usuario' | 'prestador';
+  motivoCancelacion?: string;
+  detallesCancelacion?: {
+    penalizacionTotalCalculada: number;
+    montoParaPlataforma: number;
+    montoParaPrestador: number;
+    montoReembolsoProgramadoUsuario: number;
+    reglaAplicada: '>2h' | '<=2h';
+  };
 
-  serviceType?: 'fixed' | 'hourly';
-  precioServicio?: number;
-  tarifaPorHora?: number;
-  duracionHoras?: number;
-  montoTotalEstimado?: number;
+  serviceType?: 'fixed' | 'hourly'; // Tipo de servicio (ej. precio fijo, por horas)
+  precioServicio?: number; // Para 'fixed'
+  tarifaPorHora?: number; // Para 'hourly'
+  duracionHoras?: number; // Para 'hourly'
+  montoTotalEstimado?: number; // Calculado: precioServicio o tarifaPorHora * duracionHoras
 
   permiteSeguimientoDesdeTimestamp?: number; // Timestamp: fechaHoraSolicitada - 2 horas
   notificadoParaEstarEnLinea?: boolean; // Para evitar notificaciones repetidas al proveedor
@@ -384,8 +394,8 @@ export type ActivityLogAction =
   | 'SERVICIO_REACTIVADO_SOLICITUD'
   | 'SERVICIO_REACTIVADO_OFERTA'
   | 'SERVICIO_CONFIRMADO_PAGADO'
-  | 'SERVICIO_CANCELADO_CON_PENALIZACION'
-  | 'SERVICIO_CANCELADO_SIN_PENALIZACION'
+  | 'SERVICIO_CANCELADO_CON_PENALIZACION' // Para ServiceRequest
+  | 'SERVICIO_CANCELADO_SIN_PENALIZACION' // Para ServiceRequest
   | 'COMUNIDAD_SOLICITUD_UNIRSE'
   | 'COMUNIDAD_USUARIO_UNIDO'
   | 'COMUNIDAD_SOLICITUD_APROBADA'
@@ -400,6 +410,7 @@ export type ActivityLogAction =
   | 'CITA_CONFIRMADA_PRESTADOR'
   | 'CITA_RECHAZADA_PRESTADOR'
   | 'CITA_CANCELADA_USUARIO'
+  | 'CITA_CANCELADA_USUARIO_PENALIZACION' // Nuevo para Cita
   | 'CITA_PAGO_INICIADO'
   | 'CITA_PAGADA'
   | 'CITA_COMPLETADA'
