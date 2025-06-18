@@ -1,6 +1,5 @@
-
 // src/lib/mockData.ts
-import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad, IdiomaDocumento, ZonaPreferente } from '@/types';
+import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad, IdiomaDocumento, ZonaPreferente, Comunidad, Service } from '@/types';
 import { SERVICE_CATEGORIES as LUCIDE_SERVICE_CATEGORIES } from './constants';
 
 const getApproximateLocation = (exactLoc: ProviderLocation, factor = 0.01): ProviderLocation => {
@@ -9,7 +8,7 @@ const getApproximateLocation = (exactLoc: ProviderLocation, factor = 0.01): Prov
   return { lat: latApprox, lng: lngApprox };
 };
 
-export const USER_FIXED_LOCATION: ProviderLocation = { lat: 24.8093, lng: -107.4255 };
+export const USER_FIXED_LOCATION: ProviderLocation = { lat: 24.8093, lng: -107.4255 }; // Culiacán Centro approx.
 
 const plumber1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.002, lng: USER_FIXED_LOCATION.lng - 0.002 };
 const electrician1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat - 0.003, lng: USER_FIXED_LOCATION.lng + 0.001 };
@@ -17,6 +16,51 @@ const nanny1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0
 const gardener1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat - 0.0025, lng: USER_FIXED_LOCATION.lng - 0.003 };
 const doctor1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.0005, lng: USER_FIXED_LOCATION.lng - 0.004 };
 const cleaner1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.01, lng: USER_FIXED_LOCATION.lng + 0.01 };
+
+export const mockComunidades: Comunidad[] = [
+  {
+    id: 'culiacan_centro_com',
+    nombre: 'Vecinos Centro Culiacán',
+    descripcion: 'Comunidad para los residentes y negocios del centro de Culiacán. Comparte servicios y recomendaciones locales.',
+    tipo: 'publica',
+    ubicacion: { lat: 24.8093, lng: -107.393 }, // Centro de Culiacán
+    bannerComunitario: {
+      titulo: '¡Gran Venta de Garage Centro!',
+      imagenUrl: 'https://placehold.co/600x150.png?text=Venta+Garage',
+      link: '/events/venta-garage-centro',
+      activo: true,
+      dataAiHint: "garage sale community event"
+    },
+    embajador_uid: 'admin_user_id_placeholder', // Placeholder
+    miembros: ['currentUserDemoId', 'standardUserDemoId'],
+    solicitudesPendientes: [],
+    fechaCreacion: Date.now() - (30 * 24 * 60 * 60 * 1000), // Hace 30 días
+    tags: ['centro', 'culiacan', 'servicios locales'],
+    reglasComunidad: '1. Respeto mutuo. 2. Solo recomendaciones locales. 3. No spam.',
+    lastActivity: Date.now() - (1 * 24 * 60 * 60 * 1000), // Actividad hace 1 día
+  },
+  {
+    id: 'plomeros_expertos_cul',
+    nombre: 'Plomeros Expertos Culiacán (Privada)',
+    descripcion: 'Grupo privado para plomeros profesionales y clientes verificados que buscan servicios de alta calidad en plomería.',
+    tipo: 'privada',
+    ubicacion: { lat: 24.8000, lng: -107.4000 },
+    bannerComunitario: {
+      titulo: 'Curso Avanzado de Soldadura de Tuberías',
+      imagenUrl: 'https://placehold.co/600x150/3F51B5/FFFFFF.png?text=Curso+Soldadura',
+      link: '/cursos/soldadura-plomeria',
+      activo: true,
+      dataAiHint: "plumbing course"
+    },
+    embajador_uid: 'plumber1', // Mario es el embajador
+    miembros: ['plumber1'],
+    solicitudesPendientes: ['nanny1'], // Nanny quiere unirse a esta comunidad de plomeros? Okay!
+    fechaCreacion: Date.now() - (15 * 24 * 60 * 60 * 1000),
+    tags: ['plomeria', 'profesionales', 'culiacan'],
+    lastActivity: Date.now() - (2 * 24 * 60 * 60 * 1000),
+  }
+];
+
 
 export const mockProviders: Provider[] = [
   {
@@ -30,8 +74,9 @@ export const mockProviders: Provider[] = [
     isAvailable: true,
     estadoOnline: true,
     services: [
-        {id: 's_p1_1', title: 'Reparaciones Urgentes 24/7', description: 'Solución rápida a fugas y atascos, disponible a cualquier hora.', price: 90, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200/3F51B5/FFFFFF.png?text=Fuga', dataAiHint: 'water pipes'},
-        {id: 's_p1_2', title: 'Instalación de Calentadores', description: 'Instalamos y reparamos calentadores de agua de todas las marcas.', price: 150, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200/3F51B5/FFFFFF.png?text=Boiler', dataAiHint: 'water heater'},
+        {id: 's_p1_1', title: 'Reparaciones Urgentes 24/7', description: 'Solución rápida a fugas y atascos, disponible a cualquier hora.', price: 90, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200/3F51B5/FFFFFF.png?text=Fuga', dataAiHint: 'water pipes', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 5},
+        {id: 's_p1_2', title: 'Instalación de Calentadores', description: 'Instalamos y reparamos calentadores de agua de todas las marcas.', price: 150, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200/3F51B5/FFFFFF.png?text=Boiler', dataAiHint: 'water heater', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 10},
+        {id: 's_p1_3', title: 'Desazolve Profesional de Drenajes', description: 'Servicio especializado para todo tipo de drenajes.', price: 120, category: 'plumbing', providerId: 'plumber1', comunidad_id: 'plomeros_expertos_cul', activo: true, fechaCreacion: Date.now() - 86400000 * 2}
     ],
     ubicacionExacta: plumber1ExactLocation,
     ubicacionAproximada: getApproximateLocation(plumber1ExactLocation),
@@ -52,7 +97,8 @@ export const mockProviders: Provider[] = [
     isAvailable: true,
     estadoOnline: true,
     services: [
-        {id: 's_e1_1', title: 'Cortocircuitos y Fallas Eléctricas', description: 'Diagnóstico y reparación de fallas eléctricas de todo tipo.', price: 80, category: 'electrical', providerId: 'electrician1', imageUrl: 'https://placehold.co/300x200/008080/FFFFFF.png?text=Falla', dataAiHint: 'electrical panel'},
+        {id: 's_e1_1', title: 'Cortocircuitos y Fallas Eléctricas', description: 'Diagnóstico y reparación de fallas eléctricas de todo tipo.', price: 80, category: 'electrical', providerId: 'electrician1', imageUrl: 'https://placehold.co/300x200/008080/FFFFFF.png?text=Falla', dataAiHint: 'electrical panel', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 7},
+        {id: 's_e1_2', title: 'Instalación de Lámparas y Contactos', description: 'Moderniza tu hogar con nuevas instalaciones eléctricas.', price: 60, category: 'electrical', providerId: 'electrician1', activo: true, fechaCreacion: Date.now() - 86400000 * 3} // Servicio global
     ],
     ubicacionExacta: electrician1ExactLocation,
     ubicacionAproximada: getApproximateLocation(electrician1ExactLocation),
@@ -73,7 +119,10 @@ export const mockProviders: Provider[] = [
     ratingSum: 343,
     isAvailable: true,
     estadoOnline: true,
-    services: [],
+    services: [
+      // No services with fixed price for now, only hourly
+      {id: 's_n1_hourly', title: 'Cuidado Infantil por Hora', description: 'Cuidado profesional y lúdico para tus hijos.', price: 20, category: 'child_care', providerId: 'nanny1', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 1 }
+    ],
     ubicacionExacta: nanny1ExactLocation,
     ubicacionAproximada: getApproximateLocation(nanny1ExactLocation),
     currentLocation: nanny1ExactLocation,
@@ -94,7 +143,8 @@ export const mockProviders: Provider[] = [
     isAvailable: true,
     estadoOnline: true,
     services: [
-        {id: 's_g1_1', title: 'Diseño y Mantenimiento de Jardines', description: 'Transformamos tu espacio exterior en un oasis verde.', price: 100, category: 'gardening', providerId: 'gardener1', imageUrl: 'https://placehold.co/300x200/4CAF50/FFFFFF.png?text=Jardin', dataAiHint: 'gardening tools'},
+        {id: 's_g1_1', title: 'Diseño y Mantenimiento de Jardines', description: 'Transformamos tu espacio exterior en un oasis verde.', price: 100, category: 'gardening', providerId: 'gardener1', imageUrl: 'https://placehold.co/300x200/4CAF50/FFFFFF.png?text=Jardin', dataAiHint: 'gardening tools', activo: true, fechaCreacion: Date.now() - 86400000 * 12}, // Servicio global
+        {id: 's_g1_2', title: 'Poda Estética de Setos (Comunidad)', description: 'Poda especializada para setos y arbustos en la comunidad del centro.', price: 65, category: 'gardening', providerId: 'gardener1', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 4}
     ],
     ubicacionExacta: gardener1ExactLocation,
     ubicacionAproximada: getApproximateLocation(gardener1ExactLocation),
@@ -112,14 +162,15 @@ export const mockProviders: Provider[] = [
     rating: 4.8,
     ratingCount: 150,
     ratingSum: 720,
-    isAvailable: false,
+    isAvailable: false, // Not available now
     estadoOnline: false,
     services: [
-        {id: 's_d1_1', title: 'Consulta Médica General Integral', description: 'Atención primaria, diagnóstico y seguimiento de padecimientos comunes.', price: 70, category: 'doctors', providerId: 'doctor1', imageUrl: 'https://placehold.co/300x200/F44336/FFFFFF.png?text=Consulta', dataAiHint: 'medical consultation'},
+        {id: 's_d1_1', title: 'Consulta Médica General Integral', description: 'Atención primaria, diagnóstico y seguimiento de padecimientos comunes.', price: 70, category: 'doctors', providerId: 'doctor1', imageUrl: 'https://placehold.co/300x200/F44336/FFFFFF.png?text=Consulta', dataAiHint: 'medical consultation', activo: true, fechaCreacion: Date.now() - 86400000 * 20}, // Servicio global
+        {id: 's_d1_2', title: 'Certificados Médicos (Escolares/Laborales)', description: 'Emisión de certificados médicos válidos.', price: 30, category: 'doctors', providerId: 'doctor1', activo: false, fechaCreacion: Date.now() - 86400000 * 30} // Servicio inactivo
     ],
     ubicacionExacta: doctor1ExactLocation,
     ubicacionAproximada: getApproximateLocation(doctor1ExactLocation),
-    currentLocation: null,
+    currentLocation: null, // Not online
     specialties: ['Medicina familiar', 'Diagnóstico general', 'Chequeos de rutina'],
     allowsHourlyServices: true,
     hourlyRate: 50,
@@ -135,9 +186,9 @@ export const mockProviders: Provider[] = [
     ratingCount: 80,
     ratingSum: 360,
     isAvailable: true,
-    estadoOnline: false,
+    estadoOnline: true,
     services: [
-      {id: 's_c1_1', title: 'Limpieza Profunda de Casas', description: 'Dejamos tu hogar reluciente de arriba a abajo.', price: 120, category: 'cleaning', providerId: 'cleaner1', imageUrl: 'https://placehold.co/300x200/2196F3/FFFFFF.png?text=CasaLimpia', dataAiHint: 'cleaning supplies'},
+      {id: 's_c1_1', title: 'Limpieza Profunda de Casas', description: 'Dejamos tu hogar reluciente de arriba a abajo.', price: 120, category: 'cleaning', providerId: 'cleaner1', imageUrl: 'https://placehold.co/300x200/2196F3/FFFFFF.png?text=CasaLimpia', dataAiHint: 'cleaning supplies', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 6},
     ],
     ubicacionExacta: cleaner1ExactLocation,
     ubicacionAproximada: getApproximateLocation(cleaner1ExactLocation),
@@ -177,7 +228,7 @@ export const mockBannersPublicitarios: BannerPublicitario[] = [
   {
     id: 'bp1',
     nombre: 'Promo Verano Limpieza',
-    imagenUrl: 'https://placehold.co/400x150/2196F3/FFFFFF.png?text=Limpieza+Verano+25%25+OFF',
+    imagenUrl: 'https://placehold.co/400x150.png?text=Limpieza+Verano+25%25+OFF',
     linkDestino: '/promociones/verano-limpieza',
     orden: 1,
     activo: true,
@@ -186,7 +237,7 @@ export const mockBannersPublicitarios: BannerPublicitario[] = [
   {
     id: 'bp2',
     nombre: 'Reparaciones Eléctricas Urgentes',
-    imagenUrl: 'https://placehold.co/400x150/008080/FFFFFF.png?text=Electricista+Urgente',
+    imagenUrl: 'https://placehold.co/400x150.png?text=Electricista+Urgente',
     linkDestino: '/servicios/electricidad?urgente=true',
     orden: 2,
     activo: true,
@@ -195,7 +246,7 @@ export const mockBannersPublicitarios: BannerPublicitario[] = [
   {
     id: 'bp3',
     nombre: 'Descuento Plomería Primera Vez',
-    imagenUrl: 'https://placehold.co/400x150/3F51B5/FFFFFF.png?text=Plomeria+10%25+OFF',
+    imagenUrl: 'https://placehold.co/400x150.png?text=Plomeria+10%25+OFF',
     linkDestino: '/ofertas/plomeria-novatos',
     orden: 3,
     activo: true,
@@ -204,7 +255,7 @@ export const mockBannersPublicitarios: BannerPublicitario[] = [
   {
     id: 'bp4_inactive',
     nombre: 'Jardinería Otoño (Inactiva)',
-    imagenUrl: 'https://placehold.co/400x150/4CAF50/FFFFFF.png?text=Jardin+Otono',
+    imagenUrl: 'https://placehold.co/400x150.png?text=Jardin+Otono',
     linkDestino: '/blog/jardineria-otono',
     orden: 4,
     activo: false,
@@ -388,5 +439,3 @@ export const mockZonasPreferentes: ZonaPreferente[] = [
     descripcion: 'Zona con ajuste de tarifa debido a distancia o demanda.'
   }
 ];
-
-    

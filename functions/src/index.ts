@@ -528,90 +528,90 @@ export const onServiceStatusChangeSendNotification = functions.firestore
 
     if (newValue.status !== previousValue.status) {
       switch (newValue.status) {
-        case "agendado":
-          if (newValue.isRecurringAttempt && newValue.reactivationOfferedBy === "usuario") {
-            targetUserId = prestadorId; targetUserType = "prestador";
-            tituloNotif = "Solicitud de Reactivación de Servicio";
-            cuerpoNotif = `El usuario ${newValue.usuarioId} quiere reactivar el servicio "${serviceTitle}". Por favor, confirma la nueva fecha/hora.`;
-          } else if (!newValue.isRecurringAttempt && previousValue.status !== "pendiente_confirmacion_usuario") { // Standard new request, not a response to offer
-            targetUserId = prestadorId; targetUserType = "prestador";
-            tituloNotif = "Nueva Solicitud de Servicio";
-            cuerpoNotif = `Has recibido una nueva solicitud para "${serviceTitle}".`;
-          } else {
-            sendStdNotification = false; // Avoid double notification if reactivation already sent one
-          }
-          break;
-        case "pendiente_confirmacion_usuario":
-          if (newValue.isRecurringAttempt && newValue.reactivationOfferedBy === "prestador") {
-            targetUserId = usuarioId; targetUserType = "usuario";
-            tituloNotif = "Oferta de Reactivación de Servicio";
-            cuerpoNotif = `El prestador ${newValue.prestadorId} te ofrece reactivar el servicio "${serviceTitle}". Por favor, confirma si deseas continuar.`;
-          } else { // Could be other scenarios leading to this state, handle if needed.
-            sendStdNotification = false;
-          }
-          break;
-        case "confirmada_prestador":
+      case "agendado":
+        if (newValue.isRecurringAttempt && newValue.reactivationOfferedBy === "usuario") {
+          targetUserId = prestadorId; targetUserType = "prestador";
+          tituloNotif = "Solicitud de Reactivación de Servicio";
+          cuerpoNotif = `El usuario ${newValue.usuarioId} quiere reactivar el servicio "${serviceTitle}". Por favor, confirma la nueva fecha/hora.`;
+        } else if (!newValue.isRecurringAttempt && previousValue.status !== "pendiente_confirmacion_usuario") { // Standard new request, not a response to offer
+          targetUserId = prestadorId; targetUserType = "prestador";
+          tituloNotif = "Nueva Solicitud de Servicio";
+          cuerpoNotif = `Has recibido una nueva solicitud para "${serviceTitle}".`;
+        } else {
+          sendStdNotification = false; // Avoid double notification if reactivation already sent one
+        }
+        break;
+      case "pendiente_confirmacion_usuario":
+        if (newValue.isRecurringAttempt && newValue.reactivationOfferedBy === "prestador") {
           targetUserId = usuarioId; targetUserType = "usuario";
-          tituloNotif = "¡Cita Confirmada!"; cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido confirmada.`;
+          tituloNotif = "Oferta de Reactivación de Servicio";
+          cuerpoNotif = `El prestador ${newValue.prestadorId} te ofrece reactivar el servicio "${serviceTitle}". Por favor, confirma si deseas continuar.`;
+        } else { // Could be other scenarios leading to this state, handle if needed.
+          sendStdNotification = false;
+        }
+        break;
+      case "confirmada_prestador":
+        targetUserId = usuarioId; targetUserType = "usuario";
+        tituloNotif = "¡Cita Confirmada!"; cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido confirmada.`;
 
-          if (newValue.serviceDate && newValue.serviceTime) {
-            try {
-              const [year, month, day] = newValue.serviceDate.split("-").map(Number);
-              const [hour, minute] = newValue.serviceTime.split(":").map(Number);
-              const serviceDateTime = new Date(year, month - 1, day, hour, minute);
-              const reminderTime = new Date(serviceDateTime.getTime() - HORAS_ANTES_RECORDATORIO_SERVICIO * 60 * 60 * 1000);
+        if (newValue.serviceDate && newValue.serviceTime) {
+          try {
+            const [year, month, day] = newValue.serviceDate.split("-").map(Number);
+            const [hour, minute] = newValue.serviceTime.split(":").map(Number);
+            const serviceDateTime = new Date(year, month - 1, day, hour, minute);
+            const reminderTime = new Date(serviceDateTime.getTime() - HORAS_ANTES_RECORDATORIO_SERVICIO * 60 * 60 * 1000);
 
-              if (reminderTime.getTime() > Date.now()) {
-                const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
-                const nombrePrestador = prestadorDoc.exists ? (prestadorDoc.data() as ProviderData)?.nombre || "El prestador" : "El prestador";
+            if (reminderTime.getTime() > Date.now()) {
+              const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
+              const nombrePrestador = prestadorDoc.exists ? (prestadorDoc.data() as ProviderData)?.nombre || "El prestador" : "El prestador";
 
-                const reminderData: Omit<Recordatorio, "id"> = {
-                  usuarioId: usuarioId,
-                  servicioId: solicitudId,
-                  tipo: "recordatorio_servicio",
-                  mensaje: `Recordatorio: Tu servicio "${serviceTitle}" con ${nombrePrestador} es mañana a las ${newValue.serviceTime}.`,
-                  fechaProgramada: admin.firestore.Timestamp.fromDate(reminderTime),
-                  enviado: false,
-                  datosAdicionales: {
-                    tituloServicio: serviceTitle,
-                    nombrePrestador: nombrePrestador,
-                    fechaHoraServicioIso: serviceDateTime.toISOString(),
-                  },
-                };
-                const reminderRef = await db.collection("recordatorios").add(reminderData);
-                functions.logger.info(`[Reminder Scheduled] Recordatorio programado para servicio ${solicitudId} en ${reminderTime.toISOString()}. ID: ${reminderRef.id}`);
-                await logActivity("sistema", "sistema", "NOTIFICACION_RECORDATORIO_PROGRAMADA", `Recordatorio programado para servicio ${solicitudId}.`, {tipo: "recordatorio", id: reminderRef.id});
-              }
-            } catch (e) {
-              functions.logger.error(`[Reminder Scheduling Error] Error al parsear fecha/hora para servicio ${solicitudId}: ${newValue.serviceDate} ${newValue.serviceTime}`, e);
+              const reminderData: Omit<Recordatorio, "id"> = {
+                usuarioId: usuarioId,
+                servicioId: solicitudId,
+                tipo: "recordatorio_servicio",
+                mensaje: `Recordatorio: Tu servicio "${serviceTitle}" con ${nombrePrestador} es mañana a las ${newValue.serviceTime}.`,
+                fechaProgramada: admin.firestore.Timestamp.fromDate(reminderTime),
+                enviado: false,
+                datosAdicionales: {
+                  tituloServicio: serviceTitle,
+                  nombrePrestador: nombrePrestador,
+                  fechaHoraServicioIso: serviceDateTime.toISOString(),
+                },
+              };
+              const reminderRef = await db.collection("recordatorios").add(reminderData);
+              functions.logger.info(`[Reminder Scheduled] Recordatorio programado para servicio ${solicitudId} en ${reminderTime.toISOString()}. ID: ${reminderRef.id}`);
+              await logActivity("sistema", "sistema", "NOTIFICACION_RECORDATORIO_PROGRAMADA", `Recordatorio programado para servicio ${solicitudId}.`, {tipo: "recordatorio", id: reminderRef.id});
             }
+          } catch (e) {
+            functions.logger.error(`[Reminder Scheduling Error] Error al parsear fecha/hora para servicio ${solicitudId}: ${newValue.serviceDate} ${newValue.serviceTime}`, e);
           }
-          break;
-        case "rechazada_prestador": case "cancelada_prestador":
-          targetUserId = usuarioId; targetUserType = "usuario";
-          tituloNotif = `Cita ${newValue.status === "rechazada_prestador" ? "Rechazada" : "Cancelada"}`;
-          cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido ${newValue.status === "rechazada_prestador" ? "rechazada" : "cancelada"} por el prestador.`;
-          break;
-        case "cancelada_usuario":
-          targetUserId = prestadorId; targetUserType = "prestador";
-          tituloNotif = "Cita Cancelada por Usuario"; cuerpoNotif = `La cita para "${serviceTitle}" ha sido cancelada por el usuario.`;
-          break;
-        case "en_camino_proveedor":
-          targetUserId = usuarioId; targetUserType = "usuario";
-          tituloNotif = "¡Tu Proveedor está en Camino!"; cuerpoNotif = `El proveedor para "${serviceTitle}" está en camino.`;
-          break;
-        case "servicio_iniciado":
-          targetUserId = usuarioId; targetUserType = "usuario";
-          tituloNotif = "Servicio Iniciado"; cuerpoNotif = `El proveedor ha iniciado el servicio "${serviceTitle}".`;
-          break;
-        case "completado_por_prestador":
-          targetUserId = usuarioId; targetUserType = "usuario";
-          tituloNotif = "Servicio Completado por Prestador"; cuerpoNotif = `El prestador ha marcado "${serviceTitle}" como completado. Por favor, confirma y califica.`;
-          break;
-        case "completado_por_usuario":
-          targetUserId = prestadorId; targetUserType = "prestador";
-          tituloNotif = "¡Servicio Confirmado por Usuario!"; cuerpoNotif = `El usuario ha confirmado la finalización de "${serviceTitle}". ¡Ya puedes calificarlo!`;
-          break;
+        }
+        break;
+      case "rechazada_prestador": case "cancelada_prestador":
+        targetUserId = usuarioId; targetUserType = "usuario";
+        tituloNotif = `Cita ${newValue.status === "rechazada_prestador" ? "Rechazada" : "Cancelada"}`;
+        cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido ${newValue.status === "rechazada_prestador" ? "rechazada" : "cancelada"} por el prestador.`;
+        break;
+      case "cancelada_usuario":
+        targetUserId = prestadorId; targetUserType = "prestador";
+        tituloNotif = "Cita Cancelada por Usuario"; cuerpoNotif = `La cita para "${serviceTitle}" ha sido cancelada por el usuario.`;
+        break;
+      case "en_camino_proveedor":
+        targetUserId = usuarioId; targetUserType = "usuario";
+        tituloNotif = "¡Tu Proveedor está en Camino!"; cuerpoNotif = `El proveedor para "${serviceTitle}" está en camino.`;
+        break;
+      case "servicio_iniciado":
+        targetUserId = usuarioId; targetUserType = "usuario";
+        tituloNotif = "Servicio Iniciado"; cuerpoNotif = `El proveedor ha iniciado el servicio "${serviceTitle}".`;
+        break;
+      case "completado_por_prestador":
+        targetUserId = usuarioId; targetUserType = "usuario";
+        tituloNotif = "Servicio Completado por Prestador"; cuerpoNotif = `El prestador ha marcado "${serviceTitle}" como completado. Por favor, confirma y califica.`;
+        break;
+      case "completado_por_usuario":
+        targetUserId = prestadorId; targetUserType = "prestador";
+        tituloNotif = "¡Servicio Confirmado por Usuario!"; cuerpoNotif = `El usuario ha confirmado la finalización de "${serviceTitle}". ¡Ya puedes calificarlo!`;
+        break;
       }
     }
 
@@ -2223,7 +2223,7 @@ export const onNewCommunityNoticeSendNotifications = functions.firestore
       };
 
       const notificationPromises = miembros.map((miembroUid) => {
-        if (miembroUid === avisoData.autor_uid) {
+        if (miembroUid === avisoData.autor_uid) { // Don't notify the author
           return Promise.resolve();
         }
         return sendNotification(miembroUid, "usuario", notifTitle, notifBody, notifData);
@@ -2245,6 +2245,3 @@ export const onNewCommunityNoticeSendNotifications = functions.firestore
     }
     return null;
   });
-    
- 
-    

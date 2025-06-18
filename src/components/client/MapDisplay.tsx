@@ -10,17 +10,17 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { AlertCircle, CheckCircle, Loader2, MapPin, Search, Star, Navigation, XCircle, Building2, ShieldQuestion } from 'lucide-react';
+import { AlertCircle, CheckCircle, Loader2, MapPin, Search, Star, Navigation, XCircle, Building2, ShieldQuestion, Route as RouteIcon } from 'lucide-react';
 import { mockProviders, USER_FIXED_LOCATION, mockCategoriasServicio } from '@/lib/mockData';
-import { SERVICE_CATEGORIES } from '@/lib/constants'; // Corrected import
+import { SERVICE_CATEGORIES } from '@/lib/constants';
 import type { Provider, CategoriaServicio, ProviderLocation } from '@/types';
 import { cn } from '@/lib/utils';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { BottomSearchContainer } from '@/components/client/BottomSearchContainer';
-import { CategoryIconBar } from './CategoryIconBar'; // Changed to relative path
+import { CategoryIconBar } from './CategoryIconBar';
 
 const FALLBACK_GOOGLE_MAPS_API_KEY = "AIzaSyAX3VvtVNBqCK5otabtRkChTMa9_IPegHU";
-const PROVIDER_SEARCH_RADIUS_KM = 5;
+const PROVIDER_SEARCH_RADIUS_KM = 5; // Default search radius if not in specific mode
 
 const mapContainerStyle: React.CSSProperties = {
   width: '100%',
@@ -29,6 +29,8 @@ const mapContainerStyle: React.CSSProperties = {
 
 const defaultMapZoom = 13;
 const enRouteZoom = 15;
+const providerViewZoom = 14;
+
 
 const lucideIconToDataUri = (IconComponent: LucideIcon | undefined, color = "#008080", size = 32) => {
   if (typeof window === 'undefined' || !IconComponent) {
@@ -73,9 +75,10 @@ const calculateDistance = (
 
 interface EnRouteProviderInfo {
   provider: Provider;
-  status: "En camino" | "Ha llegado";
+  status: "En camino" | "Ha llegado" | "Visualizando ruta";
   eta: string;
-  currentLocation: ProviderLocation;
+  currentLocation: ProviderLocation; // For simulation or actual provider location
+  isRouteViewOnly?: boolean; // Flag to distinguish from actual hiring
 }
 
 const mapStyles: google.maps.MapTypeStyle[] = [
@@ -99,7 +102,8 @@ const MapContentComponent = React.memo(({
   directionsResponse,
   categoryIconCache,
   isMapApiLoaded,
-  hiredProviderId,
+  hiredProviderId, // To know if we are in "hired" mode
+  viewProviderRouteId, // To know if we are in "view route" mode
 }: {
   mapCenter: ProviderLocation;
   mapZoom: number;
@@ -115,6 +119,7 @@ const MapContentComponent = React.memo(({
   categoryIconCache: React.MutableRefObject<Record<string, string>>;
   isMapApiLoaded: boolean;
   hiredProviderId: string | null;
+  viewProviderRouteId: string | null;
 }) => {
 
   const userMarkerIconObject = useMemo(() => {
@@ -122,7 +127,7 @@ const MapContentComponent = React.memo(({
       return {
         path: window.google.maps.SymbolPath.CIRCLE,
         scale: 8,
-        fillColor: '#008080',
+        fillColor: '#008080', // Teal color for user
         fillOpacity: 1,
         strokeWeight: 2,
         strokeColor: 'white',
@@ -155,27 +160,33 @@ const MapContentComponent = React.memo(({
           position={userLocationToDisplay}
           title="Tu Ubicación"
           icon={userMarkerIconObject}
-          zIndex={1001}
+          zIndex={1001} // Higher zIndex for user marker
         />
       )}
 
       {providersToDisplayOnMap.map(provider => {
-         const locationToDisplay = hiredProviderId === provider.id && provider.ubicacionExacta
+        // Determine which location to use for the marker
+        const isCurrentFocusProvider = hiredProviderId === provider.id || viewProviderRouteId === provider.id;
+        const locationToDisplay = (isCurrentFocusProvider && provider.ubicacionExacta)
           ? provider.ubicacionExacta
           : provider.ubicacionAproximada;
 
         if (!locationToDisplay) return null;
 
+        // Special marker for provider currently in "en route" or "view route" mode
         if (enRouteProviderInfo && enRouteProviderInfo.provider.id === provider.id) {
           const enRouteCategoryData = SERVICE_CATEGORIES.find(c => c.id === (provider.services[0]?.category));
           const enRouteProviderLucideIcon = enRouteCategoryData?.icon;
           let enRouteMarkerIconUrl = '';
            if (enRouteProviderLucideIcon && isMapApiLoaded) {
-              const cacheKey = `enroute_${provider.services[0]?.category || 'default'}`;
+              const cacheKey = `enroute_${provider.services[0]?.category || 'default'}_${enRouteProviderInfo.isRouteViewOnly ? 'view' : 'hired'}`;
               if (categoryIconCache.current[cacheKey]) {
                   enRouteMarkerIconUrl = categoryIconCache.current[cacheKey];
               } else {
-                  const uri = lucideIconToDataUri(enRouteProviderLucideIcon, '#FFA07A', 36); // Accent color for en-route
+                  // Use a different color/size for "view route" vs "hired & en route"
+                  const iconColor = enRouteProviderInfo.isRouteViewOnly ? '#4A90E2' : '#FFA07A'; // Blue for view, LightSalmon for hired
+                  const iconSize = enRouteProviderInfo.isRouteViewOnly ? 34 : 36;
+                  const uri = lucideIconToDataUri(enRouteProviderLucideIcon, iconColor, iconSize);
                   if (uri) {
                       enRouteMarkerIconUrl = uri;
                       categoryIconCache.current[cacheKey] = uri;
@@ -184,21 +195,22 @@ const MapContentComponent = React.memo(({
           }
           const enRouteMarkerConfig = enRouteMarkerIconUrl && typeof window !== 'undefined' && window.google?.maps ? {
               url: enRouteMarkerIconUrl,
-              scaledSize: new window.google.maps.Size(36, 36),
-              anchor: new window.google.maps.Point(18, 36),
+              scaledSize: new window.google.maps.Size(enRouteProviderInfo.isRouteViewOnly ? 34 : 36, enRouteProviderInfo.isRouteViewOnly ? 34 : 36),
+              anchor: new window.google.maps.Point(enRouteProviderInfo.isRouteViewOnly ? 17 : 18, enRouteProviderInfo.isRouteViewOnly ? 34 : 36),
           } : undefined;
 
           return (
               <MarkerF
                   key={`${provider.id}-enroute`}
-                  position={enRouteProviderInfo.currentLocation}
+                  position={enRouteProviderInfo.currentLocation} // This marker moves
                   title={`${provider.name} (${enRouteProviderInfo.status})`}
                   icon={enRouteMarkerConfig}
-                  zIndex={1000}
+                  zIndex={1000} // High zIndex
               />
           );
         }
 
+        // Standard marker for other providers
         const mainCategoryData = SERVICE_CATEGORIES.find(c => c.id === (provider.services[0]?.category));
         const mainCategoryLucideIcon = mainCategoryData?.icon;
         let markerIconUrl = '';
@@ -208,7 +220,7 @@ const MapContentComponent = React.memo(({
           if (categoryIconCache.current[cacheKey]) {
             markerIconUrl = categoryIconCache.current[cacheKey];
           } else {
-            const generatedUri = lucideIconToDataUri(mainCategoryLucideIcon, "#008080", 32);
+            const generatedUri = lucideIconToDataUri(mainCategoryLucideIcon, "#008080", 32); // Standard color
             if (generatedUri) {
               markerIconUrl = generatedUri;
               categoryIconCache.current[cacheKey] = markerIconUrl;
@@ -229,7 +241,7 @@ const MapContentComponent = React.memo(({
             title={provider.name}
             onClick={() => onMarkerClick(provider)}
             icon={markerIconConfig || { 
-              path: (typeof window !== 'undefined' && window.google?.maps?.SymbolPath.CIRCLE),
+              path: (typeof window !== 'undefined' && window.google?.maps?.SymbolPath.CIRCLE), // Fallback
               scale: 6,
               fillColor: "#008080",
               fillOpacity: 1,
@@ -239,11 +251,9 @@ const MapContentComponent = React.memo(({
         );
       })}
 
-      {selectedProviderForInfoWindow && userLocationToDisplay && (
+      {selectedProviderForInfoWindow && userLocationToDisplay && !enRouteProviderInfo && ( // Don't show info window if a route is active
         <InfoWindowF
-          position={hiredProviderId === selectedProviderForInfoWindow.id && selectedProviderForInfoWindow.ubicacionExacta
-            ? selectedProviderForInfoWindow.ubicacionExacta
-            : selectedProviderForInfoWindow.ubicacionAproximada}
+          position={selectedProviderForInfoWindow.ubicacionAproximada} // Always show InfoWindow at approx. location
           onCloseClick={onInfoWindowClose}
           options={{
             pixelOffset: (typeof window !== 'undefined' && window.google?.maps) ? new window.google.maps.Size(0, -35) : undefined
@@ -275,11 +285,11 @@ const MapContentComponent = React.memo(({
         <DirectionsRenderer
           directions={directionsResponse}
           options={{
-            suppressMarkers: true,
+            suppressMarkers: true, // We handle markers ourselves
             polylineOptions: {
-              strokeColor: '#008080',
-              strokeOpacity: 0.7,
-              strokeWeight: 5,
+              strokeColor: enRouteProviderInfo?.isRouteViewOnly ? '#4A90E2' : '#FFA07A', // Blue for view, LightSalmon for hired
+              strokeOpacity: 0.8,
+              strokeWeight: 6,
             },
           }}
         />
@@ -328,6 +338,9 @@ export function MapDisplay() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const hiredProviderId = useMemo(() => searchParams.get('hiredProviderId'), [searchParams]);
+  const viewProviderRouteId = useMemo(() => searchParams.get('viewProviderRoute'), [searchParams]); // New param
+  // const viewServiceId = useMemo(() => searchParams.get('serviceId'), [searchParams]); // For context if needed
+
   const categoryQueryParam = useMemo(() => searchParams.get('category'), [searchParams]);
 
   useEffect(() => {
@@ -341,6 +354,13 @@ export function MapDisplay() {
     }
   }, [categoryQueryParam]);
 
+  const currentMode = useMemo(() => {
+    if (hiredProviderId) return 'hired';
+    if (viewProviderRouteId) return 'view_route';
+    return 'browsing';
+  }, [hiredProviderId, viewProviderRouteId]);
+
+
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -350,7 +370,7 @@ export function MapDisplay() {
             lng: position.coords.longitude,
           };
           setUserLocation(loc);
-          if (!hiredProviderId) setMapCenter(loc);
+          if (currentMode === 'browsing') setMapCenter(loc);
           setLocationError(null);
           setShowManualLocationInput(false);
         },
@@ -358,17 +378,17 @@ export function MapDisplay() {
           console.warn(`Error de Geolocalización: ${error.message}`);
           setLocationError(`Geolocalización denegada. Usando ubicación predeterminada.`);
           setUserLocation(USER_FIXED_LOCATION);
-          if (!hiredProviderId) setMapCenter(USER_FIXED_LOCATION);
+          if (currentMode === 'browsing') setMapCenter(USER_FIXED_LOCATION);
           setShowManualLocationInput(true);
         }
       );
     } else {
       setLocationError("Geolocalización no soportada. Usando ubicación predeterminada.");
       setUserLocation(USER_FIXED_LOCATION);
-      if (!hiredProviderId) setMapCenter(USER_FIXED_LOCATION);
+      if (currentMode === 'browsing') setMapCenter(USER_FIXED_LOCATION);
       setShowManualLocationInput(true);
     }
-  }, [hiredProviderId]);
+  }, [currentMode]); // Re-check geolocation if mode changes, though USER_FIXED_LOCATION will persist if denied
 
   useEffect(() => {
     if (!userLocation || allProviders.length === 0 || allCategories.length === 0) {
@@ -377,6 +397,21 @@ export function MapDisplay() {
       return;
     }
 
+    // If in hired or view_route mode, only display that provider
+    if (currentMode === 'hired' && hiredProviderId) {
+      const hired = allProviders.find(p => p.id === hiredProviderId);
+      setDisplayedProviders(hired ? [hired] : []);
+      setActiveCategories([]); // No category bar in these modes
+      return;
+    }
+    if (currentMode === 'view_route' && viewProviderRouteId) {
+      const providerToView = allProviders.find(p => p.id === viewProviderRouteId);
+      setDisplayedProviders(providerToView ? [providerToView] : []);
+      setActiveCategories([]);
+      return;
+    }
+
+    // Browsing mode filtering
     let providersFilteredByLocationAndStatus = allProviders.filter(p => {
       if (!p.estadoOnline || !p.ubicacionAproximada) return false;
       const distance = calculateDistance(
@@ -412,19 +447,9 @@ export function MapDisplay() {
         p.specialties?.some(sp => sp.toLowerCase().includes(termLower))
       );
     }
-    
-    if (hiredProviderId) {
-      const hired = allProviders.find(p => p.id === hiredProviderId);
-      if (hired) {
-        setDisplayedProviders([hired, ...searchFilteredProviders.filter(p => p.id !== hiredProviderId)]);
-      } else {
-        setDisplayedProviders(searchFilteredProviders);
-      }
-    } else {
-      setDisplayedProviders(searchFilteredProviders);
-    }
+    setDisplayedProviders(searchFilteredProviders);
 
-  }, [userLocation, allProviders, allCategories, selectedCategory, searchTerm, hiredProviderId]);
+  }, [userLocation, allProviders, allCategories, selectedCategory, searchTerm, currentMode, hiredProviderId, viewProviderRouteId]);
 
 
   const onMapLoad = useCallback((map: google.maps.Map) => {
@@ -446,11 +471,10 @@ export function MapDisplay() {
     console.log("Search submitted:", searchTerm);
   };
 
-
   const handleCategoryFilter = (categoryId: string | null) => {
     setSelectedCategory(categoryId);
     setSelectedProviderForInfoWindow(null);
-    if (mapInstance && userLocation && !hiredProviderId) { 
+    if (mapInstance && userLocation && currentMode === 'browsing') { 
         mapInstance.panTo(userLocation);
         mapInstance.setZoom(defaultMapZoom);
     }
@@ -460,24 +484,34 @@ export function MapDisplay() {
     } else {
       params.delete('category');
     }
+    // Remove route/hired params if changing category
+    params.delete('hiredProviderId');
+    params.delete('viewProviderRoute');
     router.replace(`${window.location.pathname}?${params.toString()}`, { scroll: false });
   };
 
   const handleMarkerClick = useCallback((provider: Provider) => {
-    setSelectedProviderForInfoWindow(provider);
-    if (!hiredProviderId && provider.ubicacionAproximada && mapInstance) {
-      mapInstance.panTo(provider.ubicacionAproximada);
+    if (currentMode === 'browsing') {
+      setSelectedProviderForInfoWindow(provider);
+      if (provider.ubicacionAproximada && mapInstance) {
+        mapInstance.panTo(provider.ubicacionAproximada);
+      }
     }
-  }, [hiredProviderId, mapInstance]);
+  }, [currentMode, mapInstance]);
 
   const handleInfoWindowClose = useCallback(() => {
     setSelectedProviderForInfoWindow(null);
   }, []);
 
-  const simulateProviderMovement = useCallback((route: google.maps.DirectionsRoute | undefined, providerToSimulate: Provider) => {
+  const simulateProviderMovement = useCallback((route: google.maps.DirectionsRoute | undefined, providerToSimulate: Provider, isViewOnly: boolean) => {
     if (stepTimeoutRef.current) clearTimeout(stepTimeoutRef.current);
     if (!route || !route.legs?.[0]?.steps?.length || !providerToSimulate.ubicacionExacta || !userLocation) {
-      setEnRouteProviderInfo(prev => prev ? { ...prev, status: "Ha llegado", eta: "0 min", currentLocation: userLocation || USER_FIXED_LOCATION } : null);
+      setEnRouteProviderInfo(prev => prev ? { ...prev, status: "Ha llegado", eta: "0 min", currentLocation: userLocation || USER_FIXED_LOCATION, isRouteViewOnly: isViewOnly } : null);
+      if (isViewOnly) { // If it was just a view, clear the route param
+        const params = new URLSearchParams(window.location.search);
+        params.delete('viewProviderRoute');
+        router.replace(`${window.location.pathname}?${params.toString()}`, { scroll: false });
+      }
       return;
     }
 
@@ -486,17 +520,20 @@ export function MapDisplay() {
 
     setEnRouteProviderInfo({
         provider: providerToSimulate,
-        status: "En camino",
+        status: isViewOnly ? "Visualizando ruta" : "En camino",
         eta: route.legs[0].duration?.text || "Calculando...",
-        currentLocation: providerToSimulate.ubicacionExacta,
+        currentLocation: providerToSimulate.ubicacionExacta, // Start at provider's exact location
+        isRouteViewOnly: isViewOnly,
     });
 
     const moveNext = () => {
       if (currentPointIndex >= allPathPoints.length || !userLocation) {
-        setEnRouteProviderInfo(prev => prev ? { ...prev, status: "Ha llegado", eta: "0 min", currentLocation: userLocation } : null);
+        setEnRouteProviderInfo(prev => prev ? { ...prev, status: "Ha llegado", eta: "0 min", currentLocation: userLocation, isRouteViewOnly: isViewOnly } : null);
         if(stepTimeoutRef.current) clearTimeout(stepTimeoutRef.current);
+        
         const params = new URLSearchParams(window.location.search);
-        params.delete('hiredProviderId');
+        if (isViewOnly) params.delete('viewProviderRoute');
+        else params.delete('hiredProviderId'); // If it was a hired provider arriving
         router.replace(`${window.location.pathname}?${params.toString()}`, { scroll: false });
         return;
       }
@@ -507,7 +544,7 @@ export function MapDisplay() {
 
       setEnRouteProviderInfo(prev => prev ? { ...prev, currentLocation: nextLatLng, eta: `${etaMinutes} min (sim.)` } : null);
       currentPointIndex++;
-      stepTimeoutRef.current = setTimeout(moveNext, 1200);
+      stepTimeoutRef.current = setTimeout(moveNext, isViewOnly ? 1800 : 1200); // Slower for view only
     };
     moveNext();
   }, [userLocation, router]);
@@ -516,13 +553,17 @@ export function MapDisplay() {
     if (simulationTimeoutRef.current) clearTimeout(simulationTimeoutRef.current);
     if (stepTimeoutRef.current) clearTimeout(stepTimeoutRef.current);
     setDirectionsResponse(null);
+    setEnRouteProviderInfo(null); // Clear previous route info
 
-    if (hiredProviderId && isMapApiLoaded && mapInstance && userLocation) {
-      const providerInRoute = allProviders.find(p => p.id === hiredProviderId);
+    const providerIdForRoute = hiredProviderId || viewProviderRouteId;
+    const isViewOnlyRoute = !!viewProviderRouteId && !hiredProviderId;
+
+    if (providerIdForRoute && isMapApiLoaded && mapInstance && userLocation) {
+      const providerInRoute = allProviders.find(p => p.id === providerIdForRoute);
 
       if (providerInRoute && providerInRoute.ubicacionExacta) {
-        setSelectedProviderForInfoWindow(null);
-        setMapZoom(enRouteZoom);
+        setSelectedProviderForInfoWindow(null); // Hide info window when route is active
+        setMapZoom(isViewOnlyRoute ? providerViewZoom : enRouteZoom);
 
         if (typeof window !== 'undefined' && window.google?.maps?.DirectionsService) {
           const directionsService = new window.google.maps.DirectionsService();
@@ -537,22 +578,23 @@ export function MapDisplay() {
                 setDirectionsResponse(result);
                 if (mapInstance && providerInRoute.ubicacionExacta && userLocation && window.google?.maps) {
                   const bounds = new window.google.maps.LatLngBounds();
-                  bounds.extend(providerInRoute.ubicacionExacta);
-                  bounds.extend(userLocation);
+                  bounds.extend(providerInRoute.ubicacionExacta); // Provider's start
+                  bounds.extend(userLocation); // User's end
                   mapInstance.fitBounds(bounds);
                    const listener = window.google.maps.event.addListenerOnce(mapInstance, 'idle', () => {
-                        if (mapInstance.getZoom()! > 16) mapInstance.setZoom(16);
+                        if (mapInstance.getZoom()! > 16) mapInstance.setZoom(16); // Don't zoom in too much
                         if(window.google?.maps && listener) window.google.maps.event.removeListener(listener);
                     });
                 }
-                simulateProviderMovement(result.routes[0], providerInRoute);
+                simulateProviderMovement(result.routes[0], providerInRoute, isViewOnlyRoute);
               } else {
                 console.error(`Error al obtener direcciones: ${status}`, result);
                  setEnRouteProviderInfo({
                     provider: providerInRoute,
-                    status: "En camino",
+                    status: isViewOnlyRoute ? "Visualizando ruta" : "En camino",
                     eta: "Ruta no disponible",
                     currentLocation: providerInRoute.ubicacionExacta,
+                    isRouteViewOnly: isViewOnlyRoute,
                   });
                 setDisplayedProviders([providerInRoute]); 
                 setMapCenter(providerInRoute.ubicacionExacta);
@@ -563,12 +605,12 @@ export function MapDisplay() {
       } else {
         setEnRouteProviderInfo(null);
       }
-    } else if (!hiredProviderId) {
+    } else if (currentMode === 'browsing') { // No hired or view route ID
       setEnRouteProviderInfo(null);
       setMapZoom(defaultMapZoom);
       if (userLocation) setMapCenter(userLocation);
     }
-  }, [hiredProviderId, isMapApiLoaded, mapInstance, userLocation, simulateProviderMovement, router, allProviders]);
+  }, [currentMode, hiredProviderId, viewProviderRouteId, isMapApiLoaded, mapInstance, userLocation, simulateProviderMovement, router, allProviders]);
 
 
   const renderMapArea = () => {
@@ -636,14 +678,15 @@ export function MapDisplay() {
         categoryIconCache={categoryIconCache}
         isMapApiLoaded={isMapApiLoaded}
         hiredProviderId={hiredProviderId}
+        viewProviderRouteId={viewProviderRouteId}
       />
     );
   };
 
   return (
     <div className="h-full w-full flex flex-col relative">
-      {/* Top Search and Category Bar Area */}
-      {!enRouteProviderInfo && (
+      {/* Top Search and Category Bar Area - Only in browsing mode */}
+      {currentMode === 'browsing' && (
         <div className="absolute top-0 left-0 right-0 z-20 p-3 md:p-4 space-y-3 bg-gradient-to-b from-background via-background/90 to-transparent">
           {/* Search Bar */}
           <Card className="shadow-lg rounded-lg bg-background backdrop-blur-sm border border-border/50">
@@ -684,7 +727,7 @@ export function MapDisplay() {
         {renderMapArea()}
       </div>
 
-      {/* En-Route Provider Panel */}
+      {/* En-Route or View-Route Provider Panel */}
       {enRouteProviderInfo && (
         <Card className="absolute top-4 left-1/2 -translate-x-1/2 z-30 shadow-xl bg-background/95 backdrop-blur-sm w-auto max-w-[calc(100%-2rem)] md:max-w-md">
           <CardHeader className="p-3">
@@ -697,6 +740,8 @@ export function MapDisplay() {
                 <CardTitle className="text-base flex items-center">
                   {enRouteProviderInfo.status === "En camino" ? (
                     <Navigation className="h-5 w-5 mr-2 text-primary animate-pulse" />
+                  ) : enRouteProviderInfo.status === "Visualizando ruta" ? (
+                    <RouteIcon className="h-5 w-5 mr-2 text-blue-500" />
                   ) : (
                     <CheckCircle className="h-5 w-5 mr-2 text-green-500" />
                   )}
@@ -711,8 +756,8 @@ export function MapDisplay() {
         </Card>
       )}
 
-      {/* Bottom Banners - only show if not in "en route" mode */}
-      {!enRouteProviderInfo && (
+      {/* Bottom Banners - only show if not in "en route" or "view_route" mode */}
+      {currentMode === 'browsing' && (
         <div className="absolute bottom-0 left-0 right-0 z-10 p-2 sm:p-3">
           <BottomSearchContainer />
         </div>

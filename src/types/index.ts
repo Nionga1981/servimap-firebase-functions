@@ -1,4 +1,3 @@
-
 // src/types/index.ts
 import type { LucideIcon } from 'lucide-react';
 
@@ -12,6 +11,9 @@ export interface Service {
   dataAiHint?: string;
   providerId: string;
   hourlyRate?: never;
+  comunidad_id?: string; // Added for community linking
+  activo?: boolean; // Added to mark service as active/inactive (default true)
+  fechaCreacion?: number; // Timestamp for "Most Recent" sorting
 }
 
 export interface GalleryItem {
@@ -41,11 +43,11 @@ export interface Provider {
   ratingCount: number;
   ratingSum: number;
   services: Service[];
-  isAvailable: boolean;
-  estadoOnline: boolean;
-  ubicacionAproximada: ProviderLocation;
-  ubicacionExacta?: ProviderLocation;
-  currentLocation?: ProviderLocation | null;
+  isAvailable: boolean; // General availability toggle by provider
+  estadoOnline: boolean; // Real-time online status (e.g., sharing location)
+  ubicacionAproximada: ProviderLocation; // For general display on map before hiring
+  ubicacionExacta?: ProviderLocation; // For routing after hiring or if explicitly shared
+  currentLocation?: ProviderLocation | null; // Live location if estadoOnline is true
   lastConnection?: number;
   specialties?: string[];
   allowsHourlyServices?: boolean;
@@ -600,7 +602,7 @@ interface BannerComunitarioDetails {
 }
 
 export interface Comunidad {
-  id?: string; // Firestore document ID
+  id: string; // Firestore document ID
   nombre: string;
   descripcion: string;
   tipo: "publica" | "privada";
@@ -637,11 +639,7 @@ export interface AvisoComunidad {
   descripcion: string;
   fechaPublicacion: number; // Timestamp
   activo: boolean;
-  anclado: boolean; 
+  anclado: boolean;
   fechaExpiracion?: number; // Timestamp, opcional
   autor_uid: string; // Debe coincidir con el embajador_uid de la comunidad
 }
-
-    
-
-    
