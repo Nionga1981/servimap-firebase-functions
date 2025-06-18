@@ -2314,7 +2314,7 @@ export const confirmarCitaPorPrestador = functions.https.onCall(async (data, con
   const citaRef = db.collection("citas").doc(citaId);
 
   try {
-    await db.runTransaction(async (transaction) => {
+    return await db.runTransaction(async (transaction) => {
       const citaDoc = await transaction.get(citaRef);
       if (!citaDoc.exists) {
         throw new functions.https.HttpsError("not-found", `Cita con ID ${citaId} no encontrada.`);
@@ -2330,21 +2330,24 @@ export const confirmarCitaPorPrestador = functions.https.onCall(async (data, con
       }
 
       const now = admin.firestore.Timestamp.now();
-      const updateData: Partial<CitaDataFirestore> = {
+      const updateData: Partial<CitaDataFirestore> & {updatedAt: admin.firestore.Timestamp} = {
         updatedAt: now,
       };
       let logActionType: ActivityLogAction;
+      let logMessage = "";
 
       if (accion === "confirmar") {
         updateData.estado = "confirmada_prestador";
         updateData.fechaConfirmacionPrestador = now;
-        updateData.paymentStatus = "pendiente_cobro";
-        updateData.ordenCobroId = `sim_orden_${citaId}_${Date.now()}`;
+        updateData.paymentStatus = "pendiente_cobro"; // Prepara para el cobro
+        updateData.ordenCobroId = `sim_orden_${citaId}_${Date.now()}`; // ID de orden simulado
         logActionType = "CITA_CONFIRMADA_PRESTADOR";
+        logMessage = `Prestador ${prestadorIdAutenticado} confirmó cita ${citaId}.`;
       } else { // accion === "rechazar"
         updateData.estado = "rechazada_prestador";
         updateData.fechaRechazoPrestador = now;
         logActionType = "CITA_RECHAZADA_PRESTADOR";
+        logMessage = `Prestador ${prestadorIdAutenticado} rechazó cita ${citaId}.`;
       }
 
       transaction.update(citaRef, updateData);
@@ -2352,13 +2355,12 @@ export const confirmarCitaPorPrestador = functions.https.onCall(async (data, con
         prestadorIdAutenticado,
         "prestador",
         logActionType,
-        `Prestador ${prestadorIdAutenticado} ${accion === "confirmar" ? "confirmó" : "rechazó"} cita ${citaId}.`,
+        logMessage,
         {tipo: "cita", id: citaId},
         {usuarioId: citaData.usuarioId}
       );
+      return {success: true, message: `Cita ${accion === "confirmar" ? "confirmada" : "rechazada"} exitosamente.`};
     });
-
-    return {success: true, message: `Cita ${accion === "confirmar" ? "confirmada" : "rechazada"} exitosamente.`};
   } catch (error: any) {
     functions.logger.error(`Error en confirmarCitaPorPrestador (cita ${citaId}, accion ${accion}):`, error);
     if (error instanceof functions.https.HttpsError) throw error;
@@ -2389,7 +2391,6 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
     if (afterData.estado === "confirmada_prestador" && beforeData.estado !== "confirmada_prestador") {
       functions.logger.info(`[onCitaActualizada ${citaId}] Cita confirmada por prestador. Iniciando simulación de pago y notificación.`);
 
-      // Simular inicio de proceso de pago (log)
       await logActivity(
         "sistema",
         "sistema",
@@ -2399,7 +2400,6 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
         {usuarioId, prestadorId, monto: afterData.montoTotalEstimado || afterData.precioServicio || 0}
       );
 
-      // Notificar al cliente
       await sendNotification(
         usuarioId,
         "usuario",
@@ -2420,3 +2420,4 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
 
     return null;
   });
+
