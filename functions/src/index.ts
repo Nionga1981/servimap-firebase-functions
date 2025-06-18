@@ -19,6 +19,8 @@ const PLAZO_REPORTE_DIAS = 7;
 const MINUTOS_VENTANA_CANCELACION = 10;
 const COMISION_CANCELACION_TARDIA_PORCENTAJE = 0.10; // 10%
 const MAX_ACTIVE_COMMUNITY_NOTICES = 3;
+const DOS_HORAS_EN_MS = 2 * 60 * 60 * 1000;
+const TREINTA_MINUTOS_EN_MS = 30 * 60 * 1000;
 
 
 // --- INTERFACES (Locally defined for Cloud Functions context) ---
@@ -246,7 +248,9 @@ export type ActivityLogAction =
   | "CITA_PAGO_INICIADO"
   | "CITA_PAGADA"
   | "CITA_COMPLETADA"
-  | "CITA_ERROR_PAGO";
+  | "CITA_ERROR_PAGO"
+  | "CITA_VENTANA_SEGUIMIENTO_DEFINIDA"
+  | "CITA_PROVEEDOR_NOTIFICADO_ONLINE";
 
 
 export interface PromocionFidelidad {
@@ -500,6 +504,8 @@ export interface CitaDataFirestore {
   tarifaPorHora?: number;
   duracionHoras?: number;
   montoTotalEstimado?: number;
+  permiteSeguimientoDesdeTimestamp?: admin.firestore.Timestamp;
+  notificadoParaEstarEnLinea?: boolean;
 }
 
 
@@ -2045,7 +2051,7 @@ export const gestionarSolicitudComunidad = functions.https.onCall(async (data, c
     throw new functions.https.HttpsError("invalid-argument", "Se requiere 'solicitanteUid'.");
   }
   if (!accion || (accion !== "aprobar" && accion !== "rechazar")) {
-    throw new functions.https.HttpsError("invalid-argument", "La 'accion' debe ser 'aprobar' o 'rechazar'.");
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere una 'accion' válida ('aprobar' o 'rechazar').");
   }
 
   const comunidadRef = db.collection("comunidades").doc(comunidadId);
@@ -2380,7 +2386,7 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
       return null;
     }
 
-    const usuarioId = afterData.usuarioId; // This is the cliente_uid
+    const usuarioId = afterData.usuarioId;
     const prestadorId = afterData.prestadorId;
     let prestadorNombre = "El prestador";
     try {
@@ -2406,37 +2412,74 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
       }
     }
 
-
+    // Si la cita es confirmada por el proveedor
     if (afterData.estado === "confirmada_prestador" && beforeData.estado !== "confirmada_prestador") {
-      functions.logger.info(`[onCitaActualizada ${citaId}] Cita confirmada por prestador. Notificando al cliente.`);
+      functions.logger.info(`[onCitaActualizada ${citaId}] Cita confirmada por prestador. Notificando al cliente y procesando campos de seguimiento.`);
 
+      // Lógica para pago (simulada)
       await logActivity(
-        "sistema",
-        "sistema",
-        "CITA_PAGO_INICIADO",
+        "sistema", "sistema", "CITA_PAGO_INICIADO",
         `Proceso de pago iniciado (simulado) para cita confirmada ${citaId}. Monto: ${afterData.montoTotalEstimado || afterData.precioServicio || 0}.`,
         {tipo: "cita", id: citaId},
         {usuarioId, prestadorId, monto: afterData.montoTotalEstimado || afterData.precioServicio || 0}
       );
 
+      // Notificación al cliente
       const montoCita = (afterData.montoTotalEstimado || afterData.precioServicio || 0).toFixed(2);
       await sendNotification(
-        usuarioId,
-        "usuario",
-        "¡Tu Cita ha sido Confirmada!",
+        usuarioId, "usuario", "¡Tu Cita ha sido Confirmada!",
         `El prestador ${prestadorNombre} ha confirmado tu cita para "${detallesCita}" el ${fechaCitaFormateada} a las ${horaCitaFormateada}. Se procederá con el cobro de $${montoCita}.`,
         {citaId, tipo: "CITA_CONFIRMADA"}
       );
+
+      // Lógica para definir la ventana de seguimiento
+      const fechaHoraCitaMillis = afterData.fechaHoraSolicitada.toMillis();
+      const timestampActivacionSeguimiento = fechaHoraCitaMillis - DOS_HORAS_EN_MS;
+
+      const updatePayload: Partial<CitaDataFirestore> = {
+        permiteSeguimientoDesdeTimestamp: admin.firestore.Timestamp.fromMillis(timestampActivacionSeguimiento),
+        notificadoParaEstarEnLinea: false, // Inicializar
+      };
+
+      // Log de la definición de la ventana de seguimiento
+      await logActivity(
+        "sistema", "sistema", "CITA_VENTANA_SEGUIMIENTO_DEFINIDA",
+        `Ventana de seguimiento definida para cita ${citaId}. Seguimiento posible desde: ${new Date(timestampActivacionSeguimiento).toISOString()}`,
+        {tipo: "cita", id: citaId},
+        {timestampActivacionSeguimiento}
+      );
+      
+      // Notificar al proveedor si la cita es pronto
+      const ahoraMillis = Date.now();
+      if (timestampActivacionSeguimiento - ahoraMillis < TREINTA_MINUTOS_EN_MS && // Si la ventana de seguimiento empieza en menos de 30 min
+          ahoraMillis < fechaHoraCitaMillis && // Y la cita aún no ha pasado
+          !afterData.notificadoParaEstarEnLinea) {
+        await sendNotification(
+          prestadorId, "prestador", "Cita Próxima - ¡Ponte en Línea!",
+          `Tu cita para "${detallesCita}" con ${usuarioId} es pronto. Asegúrate de estar en línea para el seguimiento.`,
+          {citaId, tipo: "CITA_PROXIMA_IR_ONLINE"}
+        );
+        updatePayload.notificadoParaEstarEnLinea = true;
+        await logActivity("sistema", "sistema", "CITA_PROVEEDOR_NOTIFICADO_ONLINE", `Proveedor ${prestadorId} notificado para estar en línea para cita ${citaId}.`, {tipo: "cita", id: citaId});
+      }
+      
+      // Actualizar el documento de la cita con los nuevos campos.
+      // Es importante que esta actualización ocurra después de que la función `confirmarCitaPorPrestador`
+      // haya completado su propia transacción. El trigger onUpdate maneja el documento *después* del cambio.
+      // Esta escritura adicional es segura porque onUpdate se dispara sobre el estado *después* de la actualización.
+      await change.after.ref.update(updatePayload);
+      functions.logger.info(`[onCitaActualizada ${citaId}] Campos de seguimiento actualizados en la cita.`);
+
     } else if (afterData.estado === "rechazada_prestador" && beforeData.estado !== "rechazada_prestador") {
       functions.logger.info(`[onCitaActualizada ${citaId}] Cita rechazada por prestador. Notificando al cliente.`);
       await sendNotification(
-        usuarioId,
-        "usuario",
-        "Cita Rechazada",
+        usuarioId, "usuario", "Cita Rechazada",
         `Tu solicitud con ${prestadorNombre} para "${detallesCita}" el ${fechaCitaFormateada} fue rechazada. Puedes buscar otro servicio.`,
         {citaId, tipo: "CITA_RECHAZADA"}
       );
     }
-
     return null;
   });
+
+
+    
