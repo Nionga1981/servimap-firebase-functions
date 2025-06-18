@@ -233,32 +233,55 @@ export interface HourlyServiceRequest extends BaseServiceRequest {
 export type ServiceRequest = FixedServiceRequest | HourlyServiceRequest;
 
 
-// Definición para la nueva colección 'citas'
 export type CitaEstado =
-  | 'pendiente_confirmacion_prestador' // Cita solicitada, pendiente de que el prestador confirme
+  | 'pendiente_confirmacion' // Cita solicitada, pendiente de que el prestador confirme (renamed for clarity)
   | 'confirmada_prestador'             // Prestador confirmó, lista para proceder (pago podría ser el siguiente paso)
   | 'rechazada_prestador'              // Prestador no puede tomar la cita
   | 'cancelada_usuario'                // Usuario canceló la cita
   | 'pagada'                           // Si hay un pago asociado y se completó
   | 'completada'                       // Cita finalizada y posiblemente calificada
   | 'cancelada_prestador'              // Prestador canceló después de confirmar (raro, pero posible)
+  | 'servicio_iniciado'              // Similar a ServiceRequestStatus
+  | 'en_camino_proveedor'            // Similar a ServiceRequestStatus
+  | 'completado_por_prestador'       // Similar a ServiceRequestStatus
+  | 'completado_por_usuario'         // Similar a ServiceRequestStatus
   ;
 
 export interface Cita {
   id?: string; // Firestore document ID
-  cliente_uid: string; // UID del usuario que agenda
-  prestador_uid: string; // UID del prestador al que se solicita
-  servicio_id: string; // ID del servicio específico solicitado (puede ser un identificador de un servicio listado por el proveedor)
-  fecha_cita: number; // Timestamp para la fecha y hora de la cita
-  ubicacion: string; // Dirección literal ingresada por el usuario
-  mensaje?: string; // Campo opcional con observaciones/notas del usuario
+  usuarioId: string; // UID del usuario que agenda
+  prestadorId: string; // UID del prestador al que se solicita
+  // servicio_id: string; // ID del servicio específico solicitado (puede ser un identificador de un servicio listado por el proveedor)
+  fechaHoraSolicitada: number; // Timestamp para la fecha y hora de la cita
+  detallesServicio: string; // Descripción o título del servicio
+  ubicacion?: ProviderLocation | { customAddress: string };
+  notasAdicionales?: string; // Campo opcional con observaciones del usuario
   estado: CitaEstado; // Inicia como 'pendiente_confirmacion_prestador'
-  timestamp_creacion: number; // Timestamp de cuándo se generó la solicitud de cita
-  timestamp_confirmacion_prestador?: number | null; // Timestamp de confirmación del prestador, null inicialmente
-  // Campos adicionales que podrían ser útiles a futuro para el flujo de 'citas':
-  // precio_acordado_cita?: number; // Si el precio se define específicamente para esta cita
-  // notas_prestador?: string; // Notas del prestador al confirmar o rechazar
-  // paymentIntentId_cita?: string; // Si la cita tiene un proceso de pago separado
+  fechaCreacion: number; // Timestamp de cuándo se generó la solicitud de cita
+  updatedAt?: number; // Timestamp de la última actualización
+
+  // Campos relacionados con la confirmación y pago
+  fechaConfirmacionPrestador?: number | null;
+  fechaRechazoPrestador?: number | null;
+  ordenCobroId?: string; // Para identificar la transacción de pago
+  paymentStatus?: PaymentStatus; // Estado del pago, e.g. 'pendiente_cobro', 'procesado_exitosamente', 'fallido'
+  fechaCobro?: number | null;
+  montoCobrado?: number | null; // Monto final cobrado
+  
+  // Campos relacionados con la cancelación
+  fechaCancelacion?: number | null;
+  canceladaPor?: string; // UID de quien canceló
+  rolCancelador?: 'usuario' | 'prestador'; // Rol de quien canceló
+
+  // Campos para manejar el tipo de servicio (Fixed o Hourly)
+  serviceType?: 'fixed' | 'hourly';
+  precioServicio?: number; // Para servicios de precio fijo
+  tarifaPorHora?: number; // Para servicios por hora
+  duracionHoras?: number; // Para servicios por hora
+  montoTotalEstimado?: number; // Calculado para servicios por hora o el precio fijo
+
+  // Se pueden añadir más campos de ServiceRequest si son relevantes para Citas
+  // como calificacionUsuario, calificacionPrestador, etc.
 }
 
 
@@ -376,7 +399,15 @@ export type ActivityLogAction =
   | 'COMUNIDAD_AVISO_CREADO'
   | 'COMUNIDAD_AVISO_ACTUALIZADO'
   | 'COMUNIDAD_AVISO_ELIMINADO'
-  | 'COMUNIDAD_NUEVO_AVISO_NOTIFICADO';
+  | 'COMUNIDAD_NUEVO_AVISO_NOTIFICADO'
+  | 'CITA_CREADA'
+  | 'CITA_CONFIRMADA_PRESTADOR'
+  | 'CITA_RECHAZADA_PRESTADOR'
+  | 'CITA_CANCELADA_USUARIO'
+  | 'CITA_PAGO_INICIADO'
+  | 'CITA_PAGADA'
+  | 'CITA_COMPLETADA'
+  | 'CITA_ERROR_PAGO';
 
 
 export interface ActivityLog {
@@ -387,7 +418,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad';
+    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -485,7 +516,7 @@ export type RecordatorioTipo =
 export interface Recordatorio {
   id?: string;
   usuarioId: string;
-  servicioId: string;
+  servicioId: string; // Can be serviceId or citaId
   tipo: RecordatorioTipo;
   mensaje: string;
   fechaProgramada: number;

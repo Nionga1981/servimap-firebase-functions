@@ -24,8 +24,8 @@ const MAX_ACTIVE_COMMUNITY_NOTICES = 3;
 // --- INTERFACES (Locally defined for Cloud Functions context) ---
 export type ServiceRequestStatus =
   | "agendado"
-  | "pendiente_confirmacion" // Generally implies provider needs to confirm
-  | "pendiente_confirmacion_usuario" // User needs to confirm (e.g., a provider's offer or reactivation)
+  | "pendiente_confirmacion"
+  | "pendiente_confirmacion_usuario"
   | "confirmada_prestador"
   | "pagada"
   | "en_camino_proveedor"
@@ -238,7 +238,16 @@ export type ActivityLogAction =
   | "COMUNIDAD_AVISO_CREADO"
   | "COMUNIDAD_AVISO_ACTUALIZADO"
   | "COMUNIDAD_AVISO_ELIMINADO"
-  | "COMUNIDAD_NUEVO_AVISO_NOTIFICADO";
+  | "COMUNIDAD_NUEVO_AVISO_NOTIFICADO"
+  | "CITA_CREADA"
+  | "CITA_CONFIRMADA_PRESTADOR"
+  | "CITA_RECHAZADA_PRESTADOR"
+  | "CITA_CANCELADA_USUARIO"
+  | "CITA_PAGO_INICIADO"
+  | "CITA_PAGADA"
+  | "CITA_COMPLETADA"
+  | "CITA_ERROR_PAGO";
+
 
 export interface PromocionFidelidad {
   id?: string;
@@ -451,6 +460,48 @@ interface AvisoComunidadDataFirestore {
   autor_uid: string; // Should match embajador_uid from parent ComunidadData
 }
 
+// Specific type for Cita documents in Firestore
+export type CitaEstadoFirestore =
+  | "pendiente_confirmacion"
+  | "confirmada_prestador"
+  | "rechazada_prestador"
+  | "cancelada_usuario"
+  | "pagada"
+  | "completada"
+  | "cancelada_prestador"
+  | "servicio_iniciado"
+  | "en_camino_proveedor"
+  | "completado_por_prestador"
+  | "completado_por_usuario";
+
+// Interface for Cita documents in Firestore
+export interface CitaDataFirestore {
+  id?: string;
+  usuarioId: string;
+  prestadorId: string;
+  fechaHoraSolicitada: admin.firestore.Timestamp;
+  detallesServicio: string;
+  ubicacion?: ProviderLocation | { customAddress: string };
+  notasAdicionales?: string;
+  estado: CitaEstadoFirestore;
+  fechaCreacion: admin.firestore.Timestamp;
+  updatedAt?: admin.firestore.Timestamp;
+  fechaConfirmacionPrestador?: admin.firestore.Timestamp | null;
+  fechaRechazoPrestador?: admin.firestore.Timestamp | null;
+  ordenCobroId?: string;
+  paymentStatus?: PaymentStatus;
+  fechaCobro?: admin.firestore.Timestamp | null;
+  montoCobrado?: number | null;
+  fechaCancelacion?: admin.firestore.Timestamp | null;
+  canceladaPor?: string;
+  rolCancelador?: "usuario" | "prestador";
+  serviceType?: "fixed" | "hourly";
+  precioServicio?: number;
+  tarifaPorHora?: number;
+  duracionHoras?: number;
+  montoTotalEstimado?: number;
+}
+
 
 // --- Helper para enviar notificaciones ---
 async function sendNotification(userId: string, userType: "usuario" | "prestador", title: string, body: string, data?: {[key: string]: string}) {
@@ -510,12 +561,12 @@ export const onServiceStatusChangeSendNotification = functions.firestore
     const solicitudId = context.params.solicitudId;
 
     if (!newValue || !previousValue) {
-      functions.logger.log(`[FCM Trigger ${solicitudId}] No new or previous data, exiting.`);
+      functions.logger.log(`[FCM Trigger Solicitud ${solicitudId}] No new or previous data, exiting.`);
       return null;
     }
     if (newValue.status === previousValue.status && newValue.paymentStatus === previousValue.paymentStatus) return null;
 
-    functions.logger.log(`[FCM Trigger ${solicitudId}] Estado/Pago cambiado. Antes: ${previousValue.status}, ${previousValue.paymentStatus}. Después: ${newValue.status}, ${newValue.paymentStatus}.`);
+    functions.logger.log(`[FCM Trigger Solicitud ${solicitudId}] Estado/Pago cambiado. Antes: ${previousValue.status}, ${previousValue.paymentStatus}. Después: ${newValue.status}, ${newValue.paymentStatus}.`);
 
     const usuarioId = newValue.usuarioId;
     const prestadorId = newValue.prestadorId;
@@ -533,12 +584,12 @@ export const onServiceStatusChangeSendNotification = functions.firestore
           targetUserId = prestadorId; targetUserType = "prestador";
           tituloNotif = "Solicitud de Reactivación de Servicio";
           cuerpoNotif = `El usuario ${newValue.usuarioId} quiere reactivar el servicio "${serviceTitle}". Por favor, confirma la nueva fecha/hora.`;
-        } else if (!newValue.isRecurringAttempt && previousValue.status !== "pendiente_confirmacion_usuario") { // Standard new request, not a response to offer
+        } else if (!newValue.isRecurringAttempt && previousValue.status !== "pendiente_confirmacion_usuario") {
           targetUserId = prestadorId; targetUserType = "prestador";
           tituloNotif = "Nueva Solicitud de Servicio";
           cuerpoNotif = `Has recibido una nueva solicitud para "${serviceTitle}".`;
         } else {
-          sendStdNotification = false; // Avoid double notification if reactivation already sent one
+          sendStdNotification = false;
         }
         break;
       case "pendiente_confirmacion_usuario":
@@ -546,7 +597,7 @@ export const onServiceStatusChangeSendNotification = functions.firestore
           targetUserId = usuarioId; targetUserType = "usuario";
           tituloNotif = "Oferta de Reactivación de Servicio";
           cuerpoNotif = `El prestador ${newValue.prestadorId} te ofrece reactivar el servicio "${serviceTitle}". Por favor, confirma si deseas continuar.`;
-        } else { // Could be other scenarios leading to this state, handle if needed.
+        } else {
           sendStdNotification = false;
         }
         break;
@@ -820,7 +871,7 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
         createdAt: ahora, updatedAt: ahora, titulo: cotizacionData.tituloServicio || `Servicio de cotización ${cotizacionId.substring(0, 5)}`,
         precio: cotizacionData.precioSugerido,
         montoCobrado: cotizacionData.precioSugerido,
-        paymentStatus: "retenido_para_liberacion", // Asumimos que aceptar la cotización implica retener el pago
+        paymentStatus: "retenido_para_liberacion",
         originatingQuotationId: cotizacionId,
         actorDelCambioId: usuarioId,
         actorDelCambioRol: "usuario",
@@ -1600,7 +1651,7 @@ export const reactivarServicioRecurrente = functions.https.onCall(async (data, c
       actorDelCambioRol: initiatorRoleInOldService,
       createdAt: now,
       updatedAt: now,
-      paymentStatus: "no_aplica", // Payment will be handled upon confirmation
+      paymentStatus: "no_aplica",
     };
 
     if (nuevaFecha) newServiceRequestData.serviceDate = nuevaFecha;
@@ -1613,7 +1664,7 @@ export const reactivarServicioRecurrente = functions.https.onCall(async (data, c
     let logAction: ActivityLogAction = "SOLICITUD_CREADA";
 
     if (accion === "solicitar_nuevamente") {
-      newServiceRequestData.status = "agendado"; // Provider needs to confirm
+      newServiceRequestData.status = "agendado";
       newServiceRequestData.reactivationOfferedBy = "usuario";
       targetNotificationUserId = servicioAnteriorData.prestadorId;
       targetNotificationUserType = "prestador";
@@ -1621,7 +1672,7 @@ export const reactivarServicioRecurrente = functions.https.onCall(async (data, c
       notificationBody = `El usuario ${initiatorId} desea reactivar el servicio "${servicioAnteriorData.titulo || idServicioAnterior}". Por favor, revisa y confirma los detalles.`;
       logAction = "SERVICIO_REACTIVADO_SOLICITUD";
     } else { // "ofrecer_nuevamente"
-      newServiceRequestData.status = "pendiente_confirmacion_usuario"; // User needs to confirm
+      newServiceRequestData.status = "pendiente_confirmacion_usuario";
       newServiceRequestData.reactivationOfferedBy = "prestador";
       targetNotificationUserId = servicioAnteriorData.usuarioId;
       targetNotificationUserType = "usuario";
@@ -2223,7 +2274,7 @@ export const onNewCommunityNoticeSendNotifications = functions.firestore
       };
 
       const notificationPromises = miembros.map((miembroUid) => {
-        if (miembroUid === avisoData.autor_uid) { // Don't notify the author
+        if (miembroUid === avisoData.autor_uid) {
           return Promise.resolve();
         }
         return sendNotification(miembroUid, "usuario", notifTitle, notifBody, notifData);
@@ -2243,5 +2294,129 @@ export const onNewCommunityNoticeSendNotifications = functions.firestore
     } catch (error) {
       functions.logger.error(`[NewAvisoTrigger ${comunidadId}/${avisoId}] Error al enviar notificaciones por nuevo aviso:`, error);
     }
+    return null;
+  });
+
+export const confirmarCitaPorPrestador = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para confirmar una cita (prestador).");
+  }
+  const prestadorIdAutenticado = context.auth.uid;
+  const {citaId, accion} = data; // accion puede ser "confirmar" o "rechazar"
+
+  if (!citaId || typeof citaId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'citaId'.");
+  }
+  if (!accion || (accion !== "confirmar" && accion !== "rechazar")) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere una 'accion' válida ('confirmar' o 'rechazar').");
+  }
+
+  const citaRef = db.collection("citas").doc(citaId);
+
+  try {
+    await db.runTransaction(async (transaction) => {
+      const citaDoc = await transaction.get(citaRef);
+      if (!citaDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Cita con ID ${citaId} no encontrada.`);
+      }
+      const citaData = citaDoc.data() as CitaDataFirestore;
+
+      if (citaData.prestadorId !== prestadorIdAutenticado) {
+        throw new functions.https.HttpsError("permission-denied", "No tienes permiso para modificar esta cita. No corresponde a tu ID de prestador.");
+      }
+
+      if (citaData.estado !== "pendiente_confirmacion") {
+        throw new functions.https.HttpsError("failed-precondition", `Solo se pueden ${accion} citas en estado 'pendiente_confirmacion'. Estado actual: ${citaData.estado}.`);
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      const updateData: Partial<CitaDataFirestore> = {
+        updatedAt: now,
+      };
+      let logActionType: ActivityLogAction;
+
+      if (accion === "confirmar") {
+        updateData.estado = "confirmada_prestador";
+        updateData.fechaConfirmacionPrestador = now;
+        updateData.paymentStatus = "pendiente_cobro";
+        updateData.ordenCobroId = `sim_orden_${citaId}_${Date.now()}`;
+        logActionType = "CITA_CONFIRMADA_PRESTADOR";
+      } else { // accion === "rechazar"
+        updateData.estado = "rechazada_prestador";
+        updateData.fechaRechazoPrestador = now;
+        logActionType = "CITA_RECHAZADA_PRESTADOR";
+      }
+
+      transaction.update(citaRef, updateData);
+      await logActivity(
+        prestadorIdAutenticado,
+        "prestador",
+        logActionType,
+        `Prestador ${prestadorIdAutenticado} ${accion === "confirmar" ? "confirmó" : "rechazó"} cita ${citaId}.`,
+        {tipo: "cita", id: citaId},
+        {usuarioId: citaData.usuarioId}
+      );
+    });
+
+    return {success: true, message: `Cita ${accion === "confirmar" ? "confirmada" : "rechazada"} exitosamente.`};
+  } catch (error: any) {
+    functions.logger.error(`Error en confirmarCitaPorPrestador (cita ${citaId}, accion ${accion}):`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", `Error al ${accion} la cita.`, error.message);
+  }
+});
+
+export const onCitaActualizadaNotificarYProcesar = functions.firestore
+  .document("citas/{citaId}")
+  .onUpdate(async (change, context) => {
+    const citaId = context.params.citaId;
+    const beforeData = change.before.data() as CitaDataFirestore | undefined;
+    const afterData = change.after.data() as CitaDataFirestore | undefined;
+
+    if (!beforeData || !afterData) {
+      functions.logger.log(`[onCitaActualizada ${citaId}] No hay datos antes o después, saliendo.`);
+      return null;
+    }
+
+    const usuarioId = afterData.usuarioId;
+    const prestadorId = afterData.prestadorId;
+    const nombrePrestador = (await db.collection("prestadores").doc(prestadorId).get()).data()?.nombre || "El prestador";
+    const detallesCita = afterData.detallesServicio || "tu cita";
+    const fechaCitaFormateada = afterData.fechaHoraSolicitada.toDate().toLocaleDateString("es-MX", {weekday: "long", year: "numeric", month: "long", day: "numeric"});
+    const horaCitaFormateada = afterData.fechaHoraSolicitada.toDate().toLocaleTimeString("es-MX", {hour: "2-digit", minute: "2-digit"});
+
+
+    if (afterData.estado === "confirmada_prestador" && beforeData.estado !== "confirmada_prestador") {
+      functions.logger.info(`[onCitaActualizada ${citaId}] Cita confirmada por prestador. Iniciando simulación de pago y notificación.`);
+
+      // Simular inicio de proceso de pago (log)
+      await logActivity(
+        "sistema",
+        "sistema",
+        "CITA_PAGO_INICIADO",
+        `Proceso de pago iniciado (simulado) para cita confirmada ${citaId}. Monto: ${afterData.montoTotalEstimado || afterData.precioServicio || 0}.`,
+        {tipo: "cita", id: citaId},
+        {usuarioId, prestadorId, monto: afterData.montoTotalEstimado || afterData.precioServicio || 0}
+      );
+
+      // Notificar al cliente
+      await sendNotification(
+        usuarioId,
+        "usuario",
+        "¡Tu Cita ha sido Confirmada!",
+        `El prestador ${nombrePrestador} ha confirmado tu cita para "${detallesCita}" el ${fechaCitaFormateada} a las ${horaCitaFormateada}. Se procederá con el cobro de $${(afterData.montoTotalEstimado || afterData.precioServicio || 0).toFixed(2)}.`,
+        {citaId, tipo: "CITA_CONFIRMADA"}
+      );
+    } else if (afterData.estado === "rechazada_prestador" && beforeData.estado !== "rechazada_prestador") {
+      functions.logger.info(`[onCitaActualizada ${citaId}] Cita rechazada por prestador. Notificando al cliente.`);
+      await sendNotification(
+        usuarioId,
+        "usuario",
+        "Cita Rechazada",
+        `Lamentablemente, el prestador ${nombrePrestador} ha tenido que rechazar tu cita para "${detallesCita}" el ${fechaCitaFormateada} a las ${horaCitaFormateada}.`,
+        {citaId, tipo: "CITA_RECHAZADA"}
+      );
+    }
+
     return null;
   });
