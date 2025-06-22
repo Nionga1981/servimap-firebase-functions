@@ -50,7 +50,7 @@ export default function RootLayout({
 
   return (
     <html lang="es" suppressHydrationWarning className={montserrat.variable}>
-      <body className="font-montserrat antialiased">
+      <body className="antialiased">
         <AppLayout>
           {children}
         </AppLayout>
