@@ -419,7 +419,9 @@ export type ActivityLogAction =
   | 'CITA_VENTANA_SEGUIMIENTO_DEFINIDA'
   | 'CITA_PROVEEDOR_NOTIFICADO_ONLINE'
   | 'PROVEEDOR_REGISTRADO'
-  | 'CATEGORIA_PROPUESTA';
+  | 'CATEGORIA_PROPUESTA'
+  | 'CATEGORIA_APROBADA'
+  | 'CATEGORIA_RECHAZADA';
 
 
 export interface ActivityLog {
@@ -430,7 +432,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad';
+    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad' | 'categoria_propuesta';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -725,4 +727,3 @@ export interface CategoriaPropuesta {
   fechaCreacion: number; // timestamp
 }
     
-

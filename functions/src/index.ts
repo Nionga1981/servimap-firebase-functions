@@ -260,7 +260,9 @@ export type ActivityLogAction =
   | "CITA_VENTANA_SEGUIMIENTO_DEFINIDA"
   | "CITA_PROVEEDOR_NOTIFICADO_ONLINE"
   | "PROVEEDOR_REGISTRADO"
-  | "CATEGORIA_PROPUESTA";
+  | "CATEGORIA_PROPUESTA"
+  | "CATEGORIA_APROBADA"
+  | "CATEGORIA_RECHAZADA";
 
 
 export interface PromocionFidelidad {
@@ -2690,4 +2692,79 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
   }
 });
     
+export const onCategoryProposalUpdate = functions.firestore
+  .document("propuestas_categorias/{proposalId}")
+  .onUpdate(async (change, context) => {
+    const proposalId = context.params.proposalId;
+    const beforeData = change.before.data() as CategoriaPropuestaData;
+    const afterData = change.after.data() as CategoriaPropuestaData;
 
+    if (!beforeData || !afterData) {
+      functions.logger.log(`[CategoryProposalTrigger ${proposalId}] No data, exiting.`);
+      return null;
+    }
+
+    // Only trigger if 'estado' changes from 'pendiente'
+    if (beforeData.estado !== "pendiente" || beforeData.estado === afterData.estado) {
+      functions.logger.log(`[CategoryProposalTrigger ${proposalId}] No relevant state change from 'pendiente', exiting. Before: ${beforeData.estado}, After: ${afterData.estado}`);
+      return null;
+    }
+
+    const {providerId, nombrePropuesto} = afterData;
+
+    if (afterData.estado === "aprobada") {
+      functions.logger.info(`[CategoryProposalTrigger ${proposalId}] Proposal for "${nombrePropuesto}" approved. Adding to dynamic categories.`);
+      try {
+        const newCategoryId = nombrePropuesto.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+
+        // Add to a new dynamic categories collection
+        await db.collection("service_categories_dynamic").doc(newCategoryId).set({
+          id: newCategoryId,
+          name: nombrePropuesto,
+          // We can't assign a Lucide icon programmatically here, so this would be handled by an admin UI later.
+          keywords: [nombrePropuesto.toLowerCase()],
+        });
+
+        await logActivity(
+          "sistema_admin", // Assume an admin made the change
+          "admin",
+          "CATEGORIA_APROBADA",
+          `Categoría propuesta "${nombrePropuesto}" (ID: ${proposalId}) fue aprobada y añadida como ID: ${newCategoryId}.`,
+          {tipo: "categoria_propuesta", id: proposalId},
+          {newCategoryId}
+        );
+
+        await sendNotification(
+          providerId,
+          "prestador",
+          "¡Tu categoría fue aprobada!",
+          `La categoría "${nombrePropuesto}" que propusiste ha sido aprobada y ya está disponible.`,
+          {proposalId, newCategoryId}
+        );
+      } catch (error) {
+        functions.logger.error(`[CategoryProposalTrigger ${proposalId}] Error adding approved category:`, error);
+      }
+    } else if (afterData.estado === "rechazada") {
+      functions.logger.info(`[CategoryProposalTrigger ${proposalId}] Proposal for "${nombrePropuesto}" was rejected.`);
+
+      await logActivity(
+        "sistema_admin",
+        "admin",
+        "CATEGORIA_RECHAZADA",
+        `Categoría propuesta "${nombrePropuesto}" (ID: ${proposalId}) fue rechazada.`,
+        {tipo: "categoria_propuesta", id: proposalId}
+      );
+
+      await sendNotification(
+        providerId,
+        "prestador",
+        "Categoría Propuesta Revisada",
+        `La categoría "${nombrePropuesto}" que propusiste ha sido revisada y no fue aprobada en esta ocasión.`,
+        {proposalId}
+      );
+    }
+
+    return null;
+  });
+
+```
