@@ -2713,25 +2713,21 @@ export const onCategoryProposalUpdate = functions.firestore
     const {providerId, nombrePropuesto} = afterData;
 
     if (afterData.estado === "aprobada") {
-      functions.logger.info(`[CategoryProposalTrigger ${proposalId}] Proposal for "${nombrePropuesto}" approved. Adding to dynamic categories.`);
+      functions.logger.info(`[CategoryProposalTrigger ${proposalId}] Proposal for "${nombrePropuesto}" approved. Adding to official categories.`);
       try {
-        const newCategoryId = nombrePropuesto.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
-
-        // Add to a new dynamic categories collection
-        await db.collection("service_categories_dynamic").doc(newCategoryId).set({
-          id: newCategoryId,
-          name: nombrePropuesto,
-          // We can't assign a Lucide icon programmatically here, so this would be handled by an admin UI later.
-          keywords: [nombrePropuesto.toLowerCase()],
+        const newCategoryRef = await db.collection("categorias_oficiales").add({
+          nombre_categoria: nombrePropuesto,
+          fecha_creacion: admin.firestore.Timestamp.now(),
+          origen: "propuesta_prestador",
         });
 
         await logActivity(
           "sistema_admin", // Assume an admin made the change
           "admin",
           "CATEGORIA_APROBADA",
-          `Categoría propuesta "${nombrePropuesto}" (ID: ${proposalId}) fue aprobada y añadida como ID: ${newCategoryId}.`,
+          `Categoría propuesta "${nombrePropuesto}" (ID: ${proposalId}) fue aprobada y añadida como '${newCategoryRef.id}' a categorias_oficiales.`,
           {tipo: "categoria_propuesta", id: proposalId},
-          {newCategoryId}
+          {newOfficialCategoryId: newCategoryRef.id}
         );
 
         await sendNotification(
@@ -2739,7 +2735,7 @@ export const onCategoryProposalUpdate = functions.firestore
           "prestador",
           "¡Tu categoría fue aprobada!",
           `La categoría "${nombrePropuesto}" que propusiste ha sido aprobada y ya está disponible.`,
-          {proposalId, newCategoryId}
+          {proposalId, newCategoryId: newCategoryRef.id}
         );
       } catch (error) {
         functions.logger.error(`[CategoryProposalTrigger ${proposalId}] Error adding approved category:`, error);
@@ -2766,5 +2762,3 @@ export const onCategoryProposalUpdate = functions.firestore
 
     return null;
   });
-
-```
