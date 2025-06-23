@@ -2,7 +2,7 @@
 "use client";
 
 import Link from 'next/link';
-import { Menu, Package2, UserCircle, Globe, ChevronDown, Search, Users, MessageSquare, Briefcase, type LucideIcon } from 'lucide-react';
+import { Menu, Package2, UserCircle, Globe, ChevronDown, Search, Users, MessageSquare, Briefcase, type LucideIcon, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import {
@@ -221,6 +221,12 @@ export function AppHeader() {
             <DropdownMenuLabel>{getTranslatedText('my_account', 'Mi Cuenta')}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem>{getTranslatedText('profile', 'Perfil')}</DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/provider-signup">
+                <UserPlus className="mr-2 h-4 w-4" />
+                <span>Conviértete en Proveedor</span>
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem>{getTranslatedText('settings', 'Configuración')}</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem>{getTranslatedText('logout', 'Cerrar Sesión')}</DropdownMenuItem>

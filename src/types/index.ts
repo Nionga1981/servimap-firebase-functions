@@ -57,6 +57,7 @@ export interface Provider {
   fcmTokens?: string[];
   aceptaCotizacion?: boolean;
   empresa?: string;
+  categoryIds?: string[];
 }
 
 export interface ChatMessage {
@@ -416,7 +417,9 @@ export type ActivityLogAction =
   | 'CITA_COMPLETADA'
   | 'CITA_ERROR_PAGO'
   | 'CITA_VENTANA_SEGUIMIENTO_DEFINIDA'
-  | 'CITA_PROVEEDOR_NOTIFICADO_ONLINE';
+  | 'CITA_PROVEEDOR_NOTIFICADO_ONLINE'
+  | 'PROVEEDOR_REGISTRADO'
+  | 'CATEGORIA_PROPUESTA';
 
 
 export interface ActivityLog {
@@ -714,4 +717,12 @@ export interface AvisoComunidad {
   autor_uid: string; // Debe coincidir con el embajador_uid de la comunidad
 }
 
+export interface CategoriaPropuesta {
+  id?: string;
+  providerId: string;
+  nombrePropuesto: string;
+  estado: 'pendiente' | 'aprobada' | 'rechazada';
+  fechaCreacion: number; // timestamp
+}
     
+

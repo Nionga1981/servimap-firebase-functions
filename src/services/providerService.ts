@@ -1,6 +1,9 @@
 // src/services/providerService.ts
 "use client"; // Necesario si usamos hooks o interactuamos con APIs de navegador
 
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { app } from '@/lib/firebase';
+
 // En una aplicación real, importarías tu instancia de Firestore y funciones de Firebase:
 // import { db } from '@/lib/firebase'; // Asumiendo que tienes firebase.ts configurado
 // import { doc, updateDoc, serverTimestamp, deleteField } from 'firebase/firestore';
@@ -14,6 +17,14 @@ interface ProviderUpdatePayload {
     timestamp: number;
   } | null;
 }
+
+interface ProviderRegistrationData {
+    name: string;
+    specialties: string[];
+    selectedCategoryIds: string[];
+    newCategoryName?: string;
+}
+
 
 /**
  * Actualiza la disponibilidad y la ubicación en tiempo real de un proveedor.
@@ -68,4 +79,23 @@ export const disconnectProvider = async (providerId: string): Promise<void> => {
   // await updateDoc(providerRef, updates);
 
   console.log(`[ProviderService] ${providerId} desconectado (simulado).`);
+};
+
+/**
+ * Llama a la Cloud Function para registrar un nuevo perfil de proveedor.
+ */
+export const registerProvider = async (data: ProviderRegistrationData): Promise<any> => {
+  console.log('[ProviderService] Llamando a la función registerProviderProfile...', data);
+  const functions = getFunctions(app);
+  const registerProviderProfile = httpsCallable(functions, 'registerProviderProfile');
+  
+  try {
+    const result = await registerProviderProfile(data);
+    console.log('[ProviderService] Respuesta de la función:', result.data);
+    return result.data;
+  } catch (error) {
+    console.error("[ProviderService] Error al llamar a la función 'registerProviderProfile':", error);
+    // Para que el componente que llama pueda manejar el error, lo relanzamos.
+    throw error;
+  }
 };

@@ -130,6 +130,7 @@ export interface ProviderData {
   currentLocation?: {lat: number; lng: number; timestamp?: admin.firestore.Timestamp};
   rating?: number;
   avatarUrl?: string;
+  categoryIds?: string[];
 }
 
 export interface ServiceRequest {
@@ -257,7 +258,9 @@ export type ActivityLogAction =
   | "CITA_COMPLETADA"
   | "CITA_ERROR_PAGO"
   | "CITA_VENTANA_SEGUIMIENTO_DEFINIDA"
-  | "CITA_PROVEEDOR_NOTIFICADO_ONLINE";
+  | "CITA_PROVEEDOR_NOTIFICADO_ONLINE"
+  | "PROVEEDOR_REGISTRADO"
+  | "CATEGORIA_PROPUESTA";
 
 
 export interface PromocionFidelidad {
@@ -521,6 +524,14 @@ export interface CitaDataFirestore {
   montoTotalEstimado?: number;
   permiteSeguimientoDesdeTimestamp?: admin.firestore.Timestamp;
   notificadoParaEstarEnLinea?: boolean;
+}
+
+export interface CategoriaPropuestaData {
+    id?: string;
+    providerId: string;
+    nombrePropuesto: string;
+    estado: 'pendiente' | 'aprobada' | 'rechazada';
+    fechaCreacion: admin.firestore.Timestamp;
 }
 
 
@@ -2610,7 +2621,7 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
       functions.logger.info(`[onCitaActualizada ${citaId}] Cita rechazada por prestador. Notificando al cliente.`);
       await sendNotification(
         usuarioId, "usuario", "Cita Rechazada",
-        `Tu solicitud con ${prestadorNombre} para "${detallesCita}" el ${fechaCitaFormateada} fue rechazada. Puedes buscar otro servicio.`,
+        `Lamentablemente, el prestador ${prestadorNombre} ha tenido que rechazar tu cita para "${detallesCita}" el ${fechaCitaFormateada}.`,
         {citaId, tipo: "CITA_RECHAZADA"}
       );
     } else if (afterData.estado === "cancelada_usuario" && beforeData.estado !== "cancelada_usuario") {
@@ -2621,5 +2632,62 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
     return null;
   });
 
+export const registerProviderProfile = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrarte como proveedor.");
+  }
+  const providerId = context.auth.uid;
+  const {name, specialties, selectedCategoryIds, newCategoryName} = data;
 
+  if (!name || typeof name !== "string" || name.length < 3) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre válido (mínimo 3 caracteres).");
+  }
+  if (!Array.isArray(specialties) || !Array.isArray(selectedCategoryIds)) {
+    throw new functions.https.HttpsError("invalid-argument", "Especialidades y categorías deben ser un arreglo.");
+  }
+
+  const providerRef = db.collection("prestadores").doc(providerId);
+
+  try {
+    const providerDoc = await providerRef.get();
+    if (providerDoc.exists) {
+      throw new functions.https.HttpsError("already-exists", "Ya existe un perfil de proveedor para este usuario.");
+    }
+
+    const now = admin.firestore.Timestamp.now();
+    const batch = db.batch();
+
+    const newProviderData: Partial<ProviderData> = {
+      nombre: name,
+      specialties: specialties,
+      categoryIds: selectedCategoryIds,
+      isAvailable: false, // Por defecto no disponible hasta que lo activen
+      rating: 0,
+      avatarUrl: `https://placehold.co/100x100/7F7F7F/FFFFFF.png?text=${name.charAt(0)}`,
+    };
+    batch.set(providerRef, newProviderData, {merge: true});
+    await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Usuario ${providerId} se registró como proveedor: ${name}.`, {tipo: "prestador", id: providerId});
+
+    if (newCategoryName && typeof newCategoryName === "string" && newCategoryName.trim().length > 2) {
+      const proposalRef = db.collection("propuestas_categorias").doc();
+      const proposalData: CategoriaPropuestaData = {
+        providerId: providerId,
+        nombrePropuesto: newCategoryName.trim(),
+        estado: "pendiente",
+        fechaCreacion: now,
+      };
+      batch.set(proposalRef, proposalData);
+      await logActivity(providerId, "usuario", "CATEGORIA_PROPUESTA", `Proveedor ${providerId} propuso nueva categoría: "${newCategoryName.trim()}".`, {tipo: "categoria_propuesta", id: proposalRef.id});
+    }
+
+    await batch.commit();
+
+    return {success: true, message: "¡Felicidades! Tu perfil de proveedor ha sido creado.", providerId: providerId};
+  } catch (error: any) {
+    functions.logger.error(`Error registrando proveedor ${providerId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al crear el perfil de proveedor.", error.message);
+  }
+});
     
+
