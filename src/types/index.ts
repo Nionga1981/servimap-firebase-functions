@@ -1,4 +1,3 @@
-
 // src/types/index.ts
 import type { LucideIcon } from 'lucide-react';
 
@@ -722,7 +721,7 @@ export interface AvisoComunidad {
 export interface CategoriaPropuesta {
   id?: string;
   providerId: string;
-  nombrePropuesto: string;
+  nombre_categoria_propuesta: string;
   estado: 'pendiente' | 'aprobada' | 'rechazada';
   fechaCreacion: number; // timestamp
 }
