@@ -123,6 +123,7 @@ export interface ProviderData {
   fcmTokens?: string[];
   nombre?: string;
   aceptaCotizacion?: boolean;
+  aceptaViajes?: boolean;
   empresa?: string;
   services?: {category: string; title: string; description: string; price: number}[];
   specialties?: string[];
@@ -1500,6 +1501,7 @@ export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, c
   try {
     const prestadoresQuery = db.collection("prestadores")
       .where("isAvailable", "==", true)
+      .where("aceptaViajes", "==", true)
       .where("categoryIds", "array-contains", categoriaId)
       .orderBy("rating", "desc");
       
@@ -1535,14 +1537,14 @@ export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, c
       }
     }
     
-    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó por categoría: "${categoriaId}". Resultados: ${resultados.length}.`, undefined, { categoriaId, lat: latUsuario, lng: lngUsuario });
+    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó por categoría: "${categoriaId}" (aceptan viajes). Resultados: ${resultados.length}.`, undefined, { categoriaId, lat: latUsuario, lng: lngUsuario, aceptaViajes: true });
 
     return resultados;
 
   } catch (error: any) {
     functions.logger.error("Error en buscarPrestadoresPorFiltros:", error);
     if (error.code === 'failed-precondition') {
-        throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
+        throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions (isAvailable, aceptaViajes, categoryIds, rating).");
     }
     throw new functions.https.HttpsError("internal", "Error al buscar prestadores.", error.message);
   }

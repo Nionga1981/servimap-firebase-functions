@@ -55,6 +55,7 @@ export interface Provider {
   idiomasHablados?: string[];
   fcmTokens?: string[];
   aceptaCotizacion?: boolean;
+  aceptaViajes?: boolean;
   empresa?: string;
   categoryIds?: string[];
 }
