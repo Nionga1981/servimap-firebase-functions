@@ -2,7 +2,7 @@
 "use client";
 
 import Link from 'next/link';
-import { Menu, Package2, UserCircle, Globe, ChevronDown, Search, Users, MessageSquare, Briefcase, type LucideIcon, UserPlus } from 'lucide-react';
+import { Menu, Package2, UserCircle, Globe, ChevronDown, Search, Users, MessageSquare, Briefcase, type LucideIcon, UserPlus, Crown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import {
@@ -220,6 +220,9 @@ export function AppHeader() {
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>{getTranslatedText('my_account', 'Mi Cuenta')}</DropdownMenuLabel>
             <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/ambassador"><Crown className="mr-2 h-4 w-4" />Panel de Embajador</Link>
+            </DropdownMenuItem>
             <DropdownMenuItem>{getTranslatedText('profile', 'Perfil')}</DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/provider-signup">

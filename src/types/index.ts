@@ -1,4 +1,3 @@
-
 // src/types/index.ts
 import type { LucideIcon } from 'lucide-react';
 
@@ -743,6 +742,12 @@ export interface CategoriaPropuesta {
   estado: 'pendiente' | 'aprobada' | 'rechazada';
   fechaCreacion: number; // timestamp
 }
-    
 
+export interface AmbassadorData {
+  referidos: { id: string; name: string; avatarUrl?: string }[];
+  comisionesAcumuladas: number;
+  historialComisiones: (HistorialComision & { providerName?: string })[];
+  codigoEmbajador?: string;
+}
+    
     
