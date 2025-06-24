@@ -87,6 +87,7 @@ export const mockProviders: Provider[] = [
     idiomasHablados: ['es'],
     aceptaCotizacion: true,
     aceptaViajes: true,
+    aceptaTrabajosVirtuales: false,
   },
   {
     id: 'electrician1',
@@ -111,6 +112,7 @@ export const mockProviders: Provider[] = [
     idiomasHablados: ['es', 'en'],
     aceptaCotizacion: true,
     aceptaViajes: true,
+    aceptaTrabajosVirtuales: true,
   },
   {
     id: 'nanny1',
@@ -135,6 +137,7 @@ export const mockProviders: Provider[] = [
     idiomasHablados: ['es'],
     aceptaCotizacion: false,
     aceptaViajes: false,
+    aceptaTrabajosVirtuales: false,
   },
   {
     id: 'gardener1',
@@ -158,6 +161,7 @@ export const mockProviders: Provider[] = [
     idiomasHablados: ['es'],
     aceptaCotizacion: true,
     aceptaViajes: true,
+    aceptaTrabajosVirtuales: false,
   },
   {
     id: 'doctor1',
@@ -182,6 +186,7 @@ export const mockProviders: Provider[] = [
     idiomasHablados: ['es', 'en'],
     aceptaCotizacion: false,
     aceptaViajes: false,
+    aceptaTrabajosVirtuales: true,
   },
   {
     id: 'cleaner1',
@@ -205,6 +210,7 @@ export const mockProviders: Provider[] = [
     idiomasHablados: ['es'],
     aceptaCotizacion: true,
     aceptaViajes: true,
+    aceptaTrabajosVirtuales: false,
   },
 ];
 

@@ -131,6 +131,7 @@ export interface ProviderData {
   nombre?: string;
   aceptaCotizacion?: boolean;
   aceptaViajes?: boolean;
+  aceptaTrabajosVirtuales?: boolean;
   empresa?: string;
   services?: {category: string; title: string; description: string; price: number}[];
   specialties?: string[];
@@ -1491,30 +1492,30 @@ export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, c
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
   }
-  const { categoriaId, pais } = data;
+  const { categoriaId } = data;
 
-  if (!categoriaId || typeof categoriaId !== "string" || !pais || typeof pais !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'categoriaId' y 'pais'.");
+  if (!categoriaId || typeof categoriaId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'categoriaId'.");
   }
 
   try {
     const prestadoresQuery = db.collection("prestadores")
       .where("isAvailable", "==", true)
       .where("categoryIds", "array-contains", categoriaId)
-      .where("currentLocation.pais", "==", pais)
+      .where("aceptaTrabajosVirtuales", "==", true)
       .orderBy("rating", "desc");
-      
+
     const prestadoresSnapshot = await prestadoresQuery.get();
-    
+
     if (prestadoresSnapshot.empty) {
       return [];
     }
 
-    const resultados: PrestadorBuscado[] = [];
+    const resultados: Omit<PrestadorBuscado, "distanciaKm">[] = [];
 
     for (const doc of prestadoresSnapshot.docs) {
       const provider = doc.data() as ProviderData;
-      
+
       resultados.push({
         id: doc.id,
         nombre: provider.nombre || "N/A",
@@ -1524,15 +1525,14 @@ export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, c
         categoriaPrincipal: SERVICE_CATEGORIES.find(c => c.id === (provider.categoryIds?.[0]))?.name || "General",
       });
     }
-    
-    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó por categoría: "${categoriaId}" en país "${pais}". Resultados: ${resultados.length}.`, undefined, { categoriaId, pais });
+
+    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó trabajos virtuales por categoría: "${categoriaId}". Resultados: ${resultados.length}.`, undefined, { categoriaId });
 
     return resultados;
-
   } catch (error: any) {
     functions.logger.error("Error en buscarPrestadoresPorFiltros:", error);
     if (error.code === 'failed-precondition') {
-        throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions (isAvailable, categoryIds, currentLocation.pais, rating).");
+        throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions (isAvailable, categoryIds, aceptaTrabajosVirtuales, rating).");
     }
     throw new functions.https.HttpsError("internal", "Error al buscar prestadores.", error.message);
   }

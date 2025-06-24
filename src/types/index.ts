@@ -58,6 +58,7 @@ export interface Provider {
   fcmTokens?: string[];
   aceptaCotizacion?: boolean;
   aceptaViajes?: boolean;
+  aceptaTrabajosVirtuales?: boolean;
   empresa?: string;
   categoryIds?: string[];
 }
