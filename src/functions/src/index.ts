@@ -1,4 +1,5 @@
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -119,15 +120,22 @@ export interface UserData {
   favoritos?: string[];
 }
 
+interface ProviderLocation {
+  lat: number;
+  lng: number;
+  pais?: string;
+}
+
 export interface ProviderData {
   fcmTokens?: string[];
   nombre?: string;
   aceptaCotizacion?: boolean;
+  aceptaViajes?: boolean;
   empresa?: string;
   services?: {category: string; title: string; description: string; price: number}[];
   specialties?: string[];
   isAvailable?: boolean;
-  currentLocation?: {lat: number; lng: number; timestamp?: admin.firestore.Timestamp};
+  currentLocation?: ProviderLocation | null;
   rating?: number;
   avatarUrl?: string;
   categoryIds?: string[];
@@ -167,7 +175,7 @@ export interface ServiceRequest {
   isRecurringAttempt?: boolean;
   reactivationOfferedBy?: "usuario" | "prestador";
   mutualRatingCompleted?: boolean;
-  location?: ProviderLocation | {customAddress: string};
+  location?: ProviderLocation | { customAddress: string };
   notes?: string;
   providerMarkedCompleteAt?: number;
   userConfirmedCompletionAt?: number;
@@ -313,11 +321,6 @@ export interface Recordatorio {
   };
 }
 
-interface ProviderLocation {
-  lat: number;
-  lng: number;
-}
-
 interface CoordenadaFirestore {
   lat: number;
   lng: number;
@@ -376,7 +379,6 @@ interface PrestadorBuscado {
   id: string;
   nombre: string;
   empresa?: string;
-  distanciaKm: number;
   calificacion: number;
   avatarUrl?: string;
   categoriaPrincipal?: string;
@@ -531,7 +533,7 @@ export interface CitaDataFirestore {
 export interface CategoriaPropuestaData {
     id?: string;
     providerId: string;
-    nombre_categoria_propuesta: string;
+    nombrePropuesto: string;
     estado: 'pendiente' | 'aprobada' | 'rechazada';
     fechaCreacion: admin.firestore.Timestamp;
 }
@@ -1459,7 +1461,6 @@ export const buscarPrestadoresInteligente = functions.https.onCall(async (data, 
           id: doc.id,
           nombre: provider.nombre || "N/A",
           empresa: provider.empresa,
-          distanciaKm: parseFloat(distanciaKm.toFixed(1)),
           calificacion: provider.rating || 0,
           avatarUrl: provider.avatarUrl,
           categoriaPrincipal: provider.services?.[0]?.category ? (SERVICE_CATEGORIES.find(c=>c.id === provider.services?.[0]?.category)?.name || provider.services?.[0]?.category) : "General",
@@ -1468,8 +1469,10 @@ export const buscarPrestadoresInteligente = functions.https.onCall(async (data, 
     }
 
     prestadoresCandidatos.sort((a, b) => {
-      if (a.distanciaKm < b.distanciaKm) return -1;
-      if (a.distanciaKm > b.distanciaKm) return 1;
+      // @ts-ignore
+      if (a.distanciaKm && b.distanciaKm && a.distanciaKm < b.distanciaKm) return -1;
+      // @ts-ignore
+      if (a.distanciaKm && b.distanciaKm && a.distanciaKm > b.distanciaKm) return 1;
       if (a.calificacion > b.calificacion) return -1;
       if (a.calificacion < b.calificacion) return 1;
       return 0;
@@ -1480,6 +1483,57 @@ export const buscarPrestadoresInteligente = functions.https.onCall(async (data, 
     return prestadoresCandidatos;
   } catch (error: any) {
     functions.logger.error("Error en buscarPrestadoresInteligente:", error);
+    throw new functions.https.HttpsError("internal", "Error al buscar prestadores.", error.message);
+  }
+});
+
+export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const { categoriaId, pais } = data;
+
+  if (!categoriaId || typeof categoriaId !== "string" || !pais || typeof pais !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'categoriaId' y 'pais'.");
+  }
+
+  try {
+    const prestadoresQuery = db.collection("prestadores")
+      .where("isAvailable", "==", true)
+      .where("categoryIds", "array-contains", categoriaId)
+      .where("currentLocation.pais", "==", pais)
+      .orderBy("rating", "desc");
+      
+    const prestadoresSnapshot = await prestadoresQuery.get();
+    
+    if (prestadoresSnapshot.empty) {
+      return [];
+    }
+
+    const resultados: PrestadorBuscado[] = [];
+
+    for (const doc of prestadoresSnapshot.docs) {
+      const provider = doc.data() as ProviderData;
+      
+      resultados.push({
+        id: doc.id,
+        nombre: provider.nombre || "N/A",
+        empresa: provider.empresa,
+        calificacion: provider.rating || 0,
+        avatarUrl: provider.avatarUrl,
+        categoriaPrincipal: SERVICE_CATEGORIES.find(c => c.id === (provider.categoryIds?.[0]))?.name || "General",
+      });
+    }
+    
+    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó por categoría: "${categoriaId}" en país "${pais}". Resultados: ${resultados.length}.`, undefined, { categoriaId, pais });
+
+    return resultados;
+
+  } catch (error: any) {
+    functions.logger.error("Error en buscarPrestadoresPorFiltros:", error);
+    if (error.code === 'failed-precondition') {
+        throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions (isAvailable, categoryIds, currentLocation.pais, rating).");
+    }
     throw new functions.https.HttpsError("internal", "Error al buscar prestadores.", error.message);
   }
 });
@@ -2538,6 +2592,11 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
       functions.logger.log(`[onCitaActualizada ${citaId}] No hay datos antes o después, saliendo.`);
       return null;
     }
+    
+    // Solo actuar si el estado ha cambiado
+    if (beforeData.estado === afterData.estado) {
+        return null;
+    }
 
     const usuarioId = afterData.usuarioId;
     const prestadorId = afterData.prestadorId;
@@ -2674,7 +2733,7 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
       const proposalRef = db.collection("propuestas_categorias").doc();
       const proposalData: CategoriaPropuestaData = {
         providerId: providerId,
-        nombre_categoria_propuesta: newCategoryName.trim(),
+        nombrePropuesto: newCategoryName.trim(),
         estado: "pendiente",
         fechaCreacion: now,
       };
@@ -2710,13 +2769,13 @@ export const onCategoryProposalUpdate = functions.firestore
       return null;
     }
 
-    const {providerId, nombre_categoria_propuesta} = afterData;
+    const {providerId, nombrePropuesto} = afterData;
 
     if (afterData.estado === "aprobada") {
-      functions.logger.info(`[CategoryProposalTrigger ${proposalId}] Proposal for "${nombre_categoria_propuesta}" approved. Adding to official categories.`);
+      functions.logger.info(`[CategoryProposalTrigger ${proposalId}] Proposal for "${nombrePropuesto}" approved. Adding to official categories.`);
       try {
         const newCategoryRef = await db.collection("categorias_oficiales").add({
-          nombre_categoria: nombre_categoria_propuesta,
+          nombre_categoria: nombrePropuesto,
           fecha_creacion: admin.firestore.Timestamp.now(),
           origen: "propuesta_prestador",
         });
@@ -2725,7 +2784,7 @@ export const onCategoryProposalUpdate = functions.firestore
           "sistema_admin", // Assume an admin made the change
           "admin",
           "CATEGORIA_APROBADA",
-          `Categoría propuesta "${nombre_categoria_propuesta}" (ID: ${proposalId}) fue aprobada y añadida como '${newCategoryRef.id}' a categorias_oficiales.`,
+          `Categoría propuesta "${nombrePropuesto}" (ID: ${proposalId}) fue aprobada y añadida como '${newCategoryRef.id}' a categorias_oficiales.`,
           {tipo: "categoria_propuesta", id: proposalId},
           {newOfficialCategoryId: newCategoryRef.id}
         );
@@ -2734,20 +2793,20 @@ export const onCategoryProposalUpdate = functions.firestore
           providerId,
           "prestador",
           "¡Tu categoría fue aprobada!",
-          `La categoría "${nombre_categoria_propuesta}" que propusiste ha sido aprobada y ya está disponible.`,
+          `La categoría "${nombrePropuesto}" que propusiste ha sido aprobada y ya está disponible.`,
           {proposalId, newCategoryId: newCategoryRef.id}
         );
       } catch (error) {
         functions.logger.error(`[CategoryProposalTrigger ${proposalId}] Error adding approved category:`, error);
       }
     } else if (afterData.estado === "rechazada") {
-      functions.logger.info(`[CategoryProposalTrigger ${proposalId}] Proposal for "${nombre_categoria_propuesta}" was rejected.`);
+      functions.logger.info(`[CategoryProposalTrigger ${proposalId}] Proposal for "${nombrePropuesto}" was rejected.`);
 
       await logActivity(
         "sistema_admin",
         "admin",
         "CATEGORIA_RECHAZADA",
-        `Categoría propuesta "${nombre_categoria_propuesta}" (ID: ${proposalId}) fue rechazada.`,
+        `Categoría propuesta "${nombrePropuesto}" (ID: ${proposalId}) fue rechazada.`,
         {tipo: "categoria_propuesta", id: proposalId}
       );
 
@@ -2755,10 +2814,15 @@ export const onCategoryProposalUpdate = functions.firestore
         providerId,
         "prestador",
         "Categoría Propuesta Revisada",
-        `La categoría "${nombre_categoria_propuesta}" que propusiste ha sido revisada y no fue aprobada en esta ocasión.`,
+        `La categoría "${nombrePropuesto}" que propusiste ha sido revisada y no fue aprobada en esta ocasión.`,
         {proposalId}
       );
     }
 
     return null;
   });
+
+
+    
+
+    
