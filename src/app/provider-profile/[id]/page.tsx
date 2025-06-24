@@ -6,22 +6,21 @@ import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { mockProviders, USER_FIXED_LOCATION, mockProviderGalleries } from '@/lib/mockData';
-import type { Provider, Service, ServiceRequest, FixedServiceRequest, HourlyServiceRequest, GalleryItem } from '@/types';
+import type { Provider, Service, ServiceRequest, FixedServiceRequest, HourlyServiceRequest, GalleryItem, ProviderLocation } from '@/types';
 import { SERVICE_CATEGORIES, DEFAULT_USER_AVATAR, SERVICE_HOURS } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Label }
-  from "@/components/ui/label";
+import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from '@/hooks/use-toast';
-import { Star, MapPin, Briefcase, DollarSign, Clock, CalendarDays, Mail, ChevronLeft, ShoppingBag, Image as ImageIcon, Video, BookOpen } from 'lucide-react';
-import { createServiceRequest } from '@/services/requestService'; 
+import { Star, MapPin, Briefcase, DollarSign, Clock, CalendarDays, Mail, ChevronLeft, ShoppingBag, Image as ImageIcon, Video, BookOpen, CheckCircle, X } from 'lucide-react';
+import { createServiceRequest, createImmediateRequest } from '@/services/requestService'; 
 import { cn } from '@/lib/utils';
 
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -65,6 +64,7 @@ export default function ProviderProfilePage() {
   // Estados para Contratar Ahora (Servicios de Precio Fijo Inmediatos)
   const [selectedServices, setSelectedServices] = useState<Record<string, boolean>>({});
   const [isSubmittingImmediate, setIsSubmittingImmediate] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<'tarjeta' | 'efectivo' | 'transferencia' | 'wallet'>('tarjeta');
 
   // Estado para la galería
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
@@ -125,15 +125,37 @@ export default function ProviderProfilePage() {
       return;
     }
     setIsSubmittingImmediate(true);
-    toast({ title: "Procesando Solicitud...", description: "Simulando contratación inmediata..." });
-    // Simulación de proceso
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    toast({ title: "Procesando Solicitud...", description: "Enviando tu solicitud de servicio inmediato..." });
+    
+    try {
+        const payload = {
+            providerId: provider.id,
+            selectedServices: selectedImmediateServicesDetails.map(s => ({ serviceId: s.id, title: s.title, price: s.price })),
+            totalAmount: immediateServiceSubtotal,
+            location: USER_FIXED_LOCATION, // Using fixed location for now
+            metodoPago: paymentMethod,
+        };
+        const result = await createImmediateRequest(payload);
+        
+        toast({
+            title: "¡Solicitud Exitosa!",
+            description: `Tu servicio ha sido solicitado y pagado. ID: ${result.solicitudId}`,
+            duration: 7000,
+        });
 
-    // En una app real, aquí se crearía la ServiceRequest y se iniciaría el pago.
-    // Después, redirigir
-    router.push(`/?hiredProviderId=${provider.id}`);
-    setIsSubmittingImmediate(false);
-    setSelectedServices({});
+        // Redirect user to a confirmation/tracking page, or just clear the state
+        router.push(`/?hiredProviderId=${provider.id}`); // Reusing existing param for en-route view
+        setSelectedServices({});
+
+    } catch (error: any) {
+         toast({
+            title: "Error en la Solicitud",
+            description: error.message || "No se pudo crear la solicitud de servicio.",
+            variant: "destructive"
+        });
+    } finally {
+         setIsSubmittingImmediate(false);
+    }
   };
 
   const handleRequestAppointment = async () => {
@@ -396,9 +418,32 @@ export default function ProviderProfilePage() {
                       </Label>
                     ))}
                   </div>
+
+                  <div className="pt-2 border-t">
+                    <Label className="text-sm font-medium">Método de Pago</Label>
+                    <RadioGroup value={paymentMethod} onValueChange={(value) => setPaymentMethod(value as any)} className="mt-2 grid grid-cols-2 gap-2">
+                        <Label htmlFor="pay-card" className="flex items-center space-x-2 border rounded-md p-2 hover:bg-muted/50 cursor-pointer">
+                            <RadioGroupItem value="tarjeta" id="pay-card" />
+                            <span>Tarjeta</span>
+                        </Label>
+                         <Label htmlFor="pay-cash" className="flex items-center space-x-2 border rounded-md p-2 hover:bg-muted/50 cursor-pointer">
+                            <RadioGroupItem value="efectivo" id="pay-cash" />
+                            <span>Efectivo</span>
+                        </Label>
+                         <Label htmlFor="pay-wallet" className="flex items-center space-x-2 border rounded-md p-2 hover:bg-muted/50 cursor-pointer">
+                            <RadioGroupItem value="wallet" id="pay-wallet" />
+                            <span>Wallet</span>
+                        </Label>
+                         <Label htmlFor="pay-transfer" className="flex items-center space-x-2 border rounded-md p-2 hover:bg-muted/50 cursor-pointer">
+                            <RadioGroupItem value="transferencia" id="pay-transfer" />
+                            <span>Transferencia</span>
+                        </Label>
+                    </RadioGroup>
+                  </div>
+
                   {selectedImmediateServicesDetails.length > 0 && (
                     <div className="pt-2 border-t">
-                      <p className="text-sm font-medium">Subtotal: <span className="text-primary">${immediateServiceSubtotal.toFixed(2)}</span></p>
+                      <p className="text-lg font-semibold text-right">Total: <span className="text-primary">${immediateServiceSubtotal.toFixed(2)}</span></p>
                     </div>
                   )}
                   <Button

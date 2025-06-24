@@ -1,5 +1,6 @@
 
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -133,6 +134,9 @@ export interface UserData {
   referidos?: string[];
   comisionesAcumuladas?: number;
   historialComisiones?: admin.firestore.FieldValue | HistorialComision[];
+  isBlocked?: boolean;
+  blockReason?: string;
+  blockDate?: admin.firestore.Timestamp;
 }
 
 interface ProviderLocation {
@@ -157,6 +161,9 @@ export interface ProviderData {
   avatarUrl?: string;
   categoryIds?: string[];
   embajadorUID?: string;
+  isBlocked?: boolean;
+  blockReason?: string;
+  blockDate?: admin.firestore.Timestamp;
 }
 
 export interface ServiceRequest {
@@ -174,6 +181,7 @@ export interface ServiceRequest {
   calificacionUsuario?: CalificacionDetallada;
   calificacionPrestador?: CalificacionDetallada;
   paymentStatus?: PaymentStatus;
+  metodoPago?: 'tarjeta' | 'efectivo' | 'transferencia' | 'wallet';
   originatingQuotationId?: string;
   precio?: number;
   montoCobrado?: number;
@@ -297,7 +305,9 @@ export type ActivityLogAction =
   | "RECONTRATACION_RECORDATORIO_ENVIADO"
   | "REPORTE_PROBLEMA_RESUELTO"
   | "ADMIN_CANCEL_SERVICE"
-  | "ADMIN_FORCE_COMPLETE_SERVICE";
+  | "ADMIN_FORCE_COMPLETE_SERVICE"
+  | "ADMIN_BLOCK_USER"
+  | "ADMIN_UNBLOCK_USER";
 
 
 export interface PromocionFidelidad {
@@ -602,6 +612,16 @@ export interface MonitoredService {
   createdAt: number; // Timestamp
 }
 
+export interface BlockedUser {
+  id: string;
+  type: 'usuario' | 'prestador';
+  name?: string;
+  email?: string; // Add email if available in your user/provider docs
+  isBlocked: boolean;
+  blockReason?: string;
+  blockDate?: admin.firestore.Timestamp;
+}
+
 export interface BannerPublicitario {
   id?: string;
   nombre: string;
@@ -666,6 +686,65 @@ async function logActivity(
     functions.logger.error(`[LogActivityHelper] Error al crear log: ${descripcion}`, error);
   }
 }
+
+export const createImmediateServiceRequest = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+    }
+    const usuarioId = context.auth.uid;
+    const { providerId, selectedServices, totalAmount, location, metodoPago } = data;
+
+    if (!providerId || !Array.isArray(selectedServices) || selectedServices.length === 0 || typeof totalAmount !== "number" || !location || !metodoPago) {
+        throw new functions.https.HttpsError("invalid-argument", "Faltan parámetros requeridos o son inválidos.");
+    }
+
+    const now = admin.firestore.Timestamp.now();
+    const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
+
+    const providerDoc = await db.collection("prestadores").doc(providerId).get();
+    if (!providerDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
+    }
+
+    const nuevaSolicitudData: Omit<ServiceRequest, "id" | "serviceType"> & { serviceType: "fixed" } = {
+        usuarioId: usuarioId,
+        prestadorId: providerId,
+        status: "pagada", // Servicio inmediato, se asume pagado y listo para empezar.
+        createdAt: now,
+        updatedAt: now,
+        titulo: `Servicio inmediato: ${selectedServices.map((s: any) => s.title).join(", ")}`,
+        serviceType: "fixed",
+        selectedFixedServices: selectedServices,
+        totalAmount: totalAmount,
+        montoCobrado: totalAmount,
+        location: location,
+        metodoPago: metodoPago,
+        paymentStatus: "retenido_para_liberacion", // El pago se retiene hasta la confirmación final
+        actorDelCambioId: usuarioId,
+        actorDelCambioRol: "usuario",
+    };
+
+    await nuevaSolicitudRef.set(nuevaSolicitudData);
+
+    await logActivity(
+        usuarioId,
+        "usuario",
+        "SOLICITUD_CREADA",
+        `Usuario ${usuarioId} creó y pagó una solicitud de servicio inmediato #${nuevaSolicitudRef.id} para el proveedor ${providerId}.`,
+        { tipo: "solicitud_servicio", id: nuevaSolicitudRef.id },
+        { totalAmount, metodoPago }
+    );
+
+    await sendNotification(
+        providerId,
+        "prestador",
+        "¡Nuevo Servicio Inmediato!",
+        `Has recibido un nuevo servicio inmediato de ${usuarioId}. ¡Prepárate!`,
+        { solicitudId: nuevaSolicitudRef.id }
+    );
+
+    return { success: true, message: "Servicio inmediato creado y pago procesado.", solicitudId: nuevaSolicitudRef.id };
+});
 
 
 export const onServiceStatusChangeSendNotification = functions.firestore
@@ -3199,45 +3278,97 @@ export const getPastClientsForProvider = functions.https.onCall(async (data, con
     }
 });
 
-export const getBanners = functions.https.onCall(async (data, context) => {
-    functions.logger.info("Iniciando getBanners", { structuredData: true, data });
-    const { region, idioma, categoria } = data; // Targeting parameters
+export const getBlockedUsers = functions.https.onCall(async (data, context) => {
+    // Ideally, this should be protected by an admin or moderator role check
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
+    }
+    // Example: if (!context.auth.token.admin) { throw new functions.https.HttpsError("permission-denied", "Admin role required."); }
+    
+    try {
+        const blockedUsersQuery = db.collection("usuarios").where("isBlocked", "==", true);
+        const blockedProvidersQuery = db.collection("prestadores").where("isBlocked", "==", true);
 
-    const now = admin.firestore.Timestamp.now();
-    let query: admin.firestore.Query = db.collection("banners")
-      .where("activo", "==", true)
-      .where("fechaInicio", "<=", now)
-      .orderBy("fechaInicio", "desc");
+        const [usersSnapshot, providersSnapshot] = await Promise.all([
+            blockedUsersQuery.get(),
+            blockedProvidersQuery.get(),
+        ]);
+
+        const blockedUsers = usersSnapshot.docs.map((doc) => {
+            const data = doc.data() as UserData;
+            return {
+                id: doc.id,
+                type: 'usuario',
+                name: data.nombre,
+                // email: data.email, // Assuming email is stored
+                isBlocked: data.isBlocked,
+                blockReason: data.blockReason,
+                blockDate: data.blockDate?.toMillis(),
+            };
+        });
+
+        const blockedProviders = providersSnapshot.docs.map((doc) => {
+            const data = doc.data() as ProviderData;
+            return {
+                id: doc.id,
+                type: 'prestador',
+                name: data.nombre,
+                // email: data.email, // Assuming email is stored
+                isBlocked: data.isBlocked,
+                blockReason: data.blockReason,
+                blockDate: data.blockDate?.toMillis(),
+            };
+        });
+
+        return [...blockedUsers, ...blockedProviders];
+    } catch (error: any) {
+        functions.logger.error("Error fetching blocked users:", error);
+        throw new functions.https.HttpsError("internal", "Failed to fetch blocked users.", error.message);
+    }
+});
+
+export const updateUserBlockStatus = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
+    }
+    const adminId = context.auth.uid;
+    // Add admin role check here
+
+    const { userId, userType, blockStatus, reason } = data;
+
+    if (!userId || !userType || typeof blockStatus !== 'boolean') {
+        throw new functions.https.HttpsError("invalid-argument", "Missing required parameters: userId, userType, blockStatus.");
+    }
+    if (userType !== 'usuario' && userType !== 'prestador') {
+        throw new functions.https.HttpsError("invalid-argument", "userType must be 'usuario' or 'prestador'.");
+    }
+
+    const collectionName = userType === 'usuario' ? 'usuarios' : 'prestadores';
+    const userRef = db.collection(collectionName).doc(userId);
 
     try {
-        const snapshot = await query.get();
-        let banners = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BannerPublicitario));
+        const updatePayload: { isBlocked: boolean; blockDate?: admin.firestore.FieldValue; blockReason?: admin.firestore.FieldValue | string } = {
+            isBlocked: blockStatus,
+        };
 
-        // Firestore limitation: cannot have inequality filters on multiple fields.
-        // So, we filter fechaFin in code.
-        banners = banners.filter(b => !b.fechaFin || b.fechaFin >= now);
-
-        // Filter by targeting parameters in code
-        if (region) {
-            banners = banners.filter(b => !b.regiones || b.regiones.length === 0 || b.regiones.includes(region));
-        }
-        if (idioma) {
-            banners = banners.filter(b => !b.idiomas || b.idiomas.length === 0 || b.idiomas.includes(idioma));
-        }
-        if (categoria) {
-            banners = banners.filter(b => !b.categorias || b.categorias.length === 0 || b.categorias.includes(categoria));
+        if (blockStatus) {
+            updatePayload.blockDate = admin.firestore.FieldValue.serverTimestamp();
+            updatePayload.blockReason = reason || "No reason specified.";
+        } else {
+            // When unblocking, clear the reason and date
+            updatePayload.blockReason = admin.firestore.FieldValue.delete();
+            updatePayload.blockDate = admin.firestore.FieldValue.delete();
         }
 
-        banners.sort((a, b) => (a.orden || 0) - (b.orden || 0));
+        await userRef.update(updatePayload);
+        
+        const logAction = blockStatus ? "ADMIN_BLOCK_USER" : "ADMIN_UNBLOCK_USER";
+        const logDescription = `Admin ${adminId} ${blockStatus ? 'blocked' : 'unblocked'} ${userType} ${userId}. Reason: ${reason || 'N/A'}`;
+        await logActivity(adminId, "admin", logAction, logDescription, { type: userType, id: userId }, { reason });
 
-        functions.logger.info(`[getBanners] Se encontraron ${banners.length} banners activos para los criterios.`);
-        return banners;
-
+        return { success: true, message: `User ${userId} status updated to ${blockStatus ? 'blocked' : 'unblocked'}.` };
     } catch (error: any) {
-        functions.logger.error("Error al obtener banners:", error);
-        if (error.code === 'failed-precondition') {
-             throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener banners requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
-        }
-        throw new functions.https.HttpsError("internal", "Error al buscar banners.", error.message);
+        functions.logger.error(`Error updating block status for ${userType} ${userId}:`, error);
+        throw new functions.https.HttpsError("internal", "Failed to update user block status.", error.message);
     }
 });

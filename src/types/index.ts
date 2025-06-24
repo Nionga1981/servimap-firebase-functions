@@ -230,6 +230,7 @@ interface BaseServiceRequest {
   calificacionPrestador?: CalificacionDetallada;
   mutualRatingCompleted?: boolean;
   paymentStatus?: PaymentStatus;
+  metodoPago?: 'tarjeta' | 'efectivo' | 'transferencia' | 'wallet';
   paymentIntentId?: string;
   paymentReleasedToProviderAt?: number;
   disputeDetails?: {

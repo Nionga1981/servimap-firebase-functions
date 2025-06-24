@@ -1,8 +1,10 @@
 
 // src/services/requestService.ts
 "use client";
-import type { ServiceRequest, FixedServiceRequest, HourlyServiceRequest, DemoUser, PaymentStatus, ServiceRequestStatus, ActivityLog, ActivityLogAction } from '@/types';
+import type { ServiceRequest, FixedServiceRequest, HourlyServiceRequest, DemoUser, PaymentStatus, ServiceRequestStatus, ActivityLog, ActivityLogAction, ProviderLocation } from '@/types';
 import { mockProviders, USER_FIXED_LOCATION, mockDemoUsers as mockUsers } from '@/lib/mockData';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { app } from '@/lib/firebase';
 
 // Simulación de una base de datos en memoria para las solicitudes de servicio
 let serviceRequests: ServiceRequest[] = [];
@@ -123,6 +125,29 @@ export const createServiceRequest = async (
   });
 
   return newRequest;
+};
+
+interface ImmediateRequestPayload {
+    providerId: string;
+    selectedServices: { serviceId: string; title: string; price: number }[];
+    totalAmount: number;
+    location: ProviderLocation | { customAddress: string };
+    metodoPago: 'tarjeta' | 'efectivo' | 'transferencia' | 'wallet';
+}
+
+export const createImmediateRequest = async (payload: ImmediateRequestPayload) => {
+    console.log('[RequestService] Calling createImmediateServiceRequest cloud function with payload:', payload);
+    const functions = getFunctions(app);
+    const createImmediateServiceRequestFn = httpsCallable(functions, 'createImmediateServiceRequest');
+    
+    try {
+        const result = await createImmediateServiceRequestFn(payload);
+        return result.data as { success: boolean; message: string; solicitudId: string; };
+    } catch (error) {
+        console.error("[RequestService] Error calling 'createImmediateServiceRequest':", error);
+        // Re-throw the error so the component can handle it (e.g., show a toast)
+        throw error;
+    }
 };
 
 export const getServiceRequestById = async (requestId: string): Promise<ServiceRequest | undefined> => {
