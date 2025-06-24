@@ -252,7 +252,8 @@ export interface ChatData {
 export type ActivityLogAction =
   | "CAMBIO_ESTADO_SOLICITUD" | "CALIFICACION_USUARIO" | "CALIFICACION_PRESTADOR"
   | "SOLICITUD_CREADA" | "PAGO_RETENIDO" | "PAGO_LIBERADO"
-  | "GARANTIA_ACTIVADA" | "INICIO_SESION" | "CIERRE_SESION"
+  | "GARANTIA_ACTIVADA" | "GARANTIA_APROBADA" | "GARANTIA_RECHAZADA"
+  | "INICIO_SESION" | "CIERRE_SESION"
   | "CONFIG_CAMBIADA" | "COTIZACION_CREADA" | "COTIZACION_PRECIO_PROPUESTO"
   | "COTIZACION_ACEPTADA_USUARIO" | "COTIZACION_RECHAZADA" | "CHAT_CREADO"
   | "PUNTOS_FIDELIDAD_GANADOS" | "PUNTOS_FIDELIDAD_CANJEADOS" | "FONDO_FIDELIDAD_APORTE"
@@ -3183,294 +3184,101 @@ export const getPastClientsForProvider = functions.https.onCall(async (data, con
     }
 });
 
-export const getPendingReports = functions.https.onCall(async (data, context) => {
+export const getPendingWarranties = functions.https.onCall(async (data, context) => {
   // if (!context.auth || !context.auth.token.admin) {
-  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden ver los reportes.");
+  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden ver esta información.");
   // }
-  
+
   try {
-    const reportsSnapshot = await db.collection("reportes")
-      .where("estadoReporte", "==", "pendiente_revision_admin")
-      .orderBy("fechaReporte", "asc")
+    const warrantiesSnapshot = await db.collection("garantiasPendientes")
+      .where("estadoGarantia", "==", "pendiente_revision")
+      .orderBy("fechaSolicitudGarantia", "asc")
       .get();
       
-    if (reportsSnapshot.empty) {
+    if (warrantiesSnapshot.empty) {
       return [];
     }
-
-    const reports = reportsSnapshot.docs.map((doc) => ({
+    
+    const warranties = warrantiesSnapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
 
-    return reports;
+    return warranties;
   } catch (error: any) {
-    functions.logger.error("Error al obtener reportes pendientes:", error);
+    functions.logger.error("Error al obtener garantías pendientes:", error);
     if (error.code === "failed-precondition") {
-      throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener reportes requiere un índice compuesto en Firestore. Por favor, créalo desde el enlace en el log de Firebase Functions.");
+      throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener garantías requiere un índice compuesto en Firestore.");
     }
-    throw new functions.https.HttpsError("internal", "Error al buscar reportes.", error.message);
+    throw new functions.https.HttpsError("internal", "Error al buscar garantías pendientes.", error.message);
   }
 });
 
-export const resolveReport = functions.https.onCall(async (data, context) => {
+export const resolveWarranty = functions.https.onCall(async (data, context) => {
   // if (!context.auth || !context.auth.token.admin) {
-  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden resolver reportes.");
+  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden resolver garantías.");
   // }
   const adminId = context.auth?.uid || "admin_sistema";
-  const { reporteId, decision, comentarioAdmin } = data;
+  const { garantiaId, decision, notasAdmin } = data;
 
-  if (!reporteId || !decision || !comentarioAdmin) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'reporteId', 'decision' y 'comentarioAdmin'.");
+  if (!garantiaId || !decision || !notasAdmin) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'garantiaId', 'decision' y 'notasAdmin'.");
   }
-  const validDecisions = ["resuelto_compensacion", "resuelto_sin_compensacion", "rechazado_reporte"];
+  const validDecisions: Array<GarantiaPendienteData['estadoGarantia']> = ["aprobada_compensacion", "rechazada_garantia"];
   if (!validDecisions.includes(decision)) {
     throw new functions.https.HttpsError("invalid-argument", "La 'decision' no es válida.");
   }
-
-  const reporteRef = db.collection("reportes").doc(reporteId);
+  
+  const garantiaRef = db.collection("garantiasPendientes").doc(garantiaId);
 
   try {
     return await db.runTransaction(async (transaction) => {
-      const reporteDoc = await transaction.get(reporteRef);
-      if (!reporteDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Reporte con ID ${reporteId} no encontrado.`);
+      const garantiaDoc = await transaction.get(garantiaRef);
+      if (!garantiaDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Garantía con ID ${garantiaId} no encontrada.`);
       }
-      const reporteData = reporteDoc.data() as ReporteServicioData;
-
-      if (reporteData.estadoReporte !== "pendiente_revision_admin" && reporteData.estadoReporte !== "en_investigacion") {
-        throw new functions.https.HttpsError("failed-precondition", `El reporte ya fue resuelto. Estado actual: ${reporteData.estadoReporte}.`);
+      const garantiaData = garantiaDoc.data() as GarantiaPendienteData;
+      
+      if (garantiaData.estadoGarantia !== "pendiente_revision") {
+        throw new functions.https.HttpsError("failed-precondition", `La garantía ya fue resuelta. Estado actual: ${garantiaData.estadoGarantia}.`);
       }
-
-      // 1. Actualizar el documento del reporte
-      const updateReporte: Partial<ReporteServicioData> = {
-        estadoReporte: decision,
-        resolucionAdmin: comentarioAdmin,
+      
+      // 1. Actualizar el documento de la garantía
+      const updateGarantia: Partial<GarantiaPendienteData> = {
+        estadoGarantia: decision,
+        notasResolucion: notasAdmin,
         resueltaPorAdminId: adminId,
         fechaResolucion: admin.firestore.Timestamp.now(),
       };
-      transaction.update(reporteRef, updateReporte);
+      transaction.update(garantiaRef, updateGarantia);
 
-      // 2. Actualizar el servicio original para reflejar la resolución de la disputa
-      const servicioRef = db.collection("solicitudes_servicio").doc(reporteData.idServicio);
+      // 2. Actualizar el servicio original si es necesario
+      const servicioRef = db.collection("solicitudes_servicio").doc(garantiaData.idServicio);
       const servicioDoc = await transaction.get(servicioRef);
-      if (servicioDoc.exists) {
+      if (servicioDoc.exists && decision === "aprobada_compensacion") {
         const servicioData = servicioDoc.data() as ServiceRequest;
         const updateServicio: Partial<ServiceRequest> = {
-          estadoDisputa: "resuelta",
-          reporteActivoId: admin.firestore.FieldValue.delete() as any, // Eliminar el enlace al reporte activo
           updatedAt: admin.firestore.Timestamp.now(),
         };
-
-        // Si se congeló el pago, decidir qué hacer con él
-        if (servicioData.paymentStatus === "congelado_por_disputa") {
-          if (decision === "resuelto_compensacion") {
-            updateServicio.paymentStatus = "reembolsado_parcial"; // O total, dependiendo de la lógica
-            // Aquí se iniciaría un reembolso real
-          } else { // Sin compensación o reporte rechazado -> liberar pago al proveedor
-            updateServicio.paymentStatus = "liberado_al_proveedor";
-            updateServicio.paymentReleasedToProviderAt = admin.firestore.Timestamp.now();
-          }
+        // Si el pago estaba congelado, se procesa un reembolso
+        if(servicioData.paymentStatus === 'congelado_por_disputa') {
+            updateServicio.paymentStatus = 'reembolsado_total'; // O parcial, según la lógica de negocio
         }
         transaction.update(servicioRef, updateServicio);
       }
       
       // 3. Log y Notificaciones
-      await logActivity(
-        adminId, "admin", "REPORTE_PROBLEMA_RESUELTO",
-        `Admin resolvió reporte ${reporteId} con decisión: ${decision}.`,
-        { tipo: "reporte_servicio", id: reporteId },
-        { comentario: comentarioAdmin, idServicio: reporteData.idServicio }
-      );
+      const logActionType: ActivityLogAction = decision === 'aprobada_compensacion' ? 'GARANTIA_APROBADA' : 'GARANTIA_RECHAZADA';
+      await logActivity(adminId, "admin", logActionType, `Admin resolvió garantía ${garantiaId} como ${decision}.`, { tipo: "garantia", id: garantiaId }, { notas: notasAdmin });
 
-      const notifTitle = "Tu reporte ha sido resuelto";
-      const notifBody = `Un administrador ha resuelto tu reporte sobre el servicio (ID: ${reporteData.idServicio.substring(0,6)}...). Decisión: ${decision}. Comentario: "${comentarioAdmin}"`;
-      await sendNotification(reporteData.idUsuarioReportante, reporteData.rolReportante, notifTitle, notifBody, {reporteId, decision});
+      const notifBody = `Tu solicitud de garantía para el servicio (ID: ${garantiaData.idServicio.substring(0,6)}...) ha sido resuelta como "${decision}". Comentario del admin: "${notasAdmin}"`;
+      await sendNotification(garantiaData.idUsuario, "usuario", "Garantía Resolvida", notifBody, {garantiaId, decision});
       
-      const notifContraparteBody = `La disputa sobre el servicio (ID: ${reporteData.idServicio.substring(0,6)}...) ha sido resuelta. Decisión final: ${decision}.`;
-      await sendNotification(reporteData.idReportado, reporteData.rolReportado, "Disputa Resuelta", notifContraparteBody, {reporteId, decision});
-
-      return { success: true, message: "El reporte ha sido resuelto exitosamente." };
+      return { success: true, message: `Garantía ${garantiaId} resuelta.` };
     });
   } catch (error: any) {
-    functions.logger.error(`Error al resolver reporte ${reporteId}:`, error);
+    functions.logger.error(`Error al resolver garantía ${garantiaId}:`, error);
     if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar la resolución del reporte.", error.message);
-  }
-});
-
-export const getActiveServices = functions.https.onCall(async (data, context) => {
-  // if (!context.auth || !context.auth.token.admin) {
-  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden ver esta información.");
-  // }
-
-  const activeStatuses: ServiceRequestStatus[] = [
-    "agendado",
-    "pendiente_confirmacion_usuario",
-    "confirmada_prestador",
-    "pagada",
-    "en_camino_proveedor",
-    "servicio_iniciado",
-    "completado_por_prestador",
-    "en_disputa",
-  ];
-
-  try {
-    const servicesSnapshot = await db.collection("solicitudes_servicio")
-      .where("status", "in", activeStatuses)
-      .orderBy("createdAt", "desc")
-      .get();
-      
-    if (servicesSnapshot.empty) {
-      return [];
-    }
-
-    const monitoredServicesPromises = servicesSnapshot.docs.map(async (doc) => {
-      const service = doc.data() as ServiceRequest;
-      
-      const userDoc = await db.collection("usuarios").doc(service.usuarioId).get();
-      const providerDoc = await db.collection("prestadores").doc(service.prestadorId).get();
-
-      const userName = userDoc.exists() ? (userDoc.data() as UserData).nombre : "Usuario no encontrado";
-      const providerName = providerDoc.exists() ? (providerDoc.data() as ProviderData).nombre : "Prestador no encontrado";
-      
-      const scheduledTimestamp = (service.serviceDate && service.serviceTime)
-        ? new Date(`${service.serviceDate}T${service.serviceTime}`).getTime()
-        : (service.createdAt as admin.firestore.Timestamp).toMillis();
-
-      const monitoredService: MonitoredService = {
-        id: doc.id,
-        status: service.status,
-        userName: userName || "Sin nombre",
-        providerName: providerName || "Sin nombre",
-        serviceTitle: service.titulo || "Servicio sin título",
-        scheduledDate: scheduledTimestamp,
-        createdAt: (service.createdAt as admin.firestore.Timestamp).toMillis(),
-      };
-      return monitoredService;
-    });
-
-    const monitoredServices = await Promise.all(monitoredServicesPromises);
-    return monitoredServices;
-
-  } catch (error: any) {
-    functions.logger.error("Error al obtener servicios activos:", error);
-    if (error.code === "failed-precondition") {
-      throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener servicios activos requiere un índice compuesto. Por favor, créalo desde el enlace en el log de Firebase Functions.");
-    }
-    throw new functions.https.HttpsError("internal", "Error al buscar servicios activos.", error.message);
-  }
-});
-
-
-export const adminCancelService = functions.https.onCall(async (data, context) => {
-  // if (!context.auth || !context.auth.token.admin) {
-  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden cancelar servicios.");
-  // }
-  const adminId = context.auth?.uid || "admin_sistema";
-  const { serviceId, reason } = data;
-
-  if (!serviceId || !reason) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'serviceId' y 'reason'.");
-  }
-
-  const serviceRef = db.collection("solicitudes_servicio").doc(serviceId);
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const serviceDoc = await transaction.get(serviceRef);
-      if (!serviceDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Servicio con ID ${serviceId} no encontrado.`);
-      }
-      const serviceData = serviceDoc.data() as ServiceRequest;
-
-      if (ESTADOS_FINALES_SERVICIO.includes(serviceData.status as EstadoFinalServicio)) {
-         throw new functions.https.HttpsError("failed-precondition", `El servicio ya está en un estado final (${serviceData.status}).`);
-      }
-
-      const updateData: Partial<ServiceRequest> = {
-        status: "cancelada_admin",
-        actorDelCambioId: adminId,
-        actorDelCambioRol: "admin",
-        updatedAt: admin.firestore.Timestamp.now(),
-        notes: `${serviceData.notes || ""}\nCancelado por Admin: ${reason}`,
-      };
-
-      if (serviceData.paymentStatus === "retenido_para_liberacion" || serviceData.paymentStatus === "congelado_por_disputa") {
-        updateData.paymentStatus = "reembolsado_total";
-      }
-
-      transaction.update(serviceRef, updateData);
-
-      await logActivity(adminId, "admin", "ADMIN_CANCEL_SERVICE", `Admin canceló servicio ${serviceId}. Razón: ${reason}`, { tipo: "solicitud_servicio", id: serviceId });
-      
-      const notifBody = `El servicio "${serviceData.titulo || "sin título"}" ha sido cancelado por un administrador. Razón: ${reason}.`;
-      await sendNotification(serviceData.usuarioId, "usuario", "Servicio Cancelado por Administración", notifBody, { serviceId });
-      await sendNotification(serviceData.prestadorId, "prestador", "Servicio Cancelado por Administración", notifBody, { serviceId });
-
-      return { success: true, message: `Servicio ${serviceId} cancelado.` };
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error en adminCancelService para ${serviceId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al cancelar el servicio.", error.message);
-  }
-});
-
-
-export const adminForceCompleteService = functions.https.onCall(async (data, context) => {
-  // if (!context.auth || !context.auth.token.admin) {
-  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden forzar la finalización de servicios.");
-  // }
-  const adminId = context.auth?.uid || "admin_sistema";
-  const { serviceId, reason } = data;
-
-  if (!serviceId || !reason) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'serviceId' y 'reason'.");
-  }
-
-  const serviceRef = db.collection("solicitudes_servicio").doc(serviceId);
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const serviceDoc = await transaction.get(serviceRef);
-      if (!serviceDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Servicio con ID ${serviceId} no encontrado.`);
-      }
-      const serviceData = serviceDoc.data() as ServiceRequest;
-
-      if (serviceData.status !== "completado_por_prestador") {
-        throw new functions.https.HttpsError("failed-precondition", `El servicio debe estar en 'completado_por_prestador' para ser forzado a completar. Estado actual: ${serviceData.status}`);
-      }
-
-      const updateData: Partial<ServiceRequest> = {
-        status: "cerrado_forzado_admin",
-        actorDelCambioId: adminId,
-        actorDelCambioRol: "admin",
-        updatedAt: admin.firestore.Timestamp.now(),
-        notes: `${serviceData.notes || ""}\nCompletado forzosamente por Admin: ${reason}`,
-      };
-
-      if (serviceData.paymentStatus === "retenido_para_liberacion") {
-        updateData.paymentStatus = "liberado_al_proveedor";
-        updateData.paymentReleasedToProviderAt = admin.firestore.Timestamp.now();
-      }
-
-      transaction.update(serviceRef, updateData);
-
-      await logActivity(adminId, "admin", "ADMIN_FORCE_COMPLETE_SERVICE", `Admin forzó finalización de servicio ${serviceId}. Razón: ${reason}`, { tipo: "solicitud_servicio", id: serviceId });
-      
-      const notifBody = `El servicio "${serviceData.titulo || "sin título"}" fue marcado como completado por un administrador. Razón: ${reason}.`;
-      await sendNotification(serviceData.usuarioId, "usuario", "Servicio Completado por Administración", notifBody, { serviceId });
-      
-      const notifProviderBody = `El servicio "${serviceData.titulo || "sin título"}" fue completado por un administrador y el pago ha sido liberado.`;
-      await sendNotification(serviceData.prestadorId, "prestador", "Servicio Completado y Pago Liberado", notifProviderBody, { serviceId });
-
-      return { success: true, message: `Servicio ${serviceId} completado y pago liberado.` };
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error en adminForceCompleteService para ${serviceId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al forzar la finalización del servicio.", error.message);
+    throw new functions.https.HttpsError("internal", "Error al procesar la resolución de la garantía.", error.message);
   }
 });

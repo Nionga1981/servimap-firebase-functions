@@ -3,7 +3,7 @@
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '@/lib/firebase';
-import type { ReporteServicio, MonitoredService } from '@/types';
+import type { ReporteServicio, MonitoredService, GarantiaPendiente } from '@/types';
 
 /**
  * Fetches a list of reports that are pending review.
@@ -109,6 +109,51 @@ export const adminForceCompleteService = async (serviceId: string, reason: strin
         return result.data;
     } catch (error) {
         console.error(`[AdminService] Error calling 'adminForceCompleteService' for service ${serviceId}:`, error);
+        throw error;
+    }
+};
+
+
+/**
+ * Fetches a list of warranty claims that are pending review.
+ * @returns A promise that resolves to an array of pending warranties.
+ */
+export const getPendingWarranties = async (): Promise<GarantiaPendiente[]> => {
+    console.log("[AdminService] Fetching pending warranties...");
+    const functions = getFunctions(app);
+    const getPendingWarrantiesFunction = httpsCallable(functions, 'getPendingWarranties');
+
+    try {
+        const result = await getPendingWarrantiesFunction();
+        return result.data as GarantiaPendiente[];
+    } catch (error) {
+        console.error("[AdminService] Error calling 'getPendingWarranties':", error);
+        throw error;
+    }
+};
+
+interface ResolveWarrantyPayload {
+    garantiaId: string;
+    decision: 'aprobada_compensacion' | 'rechazada_garantia';
+    notasAdmin: string;
+}
+
+/**
+ * Resolves a specific warranty claim.
+ * @param payload - The data required to resolve the warranty.
+ * @returns A promise that resolves to the result of the function call.
+ */
+export const resolveWarranty = async (payload: ResolveWarrantyPayload): Promise<any> => {
+    console.log(`[AdminService] Resolving warranty ${payload.garantiaId} with decision: ${payload.decision}`);
+    const functions = getFunctions(app);
+    const resolveWarrantyFunction = httpsCallable(functions, 'resolveWarranty');
+
+    try {
+        const result = await resolveWarrantyFunction(payload);
+        console.log('[AdminService] Warranty resolved successfully:', result.data);
+        return result.data;
+    } catch (error) {
+        console.error(`[AdminService] Error calling 'resolveWarranty' for warranty ${payload.garantiaId}:`, error);
         throw error;
     }
 };
