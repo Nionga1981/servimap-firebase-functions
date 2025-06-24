@@ -1,6 +1,5 @@
-
 // src/lib/mockData.ts
-import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad, IdiomaDocumento, ZonaPreferente, Comunidad, Service } from '@/types';
+import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad, IdiomaDocumento, ZonaPreferente, Comunidad, Service, Recomendacion } from '@/types';
 import { SERVICE_CATEGORIES as LUCIDE_SERVICE_CATEGORIES } from './constants';
 
 const getApproximateLocation = (exactLoc: ProviderLocation, factor = 0.01): ProviderLocation => {
@@ -454,4 +453,35 @@ export const mockZonasPreferentes: ZonaPreferente[] = [
   }
 ];
 
+export const mockRecomendaciones: Recomendacion[] = [
+  {
+    id: 'rec1',
+    usuarioId: 'currentUserDemoId',
+    prestadorId: 'gardener1',
+    categoria: 'gardening',
+    mensaje: '¿Necesitas ayuda de nuevo con tu jardín? Podrías volver a contratar a Jardinería Esmeralda.',
+    estado: 'pendiente',
+    fechaCreacion: Date.now() - (1000 * 60 * 60 * 24 * 2) // hace 2 días
+  },
+  {
+    id: 'rec2',
+    usuarioId: 'currentUserDemoId',
+    prestadorId: 'cleaner1',
+    categoria: 'cleaning',
+    mensaje: '¿Es hora de otra limpieza profunda? Considera contratar de nuevo a Limpieza Impecable Hogar.',
+    estado: 'pendiente',
+    fechaCreacion: Date.now() - (1000 * 60 * 60 * 24 * 5) // hace 5 días
+  },
+  {
+    id: 'rec3', // For another user
+    usuarioId: 'standardUserDemoId',
+    prestadorId: 'plumber1',
+    categoria: 'plumbing',
+    mensaje: 'Recomendación para otro usuario.',
+    estado: 'pendiente',
+    fechaCreacion: Date.now() - (1000 * 60 * 60 * 24 * 1)
+  }
+];
     
+    
+
