@@ -230,6 +230,7 @@ interface BaseServiceRequest {
   reactivationOfferedBy?: 'usuario' | 'prestador'; // Who initiated this reactivation
   actualStartTime?: number; // Timestamp when service actually started
   actualEndTime?: number; // Timestamp when service actually ended
+  category?: string;
 }
 
 export interface FixedServiceRequest extends BaseServiceRequest {
@@ -437,7 +438,8 @@ export type ActivityLogAction =
   | 'CATEGORIA_PROPUESTA'
   | 'CATEGORIA_APROBADA'
   | 'CATEGORIA_RECHAZADA'
-  | 'EMBAJADOR_COMISION_PAGADA';
+  | 'EMBAJADOR_COMISION_PAGADA'
+  | 'RELACION_USUARIO_PRESTADOR_ACTUALIZADA';
 
 
 export interface ActivityLog {
@@ -448,7 +450,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad' | 'categoria_propuesta';
+    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad' | 'categoria_propuesta' | 'relacionUsuarioPrestador';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -748,6 +750,15 @@ export interface AmbassadorData {
   comisionesAcumuladas: number;
   historialComisiones: (HistorialComision & { providerName?: string })[];
   codigoEmbajador?: string;
+}
+
+export interface RelacionUsuarioPrestador {
+  id?: string;
+  usuarioId: string;
+  prestadorId: string;
+  serviciosContratados: number;
+  ultimoServicioFecha: number; // timestamp
+  categoriasServicios: string[]; // array of category IDs
 }
     
     

@@ -203,6 +203,7 @@ export interface ServiceRequest {
   actualEndTime?: admin.firestore.Timestamp | number;
   actualDurationHours?: number;
   finalTotal?: number;
+  category?: string;
 }
 
 export type SolicitudCotizacionEstado =
@@ -284,7 +285,8 @@ export type ActivityLogAction =
   | "CATEGORIA_PROPUESTA"
   | "CATEGORIA_APROBADA"
   | "CATEGORIA_RECHAZADA"
-  | "EMBAJADOR_COMISION_PAGADA";
+  | "EMBAJADOR_COMISION_PAGADA"
+  | "RELACION_USUARIO_PRESTADOR_ACTUALIZADA";
 
 
 export interface PromocionFidelidad {
@@ -553,6 +555,14 @@ export interface CategoriaPropuestaData {
     fechaCreacion: admin.firestore.Timestamp;
 }
 
+export interface RelacionUsuarioPrestadorData {
+  usuarioId: string;
+  prestadorId: string;
+  serviciosContratados: number;
+  ultimoServicioFecha: admin.firestore.Timestamp;
+  categoriasServicios: string[];
+}
+
 
 // --- Helper para enviar notificaciones ---
 async function sendNotification(userId: string, userType: "usuario" | "prestador", title: string, body: string, data?: {[key: string]: string}) {
@@ -780,6 +790,48 @@ export const logSolicitudServicioChanges = functions.firestore
     const isFinalizedState = ESTADOS_FINALES_SERVICIO.includes(afterData.status as EstadoFinalServicio);
     const wasNotFinalizedBefore = !ESTADOS_FINALES_SERVICIO.includes(beforeData.status as EstadoFinalServicio);
 
+    if (isFinalizedState && wasNotFinalizedBefore) {
+        // --- START RELATIONSHIP TRACKING ---
+        const relationshipId = `${afterData.usuarioId}_${afterData.prestadorId}`;
+        const relationshipRef = db.collection("relacionesUsuarioPrestador").doc(relationshipId);
+        let serviceCategory = afterData.category;
+        if (!serviceCategory) {
+            const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
+            if (providerDoc.exists) {
+                const providerData = providerDoc.data() as ProviderData;
+                serviceCategory = providerData.categoryIds?.[0] || "general";
+            }
+        }
+        if (serviceCategory) {
+            try {
+                await db.runTransaction(async (transaction) => {
+                    const relDoc = await transaction.get(relationshipRef);
+                    if (relDoc.exists) {
+                        transaction.update(relationshipRef, {
+                            serviciosContratados: admin.firestore.FieldValue.increment(1),
+                            ultimoServicioFecha: now,
+                            categoriasServicios: admin.firestore.FieldValue.arrayUnion(serviceCategory),
+                        });
+                    } else {
+                        const newRelationshipData: RelacionUsuarioPrestadorData = {
+                            usuarioId: afterData.usuarioId,
+                            prestadorId: afterData.prestadorId,
+                            serviciosContratados: 1,
+                            ultimoServicioFecha: now,
+                            categoriasServicios: [serviceCategory],
+                        };
+                        transaction.set(relationshipRef, newRelationshipData);
+                    }
+                });
+                await logActivity("sistema", "sistema", "RELACION_USUARIO_PRESTADOR_ACTUALIZADA", `Relación entre usuario ${afterData.usuarioId} y prestador ${afterData.prestadorId} actualizada.`, {tipo: "relacionUsuarioPrestador", id: relationshipId});
+            } catch (e) {
+                functions.logger.error(`Error actualizando relación para ${relationshipId}:`, e);
+            }
+        }
+        // --- END RELATIONSHIP TRACKING ---
+    }
+
+
     if ((isFinalizedState && wasNotFinalizedBefore && afterData.paymentStatus === "retenido_para_liberacion") ||
         (beforeData.paymentStatus === "retenido_para_liberacion" && afterData.paymentStatus === "liberado_al_proveedor" && isFinalizedState && beforeData.status !== afterData.status && afterData.status !== "en_disputa")) {
       const montoTotalPagadoPorUsuario = afterData.montoCobrado || afterData.precio || 0;
@@ -835,26 +887,28 @@ export const logSolicitudServicioChanges = functions.firestore
                 const embajadorRef = db.collection("usuarios").doc(embajadorUID);
                 const comisionEmbajador = montoTotalPagadoPorUsuario * PORCENTAJE_COMISION_EMBAJADOR;
 
-                const historialComisionEntry: HistorialComision = {
-                    servicioId: solicitudId,
-                    prestadorId: afterData.prestadorId,
-                    montoComision: comisionEmbajador,
-                    fecha: now,
-                };
-                
-                await embajadorRef.update({
-                    comisionesAcumuladas: admin.firestore.FieldValue.increment(comisionEmbajador),
-                    historialComisiones: admin.firestore.FieldValue.arrayUnion(historialComisionEntry),
-                });
-                
-                await logActivity(
-                    "sistema",
-                    "sistema",
-                    "EMBAJADOR_COMISION_PAGADA",
-                    `Comisión de $${comisionEmbajador.toFixed(2)} pagada a embajador ${embajadorUID} por servicio ${solicitudId} de prestador ${afterData.prestadorId}.`,
-                    { tipo: "usuario", id: embajadorUID },
-                    { montoComision: comisionEmbajador, servicioId, prestadorId: afterData.prestadorId }
-                );
+                if (comisionEmbajador > 0) {
+                    const comisionHistoryEntry: HistorialComision = {
+                        servicioId: solicitudId,
+                        prestadorId: afterData.prestadorId,
+                        montoComision: comisionEmbajador,
+                        fecha: now,
+                    };
+                    
+                    await embajadorRef.update({
+                        comisionesAcumuladas: admin.firestore.FieldValue.increment(comisionEmbajador),
+                        historialComisiones: admin.firestore.FieldValue.arrayUnion(comisionHistoryEntry),
+                    });
+                    
+                    await logActivity(
+                        "sistema",
+                        "sistema",
+                        "EMBAJADOR_COMISION_PAGADA",
+                        `Comisión de $${comisionEmbajador.toFixed(2)} pagada a embajador ${embajadorUID} por servicio ${solicitudId} de prestador ${afterData.prestadorId}.`,
+                        { tipo: "usuario", id: embajadorUID },
+                        { montoComision: comisionEmbajador, servicioId, prestadorId: afterData.prestadorId }
+                    );
+                }
             }
         }
         // --- END AMBASSADOR COMMISSION LOGIC ---
