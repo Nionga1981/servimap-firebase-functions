@@ -1,3 +1,4 @@
+
 // src/lib/mockData.ts
 import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad, IdiomaDocumento, ZonaPreferente, Comunidad, Service } from '@/types';
 import { SERVICE_CATEGORIES as LUCIDE_SERVICE_CATEGORIES } from './constants';
@@ -5,17 +6,17 @@ import { SERVICE_CATEGORIES as LUCIDE_SERVICE_CATEGORIES } from './constants';
 const getApproximateLocation = (exactLoc: ProviderLocation, factor = 0.01): ProviderLocation => {
   const latApprox = parseFloat((exactLoc.lat + (Math.random() - 0.5) * factor).toFixed(3));
   const lngApprox = parseFloat((exactLoc.lng + (Math.random() - 0.5) * factor).toFixed(3));
-  return { lat: latApprox, lng: lngApprox };
+  return { lat: latApprox, lng: lngApprox, pais: exactLoc.pais };
 };
 
-export const USER_FIXED_LOCATION: ProviderLocation = { lat: 24.8093, lng: -107.4255 }; // Culiacán Centro approx.
+export const USER_FIXED_LOCATION: ProviderLocation = { lat: 24.8093, lng: -107.4255, pais: 'Mexico' }; // Culiacán Centro approx.
 
-const plumber1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.002, lng: USER_FIXED_LOCATION.lng - 0.002 };
-const electrician1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat - 0.003, lng: USER_FIXED_LOCATION.lng + 0.001 };
-const nanny1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.0015, lng: USER_FIXED_LOCATION.lng + 0.0015 };
-const gardener1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat - 0.0025, lng: USER_FIXED_LOCATION.lng - 0.003 };
-const doctor1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.0005, lng: USER_FIXED_LOCATION.lng - 0.004 };
-const cleaner1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.01, lng: USER_FIXED_LOCATION.lng + 0.01 };
+const plumber1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.002, lng: USER_FIXED_LOCATION.lng - 0.002, pais: 'Mexico' };
+const electrician1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat - 0.003, lng: USER_FIXED_LOCATION.lng + 0.001, pais: 'Mexico' };
+const nanny1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.0015, lng: USER_FIXED_LOCATION.lng + 0.0015, pais: 'Mexico' };
+const gardener1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat - 0.0025, lng: USER_FIXED_LOCATION.lng - 0.003, pais: 'Mexico' };
+const doctor1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.0005, lng: USER_FIXED_LOCATION.lng - 0.004, pais: 'Mexico' };
+const cleaner1ExactLocation: ProviderLocation = { lat: USER_FIXED_LOCATION.lat + 0.01, lng: USER_FIXED_LOCATION.lng + 0.01, pais: 'Mexico' };
 
 export const mockComunidades: Comunidad[] = [
   {
@@ -23,7 +24,7 @@ export const mockComunidades: Comunidad[] = [
     nombre: 'Vecinos Centro Culiacán',
     descripcion: 'Comunidad para los residentes y negocios del centro de Culiacán. Comparte servicios y recomendaciones locales.',
     tipo: 'publica',
-    ubicacion: { lat: 24.8093, lng: -107.393 }, // Centro de Culiacán
+    ubicacion: { lat: 24.8093, lng: -107.393, pais: 'Mexico' }, // Centro de Culiacán
     bannerComunitario: {
       titulo: '¡Gran Venta de Garage Centro!',
       imagenUrl: 'https://placehold.co/600x150.png?text=Venta+Garage',
@@ -44,7 +45,7 @@ export const mockComunidades: Comunidad[] = [
     nombre: 'Plomeros Expertos Culiacán (Privada)',
     descripcion: 'Grupo privado para plomeros profesionales y clientes verificados que buscan servicios de alta calidad en plomería.',
     tipo: 'privada',
-    ubicacion: { lat: 24.8000, lng: -107.4000 },
+    ubicacion: { lat: 24.8000, lng: -107.4000, pais: 'Mexico' },
     bannerComunitario: {
       titulo: 'Curso Avanzado de Soldadura de Tuberías',
       imagenUrl: 'https://placehold.co/600x150/3F51B5/FFFFFF.png?text=Curso+Soldadura',
@@ -445,3 +446,5 @@ export const mockZonasPreferentes: ZonaPreferente[] = [
     descripcion: 'Zona con ajuste de tarifa debido a distancia o demanda.'
   }
 ];
+
+    

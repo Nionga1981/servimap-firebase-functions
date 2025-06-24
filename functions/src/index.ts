@@ -1,4 +1,5 @@
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -119,6 +120,12 @@ export interface UserData {
   favoritos?: string[];
 }
 
+interface ProviderLocation {
+  lat: number;
+  lng: number;
+  pais?: string;
+}
+
 export interface ProviderData {
   fcmTokens?: string[];
   nombre?: string;
@@ -128,7 +135,7 @@ export interface ProviderData {
   services?: {category: string; title: string; description: string; price: number}[];
   specialties?: string[];
   isAvailable?: boolean;
-  currentLocation?: {lat: number; lng: number; timestamp?: admin.firestore.Timestamp};
+  currentLocation?: ProviderLocation | null;
   rating?: number;
   avatarUrl?: string;
   categoryIds?: string[];
@@ -168,7 +175,7 @@ export interface ServiceRequest {
   isRecurringAttempt?: boolean;
   reactivationOfferedBy?: "usuario" | "prestador";
   mutualRatingCompleted?: boolean;
-  location?: ProviderLocation | {customAddress: string};
+  location?: ProviderLocation | { customAddress: string };
   notes?: string;
   providerMarkedCompleteAt?: number;
   userConfirmedCompletionAt?: number;
@@ -314,11 +321,6 @@ export interface Recordatorio {
   };
 }
 
-interface ProviderLocation {
-  lat: number;
-  lng: number;
-}
-
 interface CoordenadaFirestore {
   lat: number;
   lng: number;
@@ -377,7 +379,7 @@ interface PrestadorBuscado {
   id: string;
   nombre: string;
   empresa?: string;
-  distanciaKm: number;
+  distanciaKm?: number;
   calificacion: number;
   avatarUrl?: string;
   categoriaPrincipal?: string;
@@ -1469,8 +1471,8 @@ export const buscarPrestadoresInteligente = functions.https.onCall(async (data, 
     }
 
     prestadoresCandidatos.sort((a, b) => {
-      if (a.distanciaKm < b.distanciaKm) return -1;
-      if (a.distanciaKm > b.distanciaKm) return 1;
+      if (a.distanciaKm && b.distanciaKm && a.distanciaKm < b.distanciaKm) return -1;
+      if (a.distanciaKm && b.distanciaKm && a.distanciaKm > b.distanciaKm) return 1;
       if (a.calificacion > b.calificacion) return -1;
       if (a.calificacion < b.calificacion) return 1;
       return 0;
@@ -1489,20 +1491,17 @@ export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, c
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
   }
-  const { categoriaId, latUsuario, lngUsuario } = data;
+  const { categoriaId, pais } = data;
 
-  if (!categoriaId || typeof categoriaId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'categoriaId'.");
-  }
-  if (typeof latUsuario !== "number" || typeof lngUsuario !== "number") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'latUsuario' y 'lngUsuario'.");
+  if (!categoriaId || typeof categoriaId !== "string" || !pais || typeof pais !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'categoriaId' y 'pais'.");
   }
 
   try {
     const prestadoresQuery = db.collection("prestadores")
       .where("isAvailable", "==", true)
-      .where("aceptaViajes", "==", true)
       .where("categoryIds", "array-contains", categoriaId)
+      .where("currentLocation.pais", "==", pais)
       .orderBy("rating", "desc");
       
     const prestadoresSnapshot = await prestadoresQuery.get();
@@ -1516,35 +1515,24 @@ export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, c
     for (const doc of prestadoresSnapshot.docs) {
       const provider = doc.data() as ProviderData;
       
-      // Ensure provider has a location to calculate distance
-      if (provider.currentLocation) {
-        const distanciaKm = calculateDistance(
-          latUsuario,
-          lngUsuario,
-          provider.currentLocation.lat,
-          provider.currentLocation.lng
-        );
-
-        resultados.push({
-          id: doc.id,
-          nombre: provider.nombre || "N/A",
-          empresa: provider.empresa,
-          distanciaKm: parseFloat(distanciaKm.toFixed(1)),
-          calificacion: provider.rating || 0,
-          avatarUrl: provider.avatarUrl,
-          categoriaPrincipal: SERVICE_CATEGORIES.find(c => c.id === (provider.categoryIds?.[0]))?.name || "General",
-        });
-      }
+      resultados.push({
+        id: doc.id,
+        nombre: provider.nombre || "N/A",
+        empresa: provider.empresa,
+        calificacion: provider.rating || 0,
+        avatarUrl: provider.avatarUrl,
+        categoriaPrincipal: SERVICE_CATEGORIES.find(c => c.id === (provider.categoryIds?.[0]))?.name || "General",
+      });
     }
     
-    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó por categoría: "${categoriaId}" (aceptan viajes). Resultados: ${resultados.length}.`, undefined, { categoriaId, lat: latUsuario, lng: lngUsuario, aceptaViajes: true });
+    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó por categoría: "${categoriaId}" en país "${pais}". Resultados: ${resultados.length}.`, undefined, { categoriaId, pais });
 
     return resultados;
 
   } catch (error: any) {
     functions.logger.error("Error en buscarPrestadoresPorFiltros:", error);
     if (error.code === 'failed-precondition') {
-        throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions (isAvailable, aceptaViajes, categoryIds, rating).");
+        throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions (isAvailable, categoryIds, currentLocation.pais, rating).");
     }
     throw new functions.https.HttpsError("internal", "Error al buscar prestadores.", error.message);
   }
@@ -2694,7 +2682,7 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
       functions.logger.info(`[onCitaActualizada ${citaId}] Cita rechazada por prestador. Notificando al cliente.`);
       await sendNotification(
         usuarioId, "usuario", "Cita Rechazada",
-        `Tu solicitud con ${prestadorNombre} para "${detallesCita}" el ${fechaCitaFormateada} fue rechazada. Puedes buscar otro servicio.`,
+        `Lamentablemente, el prestador ${prestadorNombre} ha tenido que rechazar tu cita para "${detallesCita}" el ${fechaCitaFormateada}.`,
         {citaId, tipo: "CITA_RECHAZADA"}
       );
     } else if (afterData.estado === "cancelada_usuario" && beforeData.estado !== "cancelada_usuario") {
@@ -2834,5 +2822,7 @@ export const onCategoryProposalUpdate = functions.firestore
     return null;
   });
 
+
+    
 
     

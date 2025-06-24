@@ -1,3 +1,4 @@
+
 // src/types/index.ts
 import type { LucideIcon } from 'lucide-react';
 
@@ -32,6 +33,7 @@ export interface ProviderGallery {
 export interface ProviderLocation {
   lat: number;
   lng: number;
+  pais?: string;
 }
 
 export interface Provider {
@@ -726,4 +728,6 @@ export interface CategoriaPropuesta {
   estado: 'pendiente' | 'aprobada' | 'rechazada';
   fechaCreacion: number; // timestamp
 }
+    
+
     
