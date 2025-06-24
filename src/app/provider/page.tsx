@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from 'react';
@@ -7,9 +8,18 @@ import { ServiceCard } from '@/components/provider/ServiceCard';
 import { PastClientsList } from '@/components/provider/PastClientsList';
 import type { Service } from '@/types';
 import { Separator } from '@/components/ui/separator';
-import { ListChecks } from 'lucide-react';
+import { ListChecks, Star, Zap } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 
 export default function ProviderPage() {
+  // Simulación del perfil del proveedor. Cambia `isPremium` a `false` para ver el estado bloqueado.
+  const [providerProfile, setProviderProfile] = useState({
+    id: 'currentUser',
+    isPremium: true,
+  });
+
   const [services, setServices] = useState<Service[]>([
     {
       id: '1',
@@ -79,7 +89,31 @@ export default function ProviderPage() {
       <Separator className="my-8" />
 
       <section>
-        <PastClientsList />
+        {providerProfile.isPremium ? (
+          <PastClientsList />
+        ) : (
+          <Card className="shadow-lg bg-gradient-to-r from-secondary to-background border-primary/20">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-primary">
+                <Star className="h-6 w-6 text-yellow-400 fill-yellow-400" />
+                Función Premium: Clientes Anteriores
+              </CardTitle>
+              <CardDescription>
+                Accede al historial de tus clientes y envíales recordatorios para fomentar la recontratación.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground mb-4">
+                Esta herramienta te permite mantener una relación cercana con quienes ya confiaron en tu trabajo. ¡Actualiza a Premium para desbloquear esta y otras funciones exclusivas!
+              </p>
+              <Button asChild>
+                <Link href="/membresias"> {/* Enlace a una página de membresías (no creada aún) */}
+                  <Zap className="mr-2 h-4 w-4" /> ¡Actualizar a Premium ahora!
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
       </section>
     </div>
   );
