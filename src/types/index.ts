@@ -344,6 +344,7 @@ export interface CategoriaServicio {
   iconoUrl: string;
   icon?: LucideIcon;
   keywords: string[];
+  isPeriodic?: boolean;
 }
 
 export interface MiembroEmpresa {
@@ -439,7 +440,8 @@ export type ActivityLogAction =
   | 'CATEGORIA_APROBADA'
   | 'CATEGORIA_RECHAZADA'
   | 'EMBAJADOR_COMISION_PAGADA'
-  | 'RELACION_USUARIO_PRESTADOR_ACTUALIZADA';
+  | 'RELACION_USUARIO_PRESTADOR_ACTUALIZADA'
+  | 'RECOMENDACION_RECONTRATACION_CREADA';
 
 
 export interface ActivityLog {
@@ -450,7 +452,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad' | 'categoria_propuesta' | 'relacionUsuarioPrestador';
+    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad' | 'categoria_propuesta' | 'relacionUsuarioPrestador' | 'recomendacion';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -719,7 +721,7 @@ export interface RespuestaRecomendacion {
 
 export interface RecomendacionComunidad {
   id?: string; // ID del documento de recomendación
-  autor_uid: string; // UID del usuario que publica la recomendación
+  autor_uid: string; // UID del usuario que publica la pregunta o solicitud de recomendación
   texto: string; // El texto de la pregunta o solicitud de recomendación
   timestamp: number; // Timestamp de cuándo se creó la recomendación
   respuestas: RespuestaRecomendacion[]; // Array de respuestas
@@ -759,6 +761,16 @@ export interface RelacionUsuarioPrestador {
   serviciosContratados: number;
   ultimoServicioFecha: number; // timestamp
   categoriasServicios: string[]; // array of category IDs
+}
+
+export interface Recomendacion {
+  id?: string;
+  usuarioId: string;
+  prestadorId: string;
+  categoria: string;
+  mensaje: string;
+  estado: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
+  fechaCreacion: number; // timestamp
 }
     
     

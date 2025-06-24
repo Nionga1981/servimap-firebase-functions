@@ -13,6 +13,7 @@ const db = admin.firestore();
 const COMISION_SISTEMA_PAGO_PORCENTAJE = 0.04; // 4% payment processor fee
 const COMISION_APP_SERVICIOMAP_PORCENTAJE = 0.06; // 6% ServiMap app commission on original total
 const PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD = 0.10; // 10% of ServiMap's commission goes to loyalty
+const PORCENTAJE_COMISION_EMBAJADOR = 0.05; // 5% ambassador commission on original total
 const FACTOR_CONVERSION_PUNTOS = 10; // $10 MXN (or monetary unit) per 1 loyalty point
 const DEFAULT_LANGUAGE_CODE = "es";
 const HORAS_ANTES_RECORDATORIO_SERVICIO = 24;
@@ -110,6 +111,12 @@ export interface HistorialPuntoUsuario {
   fecha: admin.firestore.Timestamp;
   descripcion?: string;
 }
+export interface HistorialComision {
+  servicioId: string;
+  prestadorId: string;
+  montoComision: number;
+  fecha: admin.firestore.Timestamp;
+}
 export interface UserData {
   fcmTokens?: string[];
   nombre?: string;
@@ -120,6 +127,8 @@ export interface UserData {
   favoritos?: string[];
   codigoEmbajador?: string;
   referidos?: string[];
+  comisionesAcumuladas?: number;
+  historialComisiones?: admin.firestore.FieldValue | HistorialComision[];
 }
 
 interface ProviderLocation {
@@ -194,6 +203,7 @@ export interface ServiceRequest {
   actualEndTime?: admin.firestore.Timestamp | number;
   actualDurationHours?: number;
   finalTotal?: number;
+  category?: string;
 }
 
 export type SolicitudCotizacionEstado =
@@ -274,7 +284,10 @@ export type ActivityLogAction =
   | "PROVEEDOR_REGISTRADO"
   | "CATEGORIA_PROPUESTA"
   | "CATEGORIA_APROBADA"
-  | "CATEGORIA_RECHAZADA";
+  | "CATEGORIA_RECHAZADA"
+  | "EMBAJADOR_COMISION_PAGADA"
+  | "RELACION_USUARIO_PRESTADOR_ACTUALIZADA"
+  | "RECOMENDACION_RECONTRATACION_CREADA";
 
 
 export interface PromocionFidelidad {
@@ -543,6 +556,24 @@ export interface CategoriaPropuestaData {
     fechaCreacion: admin.firestore.Timestamp;
 }
 
+export interface RelacionUsuarioPrestadorData {
+  usuarioId: string;
+  prestadorId: string;
+  serviciosContratados: number;
+  ultimoServicioFecha: admin.firestore.Timestamp;
+  categoriasServicios: string[];
+}
+
+export interface RecomendacionData {
+  id?: string;
+  usuarioId: string;
+  prestadorId: string;
+  categoria: string;
+  mensaje: string;
+  estado: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
+  fechaCreacion: admin.firestore.Timestamp;
+}
+
 
 // --- Helper para enviar notificaciones ---
 async function sendNotification(userId: string, userType: "usuario" | "prestador", title: string, body: string, data?: {[key: string]: string}) {
@@ -770,6 +801,48 @@ export const logSolicitudServicioChanges = functions.firestore
     const isFinalizedState = ESTADOS_FINALES_SERVICIO.includes(afterData.status as EstadoFinalServicio);
     const wasNotFinalizedBefore = !ESTADOS_FINALES_SERVICIO.includes(beforeData.status as EstadoFinalServicio);
 
+    if (isFinalizedState && wasNotFinalizedBefore) {
+        // --- START RELATIONSHIP TRACKING ---
+        const relationshipId = `${afterData.usuarioId}_${afterData.prestadorId}`;
+        const relationshipRef = db.collection("relacionesUsuarioPrestador").doc(relationshipId);
+        let serviceCategory = afterData.category;
+        if (!serviceCategory) {
+            const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
+            if (providerDoc.exists) {
+                const providerData = providerDoc.data() as ProviderData;
+                serviceCategory = providerData.categoryIds?.[0] || "general";
+            }
+        }
+        if (serviceCategory) {
+            try {
+                await db.runTransaction(async (transaction) => {
+                    const relDoc = await transaction.get(relationshipRef);
+                    if (relDoc.exists) {
+                        transaction.update(relationshipRef, {
+                            serviciosContratados: admin.firestore.FieldValue.increment(1),
+                            ultimoServicioFecha: now,
+                            categoriasServicios: admin.firestore.FieldValue.arrayUnion(serviceCategory),
+                        });
+                    } else {
+                        const newRelationshipData: RelacionUsuarioPrestadorData = {
+                            usuarioId: afterData.usuarioId,
+                            prestadorId: afterData.prestadorId,
+                            serviciosContratados: 1,
+                            ultimoServicioFecha: now,
+                            categoriasServicios: [serviceCategory],
+                        };
+                        transaction.set(relationshipRef, newRelationshipData);
+                    }
+                });
+                await logActivity("sistema", "sistema", "RELACION_USUARIO_PRESTADOR_ACTUALIZADA", `Relación entre usuario ${afterData.usuarioId} y prestador ${afterData.prestadorId} actualizada.`, {tipo: "relacionUsuarioPrestador", id: relationshipId});
+            } catch (e) {
+                functions.logger.error(`Error actualizando relación para ${relationshipId}:`, e);
+            }
+        }
+        // --- END RELATIONSHIP TRACKING ---
+    }
+
+
     if ((isFinalizedState && wasNotFinalizedBefore && afterData.paymentStatus === "retenido_para_liberacion") ||
         (beforeData.paymentStatus === "retenido_para_liberacion" && afterData.paymentStatus === "liberado_al_proveedor" && isFinalizedState && beforeData.status !== afterData.status && afterData.status !== "en_disputa")) {
       const montoTotalPagadoPorUsuario = afterData.montoCobrado || afterData.precio || 0;
@@ -815,6 +888,42 @@ export const logSolicitudServicioChanges = functions.firestore
           }
           await logActivity(afterData.usuarioId, "usuario", "PUNTOS_FIDELIDAD_GANADOS", `Usuario ganó ${pointsEarned} puntos por servicio ${solicitudId}.`, {tipo: "usuario", id: afterData.usuarioId}, {puntos: pointsEarned, servicioId});
         }
+        
+        // --- START AMBASSADOR COMMISSION LOGIC ---
+        const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
+        if (providerDoc.exists) {
+            const providerData = providerDoc.data() as ProviderData;
+            if (providerData.embajadorUID) {
+                const embajadorUID = providerData.embajadorUID;
+                const embajadorRef = db.collection("usuarios").doc(embajadorUID);
+                const comisionEmbajador = montoTotalPagadoPorUsuario * PORCENTAJE_COMISION_EMBAJADOR;
+
+                if (comisionEmbajador > 0) {
+                    const comisionHistoryEntry: HistorialComision = {
+                        servicioId: solicitudId,
+                        prestadorId: afterData.prestadorId,
+                        montoComision: comisionEmbajador,
+                        fecha: now,
+                    };
+                    
+                    await embajadorRef.update({
+                        comisionesAcumuladas: admin.firestore.FieldValue.increment(comisionEmbajador),
+                        historialComisiones: admin.firestore.FieldValue.arrayUnion(comisionHistoryEntry),
+                    });
+                    
+                    await logActivity(
+                        "sistema",
+                        "sistema",
+                        "EMBAJADOR_COMISION_PAGADA",
+                        `Comisión de $${comisionEmbajador.toFixed(2)} pagada a embajador ${embajadorUID} por servicio ${solicitudId} de prestador ${afterData.prestadorId}.`,
+                        { tipo: "usuario", id: embajadorUID },
+                        { montoComision: comisionEmbajador, servicioId, prestadorId: afterData.prestadorId }
+                    );
+                }
+            }
+        }
+        // --- END AMBASSADOR COMMISSION LOGIC ---
+
 
         if (detallesFinancierosNuevos.aporteFondoFidelidadMonto && detallesFinancierosNuevos.aporteFondoFidelidadMonto > 0) {
           const fundRef = db.collection("fondoFidelidad").doc("global");
@@ -2848,8 +2957,94 @@ export const onCategoryProposalUpdate = functions.firestore
     return null;
   });
 
+export const generarRecomendacionesDeRecontratacion = functions.pubsub
+  .schedule("every 24 hours")
+  .onRun(async (context) => {
+    functions.logger.info("Ejecutando generarRecomendacionesDeRecontratacion...");
+
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.setDate(now.getDate() - 30));
+    const thirtyDaysAgoTimestamp = admin.firestore.Timestamp.fromDate(thirtyDaysAgo);
+
+    const relacionesQuery = db.collection("relacionesUsuarioPrestador")
+        .where("ultimoServicioFecha", "<", thirtyDaysAgoTimestamp);
+
+    const snapshot = await relacionesQuery.get();
+
+    if (snapshot.empty) {
+        functions.logger.log("No hay relaciones de más de 30 días para procesar.");
+        return null;
+    }
+
+    const batch = db.batch();
+    const recomendacionesRef = db.collection("recomendaciones");
+
+    let recommendationsCreated = 0;
+
+    for (const doc of snapshot.docs) {
+        const relacion = doc.data() as RelacionUsuarioPrestadorData;
+        const categoriasRelacion = relacion.categoriasServicios || [];
+
+        const periodicCategory = categoriasRelacion.find((catId) =>
+            SERVICE_CATEGORIES.find((sc) => sc.id === catId)?.isPeriodic
+        );
+
+        if (periodicCategory) {
+            const categoriaInfo = SERVICE_CATEGORIES.find((sc) => sc.id === periodicCategory);
+            if (!categoriaInfo) continue;
+
+            const providerDoc = await db.collection("prestadores").doc(relacion.prestadorId).get();
+            if (!providerDoc.exists) continue;
+
+            const providerName = (providerDoc.data() as ProviderData)?.nombre || "un prestador";
+            const message = `¿Necesitas ayuda de nuevo con ${categoriaInfo.name}? Podrías volver a contratar a ${providerName}.`;
+
+            const recomendacionData: Omit<RecomendacionData, "id"> = {
+                usuarioId: relacion.usuarioId,
+                prestadorId: relacion.prestadorId,
+                categoria: periodicCategory,
+                mensaje: message,
+                estado: "pendiente",
+                fechaCreacion: admin.firestore.Timestamp.now(),
+            };
+
+            const newRecomendacionRef = recomendacionesRef.doc();
+            batch.set(newRecomendacionRef, recomendacionData);
+            recommendationsCreated++;
+
+            await logActivity(
+                "sistema",
+                "sistema",
+                "RECOMENDACION_RECONTRATACION_CREADA",
+                `Recomendación creada para usuario ${relacion.usuarioId} de recontratar a prestador ${relacion.prestadorId} para ${periodicCategory}.`,
+                { tipo: "recomendacion", id: newRecomendacionRef.id },
+                { usuarioId: relacion.usuarioId, prestadorId: relacion.prestadorId, categoria: periodicCategory }
+            );
+
+            await sendNotification(
+                relacion.usuarioId,
+                "usuario",
+                `¿Necesitas ayuda de nuevo con ${categoriaInfo.name}?`,
+                `Notamos que ha pasado un tiempo. ¡${providerName} está disponible para ayudarte de nuevo!`,
+                { recomendacionId: newRecomendacionRef.id }
+            );
+        }
+    }
+
+    if (recommendationsCreated > 0) {
+        await batch.commit();
+        functions.logger.info(`Se crearon ${recommendationsCreated} recomendaciones de recontratación.`);
+    } else {
+        functions.logger.log("No se generaron nuevas recomendaciones en esta ejecución.");
+    }
+
+    return null;
+  });
+
 
     
 
     
+
+
 
