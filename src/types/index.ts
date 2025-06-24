@@ -61,6 +61,7 @@ export interface Provider {
   aceptaTrabajosVirtuales?: boolean;
   empresa?: string;
   categoryIds?: string[];
+  embajadorUID?: string;
 }
 
 export interface ChatMessage {
@@ -140,6 +141,8 @@ export interface DemoUser {
   puntosAcumulados?: number;
   historialPuntos?: HistorialPuntoUsuario[];
   favoritos?: string[]; // Array of provider IDs
+  codigoEmbajador?: string;
+  referidos?: string[];
 }
 
 

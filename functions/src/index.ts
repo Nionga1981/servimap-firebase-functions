@@ -118,6 +118,8 @@ export interface UserData {
   isPremium?: boolean;
   idiomaPreferido?: string;
   favoritos?: string[];
+  codigoEmbajador?: string;
+  referidos?: string[];
 }
 
 interface ProviderLocation {
@@ -140,6 +142,7 @@ export interface ProviderData {
   rating?: number;
   avatarUrl?: string;
   categoryIds?: string[];
+  embajadorUID?: string;
 }
 
 export interface ServiceRequest {
@@ -2698,7 +2701,7 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
     throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrarte como proveedor.");
   }
   const providerId = context.auth.uid;
-  const {name, specialties, selectedCategoryIds, newCategoryName} = data;
+  const {name, specialties, selectedCategoryIds, newCategoryName, codigoEmbajador} = data;
 
   if (!name || typeof name !== "string" || name.length < 3) {
     throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre válido (mínimo 3 caracteres).");
@@ -2726,6 +2729,29 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
       rating: 0,
       avatarUrl: `https://placehold.co/100x100/7F7F7F/FFFFFF.png?text=${name.charAt(0)}`,
     };
+
+    if (codigoEmbajador && typeof codigoEmbajador === 'string') {
+      const embajadorQuery = db.collection("usuarios").where("codigoEmbajador", "==", codigoEmbajador).limit(1);
+      const embajadorSnapshot = await embajadorQuery.get();
+
+      if (!embajadorSnapshot.empty) {
+        const embajadorDoc = embajadorSnapshot.docs[0];
+        const embajadorUID = embajadorDoc.id;
+        newProviderData.embajadorUID = embajadorUID;
+        
+        const embajadorRef = db.collection("usuarios").doc(embajadorUID);
+        batch.update(embajadorRef, {
+          referidos: admin.firestore.FieldValue.arrayUnion(providerId)
+        });
+        
+        functions.logger.info(`Proveedor ${providerId} referido por embajador ${embajadorUID}.`);
+        await logActivity("sistema", "sistema", "PROVEEDOR_REGISTRADO", `Proveedor ${providerId} registrado con código de embajador ${embajadorUID}.`, {tipo: "prestador", id: providerId}, {embajadorUID, codigo: codigoEmbajador});
+      } else {
+        functions.logger.warn(`Código de embajador "${codigoEmbajador}" no encontrado. Registrando proveedor sin referencia.`);
+      }
+    }
+
+
     batch.set(providerRef, newProviderData, {merge: true});
     await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Usuario ${providerId} se registró como proveedor: ${name}.`, {tipo: "prestador", id: providerId});
 
@@ -2826,3 +2852,4 @@ export const onCategoryProposalUpdate = functions.firestore
     
 
     
+

@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SERVICE_CATEGORIES } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Send } from "lucide-react";
+import { Loader2, Send, VenetianMask } from "lucide-react";
 import { registerProvider } from "@/services/providerService";
 
 const providerSignupSchema = z.object({
@@ -30,6 +30,7 @@ const providerSignupSchema = z.object({
   }),
   proposeNewCategory: z.boolean().default(false).optional(),
   newCategoryName: z.string().optional(),
+  codigoEmbajador: z.string().optional(),
 }).refine((data) => {
     if (data.proposeNewCategory && (!data.newCategoryName || data.newCategoryName.length < 3)) {
         return false;
@@ -52,10 +53,11 @@ export function ProviderSignupForm() {
       categoryIds: [],
       proposeNewCategory: false,
       newCategoryName: "",
+      codigoEmbajador: "",
     },
   });
 
-  const { watch, setValue } = form;
+  const { watch } = form;
   const proposeNew = watch("proposeNewCategory");
 
   async function onSubmit(data: ProviderSignupFormValues) {
@@ -65,6 +67,7 @@ export function ProviderSignupForm() {
             specialties: data.specialties.split(',').map(s => s.trim()),
             selectedCategoryIds: data.categoryIds,
             ...(data.proposeNewCategory && data.newCategoryName && { newCategoryName: data.newCategoryName }),
+            ...(data.codigoEmbajador && { codigoEmbajador: data.codigoEmbajador }),
         };
 
         await registerProvider(registrationData);
@@ -213,6 +216,25 @@ export function ProviderSignupForm() {
                 )}
             />
         )}
+
+        <FormField
+          control={form.control}
+          name="codigoEmbajador"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-base flex items-center gap-2">
+                <VenetianMask className="h-5 w-5 text-muted-foreground" /> Código de Embajador (Opcional)
+              </FormLabel>
+              <FormControl>
+                <Input placeholder="Ingresa el código si fuiste referido por alguien" {...field} />
+              </FormControl>
+              <FormDescription>
+                Si un embajador de ServiMap te invitó, ingresa su código aquí.
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
         
         <Button type="submit" disabled={form.formState.isSubmitting} size="lg">
           {form.formState.isSubmitting ? (

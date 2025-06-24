@@ -1,3 +1,4 @@
+
 // src/services/providerService.ts
 "use client"; // Necesario si usamos hooks o interactuamos con APIs de navegador
 
@@ -23,6 +24,7 @@ interface ProviderRegistrationData {
     specialties: string[];
     selectedCategoryIds: string[];
     newCategoryName?: string;
+    codigoEmbajador?: string;
 }
 
 
