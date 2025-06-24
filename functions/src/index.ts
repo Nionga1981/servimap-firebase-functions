@@ -1484,6 +1484,70 @@ export const buscarPrestadoresInteligente = functions.https.onCall(async (data, 
   }
 });
 
+export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const { categoriaId, latUsuario, lngUsuario } = data;
+
+  if (!categoriaId || typeof categoriaId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'categoriaId'.");
+  }
+  if (typeof latUsuario !== "number" || typeof lngUsuario !== "number") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'latUsuario' y 'lngUsuario'.");
+  }
+
+  try {
+    const prestadoresQuery = db.collection("prestadores")
+      .where("isAvailable", "==", true)
+      .where("categoryIds", "array-contains", categoriaId)
+      .orderBy("rating", "desc");
+      
+    const prestadoresSnapshot = await prestadoresQuery.get();
+    
+    if (prestadoresSnapshot.empty) {
+      return [];
+    }
+
+    const resultados: PrestadorBuscado[] = [];
+
+    for (const doc of prestadoresSnapshot.docs) {
+      const provider = doc.data() as ProviderData;
+      
+      // Ensure provider has a location to calculate distance
+      if (provider.currentLocation) {
+        const distanciaKm = calculateDistance(
+          latUsuario,
+          lngUsuario,
+          provider.currentLocation.lat,
+          provider.currentLocation.lng
+        );
+
+        resultados.push({
+          id: doc.id,
+          nombre: provider.nombre || "N/A",
+          empresa: provider.empresa,
+          distanciaKm: parseFloat(distanciaKm.toFixed(1)),
+          calificacion: provider.rating || 0,
+          avatarUrl: provider.avatarUrl,
+          categoriaPrincipal: SERVICE_CATEGORIES.find(c => c.id === (provider.categoryIds?.[0]))?.name || "General",
+        });
+      }
+    }
+    
+    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó por categoría: "${categoriaId}". Resultados: ${resultados.length}.`, undefined, { categoriaId, lat: latUsuario, lng: lngUsuario });
+
+    return resultados;
+
+  } catch (error: any) {
+    functions.logger.error("Error en buscarPrestadoresPorFiltros:", error);
+    if (error.code === 'failed-precondition') {
+        throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
+    }
+    throw new functions.https.HttpsError("internal", "Error al buscar prestadores.", error.message);
+  }
+});
+
 
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
   const R = 6371; // Radius of the earth in km
@@ -2538,6 +2602,11 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
       functions.logger.log(`[onCitaActualizada ${citaId}] No hay datos antes o después, saliendo.`);
       return null;
     }
+    
+    // Solo actuar si el estado ha cambiado
+    if (beforeData.estado === afterData.estado) {
+        return null;
+    }
 
     const usuarioId = afterData.usuarioId;
     const prestadorId = afterData.prestadorId;
@@ -2623,7 +2692,7 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
       functions.logger.info(`[onCitaActualizada ${citaId}] Cita rechazada por prestador. Notificando al cliente.`);
       await sendNotification(
         usuarioId, "usuario", "Cita Rechazada",
-        `Lamentablemente, el prestador ${prestadorNombre} ha tenido que rechazar tu cita para "${detallesCita}" el ${fechaCitaFormateada}.`,
+        `Tu solicitud con ${prestadorNombre} para "${detallesCita}" el ${fechaCitaFormateada} fue rechazada. Puedes buscar otro servicio.`,
         {citaId, tipo: "CITA_RECHAZADA"}
       );
     } else if (afterData.estado === "cancelada_usuario" && beforeData.estado !== "cancelada_usuario") {
@@ -2762,3 +2831,6 @@ export const onCategoryProposalUpdate = functions.firestore
 
     return null;
   });
+
+
+    
