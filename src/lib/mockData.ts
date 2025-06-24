@@ -1,5 +1,5 @@
 // src/lib/mockData.ts
-import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad, IdiomaDocumento, ZonaPreferente, Comunidad, Service, Recomendacion, RelacionUsuarioPrestador } from '@/types';
+import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad, IdiomaDocumento, ZonaPreferente, Comunidad, Service, Recomendacion, RelacionUsuarioPrestador, DocumentoVerificable } from '@/types';
 import { SERVICE_CATEGORIES as LUCIDE_SERVICE_CATEGORIES } from './constants';
 
 const getApproximateLocation = (exactLoc: ProviderLocation, factor = 0.01): ProviderLocation => {
@@ -73,7 +73,7 @@ export const mockProviders: Provider[] = [
     ratingSum: 588,
     isAvailable: true,
     estadoOnline: true,
-    isPremium: true, // Proveedor Premium
+    isPremium: true,
     services: [
         {id: 's_p1_1', title: 'Reparaciones Urgentes 24/7', description: 'Solución rápida a fugas y atascos, disponible a cualquier hora.', price: 90, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200/3F51B5/FFFFFF.png?text=Fuga', dataAiHint: 'water pipes', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 5},
         {id: 's_p1_2', title: 'Instalación de Calentadores', description: 'Instalamos y reparamos calentadores de agua de todas las marcas.', price: 150, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200/3F51B5/FFFFFF.png?text=Boiler', dataAiHint: 'water heater', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 10},
@@ -89,6 +89,16 @@ export const mockProviders: Provider[] = [
     aceptaViajes: true,
     aceptaTrabajosVirtuales: false,
     embajadorUID: "currentUserDemoId",
+    documentosValidos: true,
+    comentarioValidacion: "Documentos revisados y aprobados por admin.",
+    documentosVerificables: [
+      {
+        tipoDocumento: 'Identificación Oficial',
+        urlDocumento: 'https://placehold.co/300x200.png',
+        fechaRegistro: Date.now() - 86400000 * 20,
+        estadoVerificacion: 'verificado_manual'
+      }
+    ]
   },
   {
     id: 'electrician1',
@@ -100,7 +110,7 @@ export const mockProviders: Provider[] = [
     ratingSum: 446.5,
     isAvailable: true,
     estadoOnline: true,
-    isPremium: false, // Proveedor no premium
+    isPremium: false,
     services: [
         {id: 's_e1_1', title: 'Cortocircuitos y Fallas Eléctricas', description: 'Diagnóstico y reparación de fallas eléctricas de todo tipo.', price: 80, category: 'electrical', providerId: 'electrician1', imageUrl: 'https://placehold.co/300x200/008080/FFFFFF.png?text=Falla', dataAiHint: 'electrical panel', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 7},
         {id: 's_e1_2', title: 'Instalación de Lámparas y Contactos', description: 'Moderniza tu hogar con nuevas instalaciones eléctricas.', price: 60, category: 'electrical', providerId: 'electrician1', activo: true, fechaCreacion: Date.now() - 86400000 * 3} // Servicio global
@@ -115,6 +125,21 @@ export const mockProviders: Provider[] = [
     aceptaCotizacion: true,
     aceptaViajes: true,
     aceptaTrabajosVirtuales: true,
+    documentosValidos: false,
+    documentosVerificables: [
+      {
+        tipoDocumento: 'Comprobante de Domicilio',
+        urlDocumento: 'https://placehold.co/300x200.png',
+        fechaRegistro: Date.now() - 86400000 * 5,
+        estadoVerificacion: 'pendiente'
+      },
+      {
+        tipoDocumento: 'Certificado de Electricista',
+        urlDocumento: 'https://placehold.co/300x200.png',
+        fechaRegistro: Date.now() - 86400000 * 5,
+        estadoVerificacion: 'pendiente'
+      }
+    ]
   },
   {
     id: 'nanny1',
@@ -128,7 +153,6 @@ export const mockProviders: Provider[] = [
     estadoOnline: true,
     isPremium: false,
     services: [
-      // No services with fixed price for now, only hourly
       {id: 's_n1_hourly', title: 'Cuidado Infantil por Hora', description: 'Cuidado profesional y lúdico para tus hijos.', price: 20, category: 'child_care', providerId: 'nanny1', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 1 }
     ],
     ubicacionExacta: nanny1ExactLocation,
@@ -141,6 +165,8 @@ export const mockProviders: Provider[] = [
     aceptaCotizacion: false,
     aceptaViajes: false,
     aceptaTrabajosVirtuales: false,
+    documentosValidos: true,
+    comentarioValidacion: "Validado."
   },
   {
     id: 'gardener1',
@@ -166,6 +192,9 @@ export const mockProviders: Provider[] = [
     aceptaCotizacion: true,
     aceptaViajes: true,
     aceptaTrabajosVirtuales: false,
+    documentosValidos: false,
+    comentarioValidacion: 'Pendiente de revisar el comprobante de domicilio.',
+    documentosVerificables: [{ tipoDocumento: 'Identificación', urlDocumento: 'url_placeholder', fechaRegistro: Date.now(), estadoVerificacion: 'verificado_manual' }]
   },
   {
     id: 'doctor1',
@@ -192,6 +221,8 @@ export const mockProviders: Provider[] = [
     aceptaCotizacion: false,
     aceptaViajes: false,
     aceptaTrabajosVirtuales: true,
+    documentosValidos: false,
+    documentosVerificables: [{ tipoDocumento: 'Cédula Profesional', urlDocumento: 'url_placeholder', fechaRegistro: Date.now(), estadoVerificacion: 'pendiente' }]
   },
   {
     id: 'cleaner1',
@@ -217,6 +248,7 @@ export const mockProviders: Provider[] = [
     aceptaCotizacion: true,
     aceptaViajes: true,
     aceptaTrabajosVirtuales: false,
+    documentosValidos: true,
   },
 ];
 
@@ -496,5 +528,5 @@ export const mockRelaciones: RelacionUsuarioPrestador[] = [
   { id: 'rel2', usuarioId: 'anotherUser', prestadorId: 'plumber1', serviciosContratados: 1, ultimoServicioFecha: Date.now() - (1000 * 60 * 60 * 24 * 40), categoriasServicios: ['plumbing'], lastReminderSent: Date.now() - (1000 * 60 * 60 * 24 * 70) },
   { id: 'rel3', usuarioId: 'currentUserDemoId', prestadorId: 'electrician1', serviciosContratados: 1, ultimoServicioFecha: Date.now() - (1000 * 60 * 60 * 24 * 90), categoriasServicios: ['electrical'] },
 ];
-    
+
     

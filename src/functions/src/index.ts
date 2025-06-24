@@ -137,9 +137,21 @@ interface ProviderLocation {
   pais?: string;
 }
 
+export interface DocumentoVerificable {
+  tipoDocumento: string;
+  urlDocumento: string;
+  descripcion?: string;
+  fechaRegistro: admin.firestore.Timestamp;
+  estadoVerificacion: "pendiente" | "verificado_ia" | "rechazado_ia" | "verificado_manual" | "rechazado_manual" | "Validado" | "Rechazado por datos sensibles detectados";
+  fechaVerificacion?: admin.firestore.Timestamp;
+  motivoRechazoIA?: string;
+  palabrasClaveDetectadasIA?: string[];
+}
+
 export interface ProviderData {
   fcmTokens?: string[];
   nombre?: string;
+  isPremium?: boolean;
   aceptaCotizacion?: boolean;
   aceptaViajes?: boolean;
   aceptaTrabajosVirtuales?: boolean;
@@ -152,6 +164,9 @@ export interface ProviderData {
   avatarUrl?: string;
   categoryIds?: string[];
   embajadorUID?: string;
+  documentosVerificables?: DocumentoVerificable[];
+  documentosValidos?: boolean;
+  comentarioValidacion?: string;
 }
 
 export interface ServiceRequest {
@@ -563,6 +578,7 @@ export interface RelacionUsuarioPrestadorData {
   serviciosContratados: number;
   ultimoServicioFecha: admin.firestore.Timestamp;
   categoriasServicios: string[];
+  lastReminderSent?: admin.firestore.Timestamp;
 }
 
 export interface RecomendacionData {
@@ -3054,57 +3070,82 @@ export const enviarRecordatorioRecontratacion = functions.https.onCall(async (da
     if (!usuarioId || typeof usuarioId !== 'string' || !categoriaId || typeof categoriaId !== 'string') {
         throw new functions.https.HttpsError("invalid-argument", "Se requieren 'usuarioId' y 'categoriaId' válidos.");
     }
+    
+    const now = admin.firestore.Timestamp.now();
+    const prestadorRef = db.collection("prestadores").doc(prestadorId);
+    const relacionId = `${usuarioId}_${prestadorId}`;
+    const relacionRef = db.collection("relacionesUsuarioPrestador").doc(relacionId);
 
     try {
-        const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
-        if (!prestadorDoc.exists) {
-            throw new functions.https.HttpsError("not-found", "No se encontró tu perfil de prestador.");
-        }
-        const prestadorNombre = prestadorDoc.data()?.nombre || 'Tu prestador de confianza';
+        return await db.runTransaction(async (transaction) => {
+            const prestadorDoc = await transaction.get(prestadorRef);
+            if (!prestadorDoc.exists) {
+                throw new functions.https.HttpsError("not-found", "No se encontró tu perfil de prestador.");
+            }
+            const prestadorData = prestadorDoc.data() as ProviderData;
+            
+            const relacionDoc = await transaction.get(relacionRef);
+            if (!relacionDoc.exists) {
+                 throw new functions.https.HttpsError("not-found", "No se encontró una relación de servicio previa con este usuario.");
+            }
+            const relacionData = relacionDoc.data() as RelacionUsuarioPrestadorData;
+            
+            // Lógica de límite de envíos para no-premium
+            if (!prestadorData.isPremium) {
+                if (relacionData.lastReminderSent) {
+                    const sixtyDaysInMillis = 60 * 24 * 60 * 60 * 1000;
+                    const lastSentDate = relacionData.lastReminderSent.toMillis();
+                    if (now.toMillis() - lastSentDate < sixtyDaysInMillis) {
+                        throw new functions.https.HttpsError("failed-precondition", "Ya has enviado un recordatorio a este cliente recientemente. Por favor, espera 60 días para enviar otro.");
+                    }
+                }
+            }
+            
+            const prestadorNombre = prestadorData.nombre || 'Tu prestador de confianza';
+            const categoria = SERVICE_CATEGORIES.find(c => c.id === categoriaId);
+            const nombreCategoria = categoria?.name || 'un servicio';
+            const mensaje = mensajePersonalizado || `${prestadorNombre} te invita a agendar de nuevo un servicio de ${nombreCategoria}.`;
+            
+            const recomendacionData: Omit<RecomendacionData, "id"> = {
+                usuarioId: usuarioId,
+                prestadorId: prestadorId,
+                categoria: categoriaId,
+                mensaje: mensaje,
+                estado: 'pendiente',
+                fechaCreacion: now,
+                tipo: 'invita-prestador',
+            };
+            const recomendacionRef = db.collection("recomendaciones").doc();
+            transaction.set(recomendacionRef, recomendacionData);
+            
+            // Actualizar la fecha del último recordatorio enviado en la relación
+            transaction.update(relacionRef, { lastReminderSent: now });
 
-        const categoria = SERVICE_CATEGORIES.find(c => c.id === categoriaId);
-        const nombreCategoria = categoria?.name || 'un servicio';
+            await logActivity(
+                prestadorId, "prestador", "RECONTRATACION_RECORDATORIO_ENVIADO",
+                `Prestador ${prestadorId} envió recordatorio a usuario ${usuarioId} para categoría ${categoriaId}.`,
+                { tipo: "recomendacion", id: recomendacionRef.id },
+                { prestadorId, categoriaId, usuarioId }
+            );
 
-        const mensaje = mensajePersonalizado || `${prestadorNombre} te invita a agendar de nuevo un servicio de ${nombreCategoria}.`;
+            const notifTitle = `Un recordatorio de ${prestadorNombre}`;
+            const notifBody = mensaje;
 
-        const recomendacionData: Omit<RecomendacionData, "id"> = {
-            usuarioId: usuarioId,
-            prestadorId: prestadorId,
-            categoria: categoriaId,
-            mensaje: mensaje,
-            estado: 'pendiente',
-            fechaCreacion: admin.firestore.Timestamp.now(),
-            tipo: 'invita-prestador',
-        };
-        const recomendacionRef = await db.collection("recomendaciones").add(recomendacionData);
-        
-        const notifTitle = `Un recordatorio de ${prestadorNombre}`;
-        const notifBody = mensaje;
+            await sendNotification(usuarioId, "usuario", notifTitle, notifBody, {
+                type: 'REHIRE_REMINDER',
+                providerId: prestadorId,
+                categoryId: categoriaId,
+                recommendationId: recomendacionRef.id,
+            });
 
-        await sendNotification(usuarioId, "usuario", notifTitle, notifBody, {
-            type: 'REHIRE_REMINDER',
-            providerId: prestadorId,
-            categoryId: categoriaId,
-            recommendationId: recomendacionRef.id,
+            return { success: true, message: `Recordatorio enviado a usuario ${usuarioId}.`, recomendacionId: recomendacionRef.id };
         });
-
-        await logActivity(
-            prestadorId,
-            "prestador",
-            "RECONTRATACION_RECORDATORIO_ENVIADO",
-            `Prestador ${prestadorId} envió recordatorio (creó recomendación ${recomendacionRef.id}) a usuario ${usuarioId} para categoría ${categoriaId}.`,
-            { tipo: "recomendacion", id: recomendacionRef.id },
-            { prestadorId, categoriaId, usuarioId }
-        );
-
-        return { success: true, message: `Recordatorio enviado a usuario ${usuarioId}.`, recomendacionId: recomendacionRef.id };
     } catch (error: any) {
         functions.logger.error(`Error al enviar recordatorio de ${prestadorId} a ${usuarioId}:`, error);
         if (error instanceof functions.https.HttpsError) throw error;
         throw new functions.https.HttpsError("internal", "Error al procesar el envío del recordatorio.", error.message);
     }
 });
-    
 
 export const getPastClientsForProvider = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
@@ -3151,12 +3192,31 @@ export const getPastClientsForProvider = functions.https.onCall(async (data, con
     }
 });
 
+export const getProvidersForValidation = functions.https.onCall(async (data, context) => {
+    // En un entorno de producción, se debería verificar que el llamador es un administrador.
+    // if (!context.auth || !context.auth.token.admin) {
+    //     throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden realizar esta acción.");
+    // }
 
+    try {
+        const providersSnapshot = await db.collection("prestadores")
+            .where("documentosValidos", "==", false)
+            .get();
+
+        if (providersSnapshot.empty) {
+            return [];
+        }
+
+        const providersToValidate = providersSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+        }));
+
+        return providersToValidate;
+    } catch (error: any) {
+        functions.logger.error("Error al obtener proveedores para validación:", error);
+        throw new functions.https.HttpsError("internal", "Error al buscar proveedores pendientes de validación.", error.message);
+    }
+});
 
     
-
-
-
-
-
-

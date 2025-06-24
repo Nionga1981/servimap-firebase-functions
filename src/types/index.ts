@@ -35,6 +35,17 @@ export interface ProviderLocation {
   pais?: string;
 }
 
+export interface DocumentoVerificable {
+  tipoDocumento: string;
+  urlDocumento: string;
+  descripcion?: string;
+  fechaRegistro: number; // timestamp
+  estadoVerificacion: "pendiente" | "verificado_ia" | "rechazado_ia" | "verificado_manual" | "rechazado_manual" | "Validado" | "Rechazado por datos sensibles detectados";
+  fechaVerificacion?: number; // timestamp
+  motivoRechazoIA?: string;
+  palabrasClaveDetectadasIA?: string[];
+}
+
 export interface Provider {
   id: string;
   name: string;
@@ -62,6 +73,9 @@ export interface Provider {
   empresa?: string;
   categoryIds?: string[];
   embajadorUID?: string;
+  documentosVerificables?: DocumentoVerificable[];
+  documentosValidos?: boolean;
+  comentarioValidacion?: string;
 }
 
 export interface ChatMessage {
@@ -627,7 +641,7 @@ export interface PrestadorBuscado {
   id: string;
   nombre: string;
   empresa?: string;
-  distanciaKm: number;
+  distanciaKm?: number;
   calificacion: number;
   avatarUrl?: string;
   categoriaPrincipal?: string;
@@ -787,3 +801,5 @@ export interface PastClientInfo {
   ultimaCategoriaNombre: string;
   serviciosContratados: number;
 }
+
+    
