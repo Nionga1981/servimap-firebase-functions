@@ -46,6 +46,7 @@ export interface Provider {
   services: Service[];
   isAvailable: boolean; // General availability toggle by provider
   estadoOnline: boolean; // Real-time online status (e.g., sharing location)
+  isPremium?: boolean; // Added for premium features check
   ubicacionAproximada: ProviderLocation; // For general display on map before hiring
   ubicacionExacta?: ProviderLocation; // For routing after hiring or if explicitly shared
   currentLocation?: ProviderLocation | null; // Live location if estadoOnline is true
@@ -763,6 +764,7 @@ export interface RelacionUsuarioPrestador {
   serviciosContratados: number;
   ultimoServicioFecha: number; // timestamp
   categoriasServicios: string[]; // array of category IDs
+  lastReminderSent?: number; // timestamp of the last reminder sent by the provider
 }
 
 export interface Recomendacion {
@@ -785,5 +787,3 @@ export interface PastClientInfo {
   ultimaCategoriaNombre: string;
   serviciosContratados: number;
 }
-    
-    

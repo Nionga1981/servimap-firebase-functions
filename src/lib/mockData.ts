@@ -73,6 +73,7 @@ export const mockProviders: Provider[] = [
     ratingSum: 588,
     isAvailable: true,
     estadoOnline: true,
+    isPremium: true, // Proveedor Premium
     services: [
         {id: 's_p1_1', title: 'Reparaciones Urgentes 24/7', description: 'Solución rápida a fugas y atascos, disponible a cualquier hora.', price: 90, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200/3F51B5/FFFFFF.png?text=Fuga', dataAiHint: 'water pipes', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 5},
         {id: 's_p1_2', title: 'Instalación de Calentadores', description: 'Instalamos y reparamos calentadores de agua de todas las marcas.', price: 150, category: 'plumbing', providerId: 'plumber1', imageUrl: 'https://placehold.co/300x200/3F51B5/FFFFFF.png?text=Boiler', dataAiHint: 'water heater', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 10},
@@ -99,6 +100,7 @@ export const mockProviders: Provider[] = [
     ratingSum: 446.5,
     isAvailable: true,
     estadoOnline: true,
+    isPremium: false, // Proveedor no premium
     services: [
         {id: 's_e1_1', title: 'Cortocircuitos y Fallas Eléctricas', description: 'Diagnóstico y reparación de fallas eléctricas de todo tipo.', price: 80, category: 'electrical', providerId: 'electrician1', imageUrl: 'https://placehold.co/300x200/008080/FFFFFF.png?text=Falla', dataAiHint: 'electrical panel', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 7},
         {id: 's_e1_2', title: 'Instalación de Lámparas y Contactos', description: 'Moderniza tu hogar con nuevas instalaciones eléctricas.', price: 60, category: 'electrical', providerId: 'electrician1', activo: true, fechaCreacion: Date.now() - 86400000 * 3} // Servicio global
@@ -124,6 +126,7 @@ export const mockProviders: Provider[] = [
     ratingSum: 343,
     isAvailable: true,
     estadoOnline: true,
+    isPremium: false,
     services: [
       // No services with fixed price for now, only hourly
       {id: 's_n1_hourly', title: 'Cuidado Infantil por Hora', description: 'Cuidado profesional y lúdico para tus hijos.', price: 20, category: 'child_care', providerId: 'nanny1', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 1 }
@@ -149,6 +152,7 @@ export const mockProviders: Provider[] = [
     ratingSum: 230,
     isAvailable: true,
     estadoOnline: true,
+    isPremium: true,
     services: [
         {id: 's_g1_1', title: 'Diseño y Mantenimiento de Jardines', description: 'Transformamos tu espacio exterior en un oasis verde.', price: 100, category: 'gardening', providerId: 'gardener1', imageUrl: 'https://placehold.co/300x200/4CAF50/FFFFFF.png?text=Jardin', dataAiHint: 'gardening tools', activo: true, fechaCreacion: Date.now() - 86400000 * 12}, // Servicio global
         {id: 's_g1_2', title: 'Poda Estética de Setos (Comunidad)', description: 'Poda especializada para setos y arbustos en la comunidad del centro.', price: 65, category: 'gardening', providerId: 'gardener1', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 4}
@@ -173,6 +177,7 @@ export const mockProviders: Provider[] = [
     ratingSum: 720,
     isAvailable: false, // Not available now
     estadoOnline: false,
+    isPremium: true,
     services: [
         {id: 's_d1_1', title: 'Consulta Médica General Integral', description: 'Atención primaria, diagnóstico y seguimiento de padecimientos comunes.', price: 70, category: 'doctors', providerId: 'doctor1', imageUrl: 'https://placehold.co/300x200/F44336/FFFFFF.png?text=Consulta', dataAiHint: 'medical consultation', activo: true, fechaCreacion: Date.now() - 86400000 * 20}, // Servicio global
         {id: 's_d1_2', title: 'Certificados Médicos (Escolares/Laborales)', description: 'Emisión de certificados médicos válidos.', price: 30, category: 'doctors', providerId: 'doctor1', activo: false, fechaCreacion: Date.now() - 86400000 * 30} // Servicio inactivo
@@ -198,6 +203,7 @@ export const mockProviders: Provider[] = [
     ratingSum: 360,
     isAvailable: true,
     estadoOnline: true,
+    isPremium: false,
     services: [
       {id: 's_c1_1', title: 'Limpieza Profunda de Casas', description: 'Dejamos tu hogar reluciente de arriba a abajo.', price: 120, category: 'cleaning', providerId: 'cleaner1', imageUrl: 'https://placehold.co/300x200/2196F3/FFFFFF.png?text=CasaLimpia', dataAiHint: 'cleaning supplies', comunidad_id: 'culiacan_centro_com', activo: true, fechaCreacion: Date.now() - 86400000 * 6},
     ],
@@ -486,8 +492,9 @@ export const mockRecomendaciones: Recomendacion[] = [
 ];
 
 export const mockRelaciones: RelacionUsuarioPrestador[] = [
-  { id: 'rel1', usuarioId: 'standardUserDemoId', prestadorId: 'plumber1', serviciosContratados: 2, ultimoServicioFecha: Date.now() - (1000 * 60 * 60 * 24 * 15), categoriasServicios: ['plumbing'] },
-  { id: 'rel2', usuarioId: 'anotherUser', prestadorId: 'plumber1', serviciosContratados: 1, ultimoServicioFecha: Date.now() - (1000 * 60 * 60 * 24 * 40), categoriasServicios: ['plumbing'] },
+  { id: 'rel1', usuarioId: 'standardUserDemoId', prestadorId: 'plumber1', serviciosContratados: 2, ultimoServicioFecha: Date.now() - (1000 * 60 * 60 * 24 * 15), categoriasServicios: ['plumbing'], lastReminderSent: Date.now() - (1000 * 60 * 60 * 24 * 5) },
+  { id: 'rel2', usuarioId: 'anotherUser', prestadorId: 'plumber1', serviciosContratados: 1, ultimoServicioFecha: Date.now() - (1000 * 60 * 60 * 24 * 40), categoriasServicios: ['plumbing'], lastReminderSent: Date.now() - (1000 * 60 * 60 * 24 * 70) },
+  { id: 'rel3', usuarioId: 'currentUserDemoId', prestadorId: 'electrician1', serviciosContratados: 1, ultimoServicioFecha: Date.now() - (1000 * 60 * 60 * 24 * 90), categoriasServicios: ['electrical'] },
 ];
     
     

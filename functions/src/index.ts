@@ -1,6 +1,5 @@
 
 
-
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -141,6 +140,7 @@ interface ProviderLocation {
 export interface ProviderData {
   fcmTokens?: string[];
   nombre?: string;
+  isPremium?: boolean;
   aceptaCotizacion?: boolean;
   aceptaViajes?: boolean;
   aceptaTrabajosVirtuales?: boolean;
@@ -564,6 +564,7 @@ export interface RelacionUsuarioPrestadorData {
   serviciosContratados: number;
   ultimoServicioFecha: admin.firestore.Timestamp;
   categoriasServicios: string[];
+  lastReminderSent?: admin.firestore.Timestamp;
 }
 
 export interface RecomendacionData {
@@ -574,6 +575,7 @@ export interface RecomendacionData {
   mensaje: string;
   estado: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
   fechaCreacion: admin.firestore.Timestamp;
+  tipo?: 'sistema' | 'invita-prestador';
 }
 
 
@@ -3008,6 +3010,7 @@ export const generarRecomendacionesDeRecontratacion = functions.pubsub
                 mensaje: message,
                 estado: "pendiente",
                 fechaCreacion: admin.firestore.Timestamp.now(),
+                tipo: 'sistema',
             };
 
             const newRecomendacionRef = recomendacionesRef.doc();
@@ -3044,52 +3047,91 @@ export const generarRecomendacionesDeRecontratacion = functions.pubsub
   });
 
 export const enviarRecordatorioRecontratacion = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar un recordatorio (prestador).");
-  }
-  const prestadorId = context.auth.uid;
-  const { usuarioId, categoriaId } = data;
-
-  if (!usuarioId || typeof usuarioId !== 'string' || !categoriaId || typeof categoriaId !== 'string') {
-    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'usuarioId' y 'categoriaId' válidos.");
-  }
-
-  try {
-    const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
-    if (!prestadorDoc.exists) {
-      throw new functions.https.HttpsError("not-found", "No se encontró tu perfil de prestador.");
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar un recordatorio (prestador).");
     }
-    const prestadorNombre = prestadorDoc.data()?.nombre || 'Tu prestador de confianza';
+    const prestadorId = context.auth.uid;
+    const { usuarioId, categoriaId, mensajePersonalizado } = data;
 
-    const categoria = SERVICE_CATEGORIES.find(c => c.id === categoriaId);
-    const nombreCategoria = categoria?.name || 'un servicio';
-
-    const notifTitle = `¿Necesitas ayuda de nuevo?`;
-    const notifBody = `${prestadorNombre} te invita a agendar de nuevo un servicio de ${nombreCategoria}.`;
-
-    await sendNotification(usuarioId, "usuario", notifTitle, notifBody, {
-      type: 'REHIRE_REMINDER',
-      providerId: prestadorId,
-      categoryId: categoriaId,
-    });
-
-    await logActivity(
-      prestadorId,
-      "prestador",
-      "RECONTRATACION_RECORDATORIO_ENVIADO",
-      `Prestador ${prestadorId} envió recordatorio a usuario ${usuarioId} para categoría ${categoriaId}.`,
-      { tipo: "usuario", id: usuarioId },
-      { prestadorId, categoriaId }
-    );
-
-    return { success: true, message: `Recordatorio enviado a usuario ${usuarioId}.` };
-  } catch (error: any) {
-    functions.logger.error(`Error al enviar recordatorio de ${prestadorId} a ${usuarioId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar el envío del recordatorio.", error.message);
-  }
-});
+    if (!usuarioId || typeof usuarioId !== 'string' || !categoriaId || typeof categoriaId !== 'string') {
+        throw new functions.https.HttpsError("invalid-argument", "Se requieren 'usuarioId' y 'categoriaId' válidos.");
+    }
     
+    const now = admin.firestore.Timestamp.now();
+    const prestadorRef = db.collection("prestadores").doc(prestadorId);
+    const relacionId = `${usuarioId}_${prestadorId}`;
+    const relacionRef = db.collection("relacionesUsuarioPrestador").doc(relacionId);
+
+    try {
+        return await db.runTransaction(async (transaction) => {
+            const prestadorDoc = await transaction.get(prestadorRef);
+            if (!prestadorDoc.exists) {
+                throw new functions.https.HttpsError("not-found", "No se encontró tu perfil de prestador.");
+            }
+            const prestadorData = prestadorDoc.data() as ProviderData;
+            
+            const relacionDoc = await transaction.get(relacionRef);
+            if (!relacionDoc.exists) {
+                 throw new functions.https.HttpsError("not-found", "No se encontró una relación de servicio previa con este usuario.");
+            }
+            const relacionData = relacionDoc.data() as RelacionUsuarioPrestadorData;
+            
+            // Lógica de límite de envíos para no-premium
+            if (!prestadorData.isPremium) {
+                if (relacionData.lastReminderSent) {
+                    const sixtyDaysInMillis = 60 * 24 * 60 * 60 * 1000;
+                    const lastSentDate = relacionData.lastReminderSent.toMillis();
+                    if (now.toMillis() - lastSentDate < sixtyDaysInMillis) {
+                        throw new functions.https.HttpsError("failed-precondition", "Ya has enviado un recordatorio a este cliente recientemente. Por favor, espera 60 días para enviar otro.");
+                    }
+                }
+            }
+            
+            const prestadorNombre = prestadorData.nombre || 'Tu prestador de confianza';
+            const categoria = SERVICE_CATEGORIES.find(c => c.id === categoriaId);
+            const nombreCategoria = categoria?.name || 'un servicio';
+            const mensaje = mensajePersonalizado || `${prestadorNombre} te invita a agendar de nuevo un servicio de ${nombreCategoria}.`;
+            
+            const recomendacionData: Omit<RecomendacionData, "id"> = {
+                usuarioId: usuarioId,
+                prestadorId: prestadorId,
+                categoria: categoriaId,
+                mensaje: mensaje,
+                estado: 'pendiente',
+                fechaCreacion: now,
+                tipo: 'invita-prestador',
+            };
+            const recomendacionRef = db.collection("recomendaciones").doc();
+            transaction.set(recomendacionRef, recomendacionData);
+            
+            // Actualizar la fecha del último recordatorio enviado en la relación
+            transaction.update(relacionRef, { lastReminderSent: now });
+
+            await logActivity(
+                prestadorId, "prestador", "RECONTRATACION_RECORDATORIO_ENVIADO",
+                `Prestador ${prestadorId} envió recordatorio a usuario ${usuarioId} para categoría ${categoriaId}.`,
+                { tipo: "recomendacion", id: recomendacionRef.id },
+                { prestadorId, categoriaId, usuarioId }
+            );
+
+            const notifTitle = `Un recordatorio de ${prestadorNombre}`;
+            const notifBody = mensaje;
+
+            await sendNotification(usuarioId, "usuario", notifTitle, notifBody, {
+                type: 'REHIRE_REMINDER',
+                providerId: prestadorId,
+                categoryId: categoriaId,
+                recommendationId: recomendacionRef.id,
+            });
+
+            return { success: true, message: `Recordatorio enviado a usuario ${usuarioId}.`, recomendacionId: recomendacionRef.id };
+        });
+    } catch (error: any) {
+        functions.logger.error(`Error al enviar recordatorio de ${prestadorId} a ${usuarioId}:`, error);
+        if (error instanceof functions.https.HttpsError) throw error;
+        throw new functions.https.HttpsError("internal", "Error al procesar el envío del recordatorio.", error.message);
+    }
+});
 
 export const getPastClientsForProvider = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
@@ -3135,12 +3177,3 @@ export const getPastClientsForProvider = functions.https.onCall(async (data, con
         throw new functions.https.HttpsError("internal", "Error al obtener la lista de clientes.", error.message);
     }
 });
-
-
-
-    
-
-
-
-
-
