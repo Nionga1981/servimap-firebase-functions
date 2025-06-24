@@ -424,6 +424,7 @@ export type ActivityLogAction =
   | 'TICKET_SOPORTE_ACTUALIZADO'
   | 'BUSQUEDA_PRESTADORES'
   | 'REPORTE_PROBLEMA_CREADO'
+  | 'REPORTE_PROBLEMA_RESUELTO'
   | 'GARANTIA_REGISTRADA'
   | 'SERVICIO_REACTIVADO_SOLICITUD'
   | 'SERVICIO_REACTIVADO_OFERTA'
@@ -652,6 +653,9 @@ export interface ReporteServicio {
   idServicio: string;
   idUsuarioReportante: string;
   rolReportante: 'usuario' | 'prestador';
+  idReportado: string;
+  rolReportado: 'usuario' | 'prestador';
+  categoria: string;
   descripcionProblema: string;
   archivoAdjuntoURL?: string;
   fechaReporte: number; // Timestamp
@@ -659,6 +663,9 @@ export interface ReporteServicio {
   idServicioOriginalData?: Partial<ServiceRequest>;
   garantiaActivada?: boolean;
   idGarantiaPendiente?: string;
+  resolucionAdmin?: string; // Comentario del admin al resolver
+  fechaResolucion?: number; // Timestamp
+  resueltaPorAdminId?: string;
 }
 
 export interface GarantiaPendiente {
@@ -801,5 +808,3 @@ export interface PastClientInfo {
   ultimaCategoriaNombre: string;
   serviciosContratados: number;
 }
-
-    

@@ -2,7 +2,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import {SERVICE_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
+import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -137,17 +137,6 @@ interface ProviderLocation {
   pais?: string;
 }
 
-export interface DocumentoVerificable {
-  tipoDocumento: string;
-  urlDocumento: string;
-  descripcion?: string;
-  fechaRegistro: admin.firestore.Timestamp;
-  estadoVerificacion: "pendiente" | "verificado_ia" | "rechazado_ia" | "verificado_manual" | "rechazado_manual" | "Validado" | "Rechazado por datos sensibles detectados";
-  fechaVerificacion?: admin.firestore.Timestamp;
-  motivoRechazoIA?: string;
-  palabrasClaveDetectadasIA?: string[];
-}
-
 export interface ProviderData {
   fcmTokens?: string[];
   nombre?: string;
@@ -164,9 +153,6 @@ export interface ProviderData {
   avatarUrl?: string;
   categoryIds?: string[];
   embajadorUID?: string;
-  documentosVerificables?: DocumentoVerificable[];
-  documentosValidos?: boolean;
-  comentarioValidacion?: string;
 }
 
 export interface ServiceRequest {
@@ -303,7 +289,8 @@ export type ActivityLogAction =
   | "EMBAJADOR_COMISION_PAGADA"
   | "RELACION_USUARIO_PRESTADOR_ACTUALIZADA"
   | "RECOMENDACION_RECONTRATACION_CREADA"
-  | "RECONTRATACION_RECORDATORIO_ENVIADO";
+  | "RECONTRATACION_RECORDATORIO_ENVIADO"
+  | "REPORTE_PROBLEMA_RESUELTO";
 
 
 export interface PromocionFidelidad {
@@ -423,6 +410,9 @@ interface ReporteServicioData {
   idServicio: string;
   idUsuarioReportante: string;
   rolReportante: "usuario" | "prestador";
+  idReportado: string;
+  rolReportado: "usuario" | "prestador";
+  categoria: string;
   descripcionProblema: string;
   archivoAdjuntoURL?: string;
   fechaReporte: admin.firestore.Timestamp;
@@ -430,6 +420,9 @@ interface ReporteServicioData {
   idServicioOriginalData?: Partial<ServiceRequest>;
   garantiaActivada?: boolean;
   idGarantiaPendiente?: string;
+  resolucionAdmin?: string; // Comentario del admin al resolver
+  fechaResolucion?: admin.firestore.Timestamp;
+  resueltaPorAdminId?: string;
 }
 
 interface GarantiaPendienteData {
@@ -1687,17 +1680,12 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
     throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
   }
   const idUsuarioReportante = context.auth.uid;
-  const {idServicio, rol, descripcionProblema, archivoAdjuntoURL} = data;
+  const {idServicio, rol, categoria, descripcionProblema, archivoAdjuntoURL} = data;
 
-  if (!idServicio || typeof idServicio !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idServicio'.");
-  }
-  if (!rol || (rol !== "usuario" && rol !== "prestador")) {
-    throw new functions.https.HttpsError("invalid-argument", "El 'rol' del reportante ('usuario' o 'prestador') es requerido.");
-  }
-  if (!descripcionProblema || typeof descripcionProblema !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'descripcionProblema'.");
-  }
+  if (!idServicio || typeof idServicio !== "string") throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idServicio'.");
+  if (!rol || (rol !== "usuario" && rol !== "prestador")) throw new functions.https.HttpsError("invalid-argument", "El 'rol' del reportante es requerido.");
+  if (!categoria || typeof categoria !== "string") throw new functions.https.HttpsError("invalid-argument", "Se requiere 'categoria' del reporte.");
+  if (!descripcionProblema || typeof descripcionProblema !== "string") throw new functions.https.HttpsError("invalid-argument", "Se requiere 'descripcionProblema'.");
 
   const servicioRef = db.collection("solicitudes_servicio").doc(idServicio);
   const reportesRef = db.collection("reportes");
@@ -1712,32 +1700,20 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
       }
       const servicioData = servicioDoc.data() as ServiceRequest;
 
-      if (idUsuarioReportante !== servicioData.usuarioId && idUsuarioReportante !== servicioData.prestadorId) {
-        throw new functions.https.HttpsError("permission-denied", "No participaste en este servicio.");
-      }
-      if (rol === "usuario" && idUsuarioReportante !== servicioData.usuarioId) {
-        throw new functions.https.HttpsError("permission-denied", "Tu rol no coincide con tu participación en este servicio.");
-      }
-      if (rol === "prestador" && idUsuarioReportante !== servicioData.prestadorId) {
-        throw new functions.https.HttpsError("permission-denied", "Tu rol no coincide con tu participación en este servicio.");
-      }
-
-      if (!servicioData.fechaFinalizacionEfectiva) {
-        throw new functions.https.HttpsError("failed-precondition", "El servicio aún no ha finalizado para poder reportar un problema.");
-      }
+      const [idReportado, rolReportado] = rol === "usuario" ? [servicioData.prestadorId, "prestador"] : [servicioData.usuarioId, "usuario"];
+      
+      if (idUsuarioReportante !== servicioData.usuarioId && idUsuarioReportante !== servicioData.prestadorId) throw new functions.https.HttpsError("permission-denied", "No participaste en este servicio.");
+      if (rol === "usuario" && idUsuarioReportante !== servicioData.usuarioId) throw new functions.https.HttpsError("permission-denied", "Tu rol no coincide con tu participación en este servicio.");
+      if (rol === "prestador" && idUsuarioReportante !== servicioData.prestadorId) throw new functions.https.HttpsError("permission-denied", "Tu rol no coincide con tu participación en este servicio.");
+      if (!servicioData.fechaFinalizacionEfectiva) throw new functions.https.HttpsError("failed-precondition", "El servicio aún no ha finalizado para poder reportar un problema.");
 
       const fechaFinalizacion = (servicioData.fechaFinalizacionEfectiva as admin.firestore.Timestamp).toDate();
       const plazoMaximoReporte = new Date(fechaFinalizacion.getTime() + PLAZO_REPORTE_DIAS * 24 * 60 * 60 * 1000);
-
-      if (now.toDate() > plazoMaximoReporte) {
-        throw new functions.https.HttpsError("failed-precondition", "El plazo para reportar problemas para este servicio ha expirado.");
-      }
+      if (now.toDate() > plazoMaximoReporte) throw new functions.https.HttpsError("failed-precondition", "El plazo para reportar problemas ha expirado.");
 
       if (servicioData.reporteActivoId) {
         const reporteExistenteDoc = await transaction.get(reportesRef.doc(servicioData.reporteActivoId));
-        if (reporteExistenteDoc.exists) {
-          throw new functions.https.HttpsError("already-exists", "Ya existe un reporte activo para este servicio.");
-        }
+        if (reporteExistenteDoc.exists) throw new functions.https.HttpsError("already-exists", "Ya existe un reporte activo para este servicio.");
       }
 
       const nuevoReporteRef = reportesRef.doc();
@@ -1745,7 +1721,10 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
         idServicio: idServicio,
         idUsuarioReportante: idUsuarioReportante,
         rolReportante: rol as "usuario" | "prestador",
-        descripcionProblema: descripcionProblema,
+        idReportado: idReportado,
+        rolReportado: rolReportado,
+        categoria,
+        descripcionProblema,
         fechaReporte: now,
         estadoReporte: "pendiente_revision_admin",
         garantiaActivada: false,
@@ -1754,8 +1733,8 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
           titulo: servicioData.titulo,
           status: servicioData.status,
           paymentStatus: servicioData.paymentStatus,
-          montoCobrado: servicioData.montoCobrado
-        }
+          montoCobrado: servicioData.montoCobrado,
+        },
       };
       transaction.set(nuevoReporteRef, reporteData);
 
@@ -1770,10 +1749,7 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
       transaction.update(servicioRef, updateServicio);
 
       await logActivity(idUsuarioReportante, rol as "usuario" | "prestador", "REPORTE_PROBLEMA_CREADO", `Reporte #${nuevoReporteRef.id} creado para servicio ${idServicio} por ${rol} ${idUsuarioReportante}.`, {tipo: "reporte_servicio", id: nuevoReporteRef.id}, {descripcion: descripcionProblema});
-
-      const contraparteId = rol === "usuario" ? servicioData.prestadorId : servicioData.usuarioId;
-      const contraparteRol = rol === "usuario" ? "prestador" : "usuario";
-      await sendNotification(contraparteId, contraparteRol, "Reporte de Problema Recibido", `Se ha registrado un reporte para el servicio "${servicioData.titulo || idServicio}". Un administrador lo revisará pronto.`, {servicioId: idServicio, reporteId: nuevoReporteRef.id});
+      await sendNotification(idReportado, rolReportado, "Reporte de Problema Recibido", `Se ha registrado un reporte para el servicio "${servicioData.titulo || idServicio}". Un administrador lo revisará pronto.`, {servicioId: idServicio, reporteId: nuevoReporteRef.id});
 
       if (rol === "usuario") {
         const usuarioDocSnap = await db.collection("usuarios").doc(idUsuarioReportante).get();
@@ -1789,11 +1765,10 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
             fechaSolicitudGarantia: now,
             estadoGarantia: "pendiente_revision",
             descripcionProblemaOriginal: descripcionProblema,
-            detallesServicioOriginal: {titulo: servicioData.titulo, status: servicioData.status}
+            detallesServicioOriginal: {titulo: servicioData.titulo, status: servicioData.status},
           };
           transaction.set(nuevaGarantiaRef, garantiaData);
           transaction.update(nuevoReporteRef, {garantiaActivada: true, idGarantiaPendiente: nuevaGarantiaRef.id});
-
           await logActivity(idUsuarioReportante, "usuario", "GARANTIA_REGISTRADA", `Garantía #${nuevaGarantiaRef.id} registrada para reporte ${nuevoReporteRef.id} de usuario premium.`, {tipo: "garantia", id: nuevaGarantiaRef.id});
           return {status: "garantiaActivada", reporteId: nuevoReporteRef.id, garantiaId: nuevaGarantiaRef.id};
         }
@@ -3192,31 +3167,118 @@ export const getPastClientsForProvider = functions.https.onCall(async (data, con
     }
 });
 
-export const getProvidersForValidation = functions.https.onCall(async (data, context) => {
-    // En un entorno de producción, se debería verificar que el llamador es un administrador.
-    // if (!context.auth || !context.auth.token.admin) {
-    //     throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden realizar esta acción.");
-    // }
-
-    try {
-        const providersSnapshot = await db.collection("prestadores")
-            .where("documentosValidos", "==", false)
-            .get();
-
-        if (providersSnapshot.empty) {
-            return [];
-        }
-
-        const providersToValidate = providersSnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-        }));
-
-        return providersToValidate;
-    } catch (error: any) {
-        functions.logger.error("Error al obtener proveedores para validación:", error);
-        throw new functions.https.HttpsError("internal", "Error al buscar proveedores pendientes de validación.", error.message);
+export const getPendingReports = functions.https.onCall(async (data, context) => {
+  // if (!context.auth || !context.auth.token.admin) {
+  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden ver los reportes.");
+  // }
+  
+  try {
+    const reportsSnapshot = await db.collection("reportes")
+      .where("estadoReporte", "==", "pendiente_revision_admin")
+      .orderBy("fechaReporte", "asc")
+      .get();
+      
+    if (reportsSnapshot.empty) {
+      return [];
     }
+
+    const reports = reportsSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    return reports;
+  } catch (error: any) {
+    functions.logger.error("Error al obtener reportes pendientes:", error);
+    if (error.code === "failed-precondition") {
+      throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener reportes requiere un índice compuesto en Firestore. Por favor, créalo desde el enlace en el log de Firebase Functions.");
+    }
+    throw new functions.https.HttpsError("internal", "Error al buscar reportes.", error.message);
+  }
 });
 
-    
+export const resolveReport = functions.https.onCall(async (data, context) => {
+  // if (!context.auth || !context.auth.token.admin) {
+  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden resolver reportes.");
+  // }
+  const adminId = context.auth?.uid || "admin_sistema";
+  const { reporteId, decision, comentarioAdmin } = data;
+
+  if (!reporteId || !decision || !comentarioAdmin) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'reporteId', 'decision' y 'comentarioAdmin'.");
+  }
+  const validDecisions = ["resuelto_compensacion", "resuelto_sin_compensacion", "rechazado_reporte"];
+  if (!validDecisions.includes(decision)) {
+    throw new functions.https.HttpsError("invalid-argument", "La 'decision' no es válida.");
+  }
+
+  const reporteRef = db.collection("reportes").doc(reporteId);
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const reporteDoc = await transaction.get(reporteRef);
+      if (!reporteDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Reporte con ID ${reporteId} no encontrado.`);
+      }
+      const reporteData = reporteDoc.data() as ReporteServicioData;
+
+      if (reporteData.estadoReporte !== "pendiente_revision_admin" && reporteData.estadoReporte !== "en_investigacion") {
+        throw new functions.https.HttpsError("failed-precondition", `El reporte ya fue resuelto. Estado actual: ${reporteData.estadoReporte}.`);
+      }
+
+      // 1. Actualizar el documento del reporte
+      const updateReporte: Partial<ReporteServicioData> = {
+        estadoReporte: decision,
+        resolucionAdmin: comentarioAdmin,
+        resueltaPorAdminId: adminId,
+        fechaResolucion: admin.firestore.Timestamp.now(),
+      };
+      transaction.update(reporteRef, updateReporte);
+
+      // 2. Actualizar el servicio original para reflejar la resolución de la disputa
+      const servicioRef = db.collection("solicitudes_servicio").doc(reporteData.idServicio);
+      const servicioDoc = await transaction.get(servicioRef);
+      if (servicioDoc.exists) {
+        const servicioData = servicioDoc.data() as ServiceRequest;
+        const updateServicio: Partial<ServiceRequest> = {
+          estadoDisputa: "resuelta",
+          reporteActivoId: admin.firestore.FieldValue.delete() as any, // Eliminar el enlace al reporte activo
+          updatedAt: admin.firestore.Timestamp.now(),
+        };
+
+        // Si se congeló el pago, decidir qué hacer con él
+        if (servicioData.paymentStatus === "congelado_por_disputa") {
+          if (decision === "resuelto_compensacion") {
+            updateServicio.paymentStatus = "reembolsado_parcial"; // O total, dependiendo de la lógica
+            // Aquí se iniciaría un reembolso real
+          } else { // Sin compensación o reporte rechazado -> liberar pago al proveedor
+            updateServicio.paymentStatus = "liberado_al_proveedor";
+            updateServicio.paymentReleasedToProviderAt = admin.firestore.Timestamp.now();
+          }
+        }
+        transaction.update(servicioRef, updateServicio);
+      }
+      
+      // 3. Log y Notificaciones
+      await logActivity(
+        adminId, "admin", "REPORTE_PROBLEMA_RESUELTO",
+        `Admin resolvió reporte ${reporteId} con decisión: ${decision}.`,
+        { tipo: "reporte_servicio", id: reporteId },
+        { comentario: comentarioAdmin, idServicio: reporteData.idServicio }
+      );
+
+      const notifTitle = "Tu reporte ha sido resuelto";
+      const notifBody = `Un administrador ha resuelto tu reporte sobre el servicio (ID: ${reporteData.idServicio.substring(0,6)}...). Decisión: ${decision}. Comentario: "${comentarioAdmin}"`;
+      await sendNotification(reporteData.idUsuarioReportante, reporteData.rolReportante, notifTitle, notifBody, {reporteId, decision});
+      
+      const notifContraparteBody = `La disputa sobre el servicio (ID: ${reporteData.idServicio.substring(0,6)}...) ha sido resuelta. Decisión final: ${decision}.`;
+      await sendNotification(reporteData.idReportado, reporteData.rolReportado, "Disputa Resuelta", notifContraparteBody, {reporteId, decision});
+
+      return { success: true, message: "El reporte ha sido resuelto exitosamente." };
+    });
+  } catch (error: any) {
+    functions.logger.error(`Error al resolver reporte ${reporteId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar la resolución del reporte.", error.message);
+  }
+});
