@@ -1,5 +1,6 @@
 
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -3090,7 +3091,55 @@ export const enviarRecordatorioRecontratacion = functions.https.onCall(async (da
 });
     
 
+export const getPastClientsForProvider = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para ver tus clientes pasados (proveedor).");
+    }
+    const providerId = context.auth.uid;
+
+    try {
+        const relationsQuery = db.collection("relacionesUsuarioPrestador")
+            .where("prestadorId", "==", providerId)
+            .orderBy("ultimoServicioFecha", "desc");
+        
+        const snapshot = await relationsQuery.get();
+        if (snapshot.empty) {
+            return [];
+        }
+
+        const pastClientsPromises = snapshot.docs.map(async (doc) => {
+            const relacion = doc.data() as RelacionUsuarioPrestadorData;
+            const userDoc = await db.collection("usuarios").doc(relacion.usuarioId).get();
+            const userData = userDoc.exists() ? userDoc.data() as UserData : null;
+            const lastCategory = SERVICE_CATEGORIES.find(c => c.id === relacion.categoriasServicios[relacion.categoriasServicios.length - 1]);
+
+            return {
+                usuarioId: relacion.usuarioId,
+                nombreUsuario: userData?.nombre || 'Usuario Desconocido',
+                avatarUrl: "https://placehold.co/100x100.png", // UserData doesn't have avatarUrl yet, so using a placeholder.
+                ultimoServicioFecha: (relacion.ultimoServicioFecha as admin.firestore.Timestamp).toMillis(),
+                ultimaCategoriaId: lastCategory?.id || 'general',
+                ultimaCategoriaNombre: lastCategory?.name || 'Servicio General',
+                serviciosContratados: relacion.serviciosContratados,
+            };
+        });
+
+        const pastClients = await Promise.all(pastClientsPromises);
+        return pastClients;
+
+    } catch (error: any) {
+        functions.logger.error(`Error al obtener clientes pasados para proveedor ${providerId}:`, error);
+        if (error.code === 'failed-precondition') {
+             throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener clientes pasados requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
+        }
+        throw new functions.https.HttpsError("internal", "Error al obtener la lista de clientes.", error.message);
+    }
+});
+
+
+
     
+
 
 
 

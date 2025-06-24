@@ -3,9 +3,7 @@
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '@/lib/firebase';
-import type { PastClientInfo, RelacionUsuarioPrestador, DemoUser } from '@/types';
-import { mockRelaciones, mockDemoUsers } from '@/lib/mockData';
-import { SERVICE_CATEGORIES } from '@/lib/constants';
+import type { PastClientInfo } from '@/types';
 
 interface ProviderUpdatePayload {
   isAvailable: boolean;
@@ -79,26 +77,20 @@ export const registerProvider = async (data: ProviderRegistrationData): Promise<
 
 export const getPastClients = async (providerId: string): Promise<PastClientInfo[]> => {
   console.log(`[ProviderService] Obteniendo clientes pasados para el proveedor: ${providerId}`);
-  await new Promise(resolve => setTimeout(resolve, 500)); // Simular delay
+  
+  // La función callable usa el UID del usuario autenticado, por lo que no es necesario pasar el providerId.
+  const functions = getFunctions(app);
+  const getPastClientsFunction = httpsCallable(functions, 'getPastClientsForProvider');
 
-  const relaciones = mockRelaciones.filter(rel => rel.prestadorId === providerId);
-
-  const clientsInfo = relaciones.map(rel => {
-    const user = mockDemoUsers.find(u => u.id === rel.usuarioId);
-    const lastCategory = SERVICE_CATEGORIES.find(c => c.id === rel.categoriasServicios[rel.categoriasServicios.length - 1]);
-
-    return {
-      usuarioId: rel.usuarioId,
-      nombreUsuario: user?.name || 'Usuario Desconocido',
-      avatarUrl: user?.avatarUrl,
-      ultimoServicioFecha: rel.ultimoServicioFecha,
-      ultimaCategoriaId: lastCategory?.id || 'general',
-      ultimaCategoriaNombre: lastCategory?.name || 'Servicio General',
-      serviciosContratados: rel.serviciosContratados,
-    };
-  });
-
-  return clientsInfo.sort((a, b) => b.ultimoServicioFecha - a.ultimoServicioFecha);
+  try {
+      const result = await getPastClientsFunction();
+      // El resultado de la función ya es el array de clientes que necesitamos.
+      return result.data as PastClientInfo[];
+  } catch (error) {
+      console.error("[ProviderService] Error al llamar a 'getPastClientsForProvider':", error);
+      // El componente que llama a este servicio deberá manejar el error (ej. mostrar un toast).
+      throw error;
+  }
 };
 
 export const sendRehireReminder = async (usuarioId: string, categoriaId: string): Promise<any> => {
