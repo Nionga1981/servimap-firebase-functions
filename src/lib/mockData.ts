@@ -88,6 +88,7 @@ export const mockProviders: Provider[] = [
     aceptaCotizacion: true,
     aceptaViajes: true,
     aceptaTrabajosVirtuales: false,
+    embajadorUID: "currentUserDemoId",
   },
   {
     id: 'electrician1',
@@ -233,7 +234,7 @@ export const mockProviderGalleries: ProviderGallery[] = [
 ];
 
 export const mockDemoUsers: DemoUser[] = [
-  { id: 'currentUserDemoId', isPremium: true, name: 'Usuario Premium Demo', idiomaPreferido: 'es', ubicacionExacta: USER_FIXED_LOCATION, puntosAcumulados: 150, historialPuntos: [{ tipo: 'ganados', puntos: 150, fecha: Date.now() - 86400000, servicioId: 'serv123', descripcion: 'Servicio Plomería Urgente' }], favoritos: ['plumber1', 'gardener1'] },
+  { id: 'currentUserDemoId', isPremium: true, name: 'Usuario Premium Demo', idiomaPreferido: 'es', ubicacionExacta: USER_FIXED_LOCATION, puntosAcumulados: 150, historialPuntos: [{ tipo: 'ganados', puntos: 150, fecha: Date.now() - 86400000, servicioId: 'serv123', descripcion: 'Servicio Plomería Urgente' }], favoritos: ['plumber1', 'gardener1'], codigoEmbajador: 'EMBAJADOR123', comisionesAcumuladas: 0, historialComisiones: [] },
   { id: 'standardUserDemoId', isPremium: false, name: 'Usuario Estándar Demo', idiomaPreferido: 'en', puntosAcumulados: 20, historialPuntos: [{ tipo: 'ganados', puntos: 20, fecha: Date.now() - 86400000*2, servicioId: 'serv456', descripcion: 'Consulta Eléctrica' }], favoritos: ['electrician1'] },
 ];
 

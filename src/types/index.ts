@@ -121,6 +121,14 @@ export interface HistorialPuntoUsuario {
   descripcion?: string;
 }
 
+export interface HistorialComision {
+  servicioId: string;
+  prestadorId: string;
+  montoComision: number;
+  fecha: number; // timestamp
+}
+
+
 export interface IdiomaRecursos {
   [key: string]: string;
 }
@@ -143,6 +151,8 @@ export interface DemoUser {
   favoritos?: string[]; // Array of provider IDs
   codigoEmbajador?: string;
   referidos?: string[];
+  comisionesAcumuladas?: number;
+  historialComisiones?: HistorialComision[];
 }
 
 
@@ -427,7 +437,8 @@ export type ActivityLogAction =
   | 'PROVEEDOR_REGISTRADO'
   | 'CATEGORIA_PROPUESTA'
   | 'CATEGORIA_APROBADA'
-  | 'CATEGORIA_RECHAZADA';
+  | 'CATEGORIA_RECHAZADA'
+  | 'EMBAJADOR_COMISION_PAGADA';
 
 
 export interface ActivityLog {

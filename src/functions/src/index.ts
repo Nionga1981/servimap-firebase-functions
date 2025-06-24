@@ -13,6 +13,7 @@ const db = admin.firestore();
 const COMISION_SISTEMA_PAGO_PORCENTAJE = 0.04; // 4% payment processor fee
 const COMISION_APP_SERVICIOMAP_PORCENTAJE = 0.06; // 6% ServiMap app commission on original total
 const PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD = 0.10; // 10% of ServiMap's commission goes to loyalty
+const PORCENTAJE_COMISION_EMBAJADOR = 0.05; // 5% ambassador commission on original total
 const FACTOR_CONVERSION_PUNTOS = 10; // $10 MXN (or monetary unit) per 1 loyalty point
 const DEFAULT_LANGUAGE_CODE = "es";
 const HORAS_ANTES_RECORDATORIO_SERVICIO = 24;
@@ -110,6 +111,12 @@ export interface HistorialPuntoUsuario {
   fecha: admin.firestore.Timestamp;
   descripcion?: string;
 }
+export interface HistorialComision {
+  servicioId: string;
+  prestadorId: string;
+  montoComision: number;
+  fecha: admin.firestore.Timestamp;
+}
 export interface UserData {
   fcmTokens?: string[];
   nombre?: string;
@@ -118,6 +125,10 @@ export interface UserData {
   isPremium?: boolean;
   idiomaPreferido?: string;
   favoritos?: string[];
+  codigoEmbajador?: string;
+  referidos?: string[];
+  comisionesAcumuladas?: number;
+  historialComisiones?: admin.firestore.FieldValue | HistorialComision[];
 }
 
 interface ProviderLocation {
@@ -131,6 +142,7 @@ export interface ProviderData {
   nombre?: string;
   aceptaCotizacion?: boolean;
   aceptaViajes?: boolean;
+  aceptaTrabajosVirtuales?: boolean;
   empresa?: string;
   services?: {category: string; title: string; description: string; price: number}[];
   specialties?: string[];
@@ -139,6 +151,7 @@ export interface ProviderData {
   rating?: number;
   avatarUrl?: string;
   categoryIds?: string[];
+  embajadorUID?: string;
 }
 
 export interface ServiceRequest {
@@ -270,7 +283,8 @@ export type ActivityLogAction =
   | "PROVEEDOR_REGISTRADO"
   | "CATEGORIA_PROPUESTA"
   | "CATEGORIA_APROBADA"
-  | "CATEGORIA_RECHAZADA";
+  | "CATEGORIA_RECHAZADA"
+  | "EMBAJADOR_COMISION_PAGADA";
 
 
 export interface PromocionFidelidad {
@@ -379,6 +393,7 @@ interface PrestadorBuscado {
   id: string;
   nombre: string;
   empresa?: string;
+  distanciaKm?: number;
   calificacion: number;
   avatarUrl?: string;
   categoriaPrincipal?: string;
@@ -810,6 +825,40 @@ export const logSolicitudServicioChanges = functions.firestore
           }
           await logActivity(afterData.usuarioId, "usuario", "PUNTOS_FIDELIDAD_GANADOS", `Usuario ganó ${pointsEarned} puntos por servicio ${solicitudId}.`, {tipo: "usuario", id: afterData.usuarioId}, {puntos: pointsEarned, servicioId});
         }
+        
+        // --- START AMBASSADOR COMMISSION LOGIC ---
+        const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
+        if (providerDoc.exists) {
+            const providerData = providerDoc.data() as ProviderData;
+            if (providerData.embajadorUID) {
+                const embajadorUID = providerData.embajadorUID;
+                const embajadorRef = db.collection("usuarios").doc(embajadorUID);
+                const comisionEmbajador = montoTotalPagadoPorUsuario * PORCENTAJE_COMISION_EMBAJADOR;
+
+                const historialComisionEntry: HistorialComision = {
+                    servicioId: solicitudId,
+                    prestadorId: afterData.prestadorId,
+                    montoComision: comisionEmbajador,
+                    fecha: now,
+                };
+                
+                await embajadorRef.update({
+                    comisionesAcumuladas: admin.firestore.FieldValue.increment(comisionEmbajador),
+                    historialComisiones: admin.firestore.FieldValue.arrayUnion(historialComisionEntry),
+                });
+                
+                await logActivity(
+                    "sistema",
+                    "sistema",
+                    "EMBAJADOR_COMISION_PAGADA",
+                    `Comisión de $${comisionEmbajador.toFixed(2)} pagada a embajador ${embajadorUID} por servicio ${solicitudId} de prestador ${afterData.prestadorId}.`,
+                    { tipo: "usuario", id: embajadorUID },
+                    { montoComision: comisionEmbajador, servicioId, prestadorId: afterData.prestadorId }
+                );
+            }
+        }
+        // --- END AMBASSADOR COMMISSION LOGIC ---
+
 
         if (detallesFinancierosNuevos.aporteFondoFidelidadMonto && detallesFinancierosNuevos.aporteFondoFidelidadMonto > 0) {
           const fundRef = db.collection("fondoFidelidad").doc("global");
@@ -1461,6 +1510,7 @@ export const buscarPrestadoresInteligente = functions.https.onCall(async (data, 
           id: doc.id,
           nombre: provider.nombre || "N/A",
           empresa: provider.empresa,
+          distanciaKm: parseFloat(distanciaKm.toFixed(1)),
           calificacion: provider.rating || 0,
           avatarUrl: provider.avatarUrl,
           categoriaPrincipal: provider.services?.[0]?.category ? (SERVICE_CATEGORIES.find(c=>c.id === provider.services?.[0]?.category)?.name || provider.services?.[0]?.category) : "General",
@@ -1469,9 +1519,7 @@ export const buscarPrestadoresInteligente = functions.https.onCall(async (data, 
     }
 
     prestadoresCandidatos.sort((a, b) => {
-      // @ts-ignore
       if (a.distanciaKm && b.distanciaKm && a.distanciaKm < b.distanciaKm) return -1;
-      // @ts-ignore
       if (a.distanciaKm && b.distanciaKm && a.distanciaKm > b.distanciaKm) return 1;
       if (a.calificacion > b.calificacion) return -1;
       if (a.calificacion < b.calificacion) return 1;
@@ -1491,30 +1539,30 @@ export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, c
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
   }
-  const { categoriaId, pais } = data;
+  const { categoriaId } = data;
 
-  if (!categoriaId || typeof categoriaId !== "string" || !pais || typeof pais !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'categoriaId' y 'pais'.");
+  if (!categoriaId || typeof categoriaId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'categoriaId'.");
   }
 
   try {
     const prestadoresQuery = db.collection("prestadores")
       .where("isAvailable", "==", true)
       .where("categoryIds", "array-contains", categoriaId)
-      .where("currentLocation.pais", "==", pais)
+      .where("aceptaTrabajosVirtuales", "==", true)
       .orderBy("rating", "desc");
-      
+
     const prestadoresSnapshot = await prestadoresQuery.get();
-    
+
     if (prestadoresSnapshot.empty) {
       return [];
     }
 
-    const resultados: PrestadorBuscado[] = [];
+    const resultados: Omit<PrestadorBuscado, "distanciaKm">[] = [];
 
     for (const doc of prestadoresSnapshot.docs) {
       const provider = doc.data() as ProviderData;
-      
+
       resultados.push({
         id: doc.id,
         nombre: provider.nombre || "N/A",
@@ -1524,15 +1572,14 @@ export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, c
         categoriaPrincipal: SERVICE_CATEGORIES.find(c => c.id === (provider.categoryIds?.[0]))?.name || "General",
       });
     }
-    
-    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó por categoría: "${categoriaId}" en país "${pais}". Resultados: ${resultados.length}.`, undefined, { categoriaId, pais });
+
+    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó trabajos virtuales por categoría: "${categoriaId}". Resultados: ${resultados.length}.`, undefined, { categoriaId });
 
     return resultados;
-
   } catch (error: any) {
     functions.logger.error("Error en buscarPrestadoresPorFiltros:", error);
     if (error.code === 'failed-precondition') {
-        throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions (isAvailable, categoryIds, currentLocation.pais, rating).");
+        throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions (isAvailable, categoryIds, aceptaTrabajosVirtuales, rating).");
     }
     throw new functions.https.HttpsError("internal", "Error al buscar prestadores.", error.message);
   }
@@ -2698,7 +2745,7 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
     throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrarte como proveedor.");
   }
   const providerId = context.auth.uid;
-  const {name, specialties, selectedCategoryIds, newCategoryName} = data;
+  const {name, specialties, selectedCategoryIds, newCategoryName, codigoEmbajador} = data;
 
   if (!name || typeof name !== "string" || name.length < 3) {
     throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre válido (mínimo 3 caracteres).");
@@ -2726,6 +2773,29 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
       rating: 0,
       avatarUrl: `https://placehold.co/100x100/7F7F7F/FFFFFF.png?text=${name.charAt(0)}`,
     };
+
+    if (codigoEmbajador && typeof codigoEmbajador === 'string') {
+      const embajadorQuery = db.collection("usuarios").where("codigoEmbajador", "==", codigoEmbajador).limit(1);
+      const embajadorSnapshot = await embajadorQuery.get();
+
+      if (!embajadorSnapshot.empty) {
+        const embajadorDoc = embajadorSnapshot.docs[0];
+        const embajadorUID = embajadorDoc.id;
+        newProviderData.embajadorUID = embajadorUID;
+        
+        const embajadorRef = db.collection("usuarios").doc(embajadorUID);
+        batch.update(embajadorRef, {
+          referidos: admin.firestore.FieldValue.arrayUnion(providerId)
+        });
+        
+        functions.logger.info(`Proveedor ${providerId} referido por embajador ${embajadorUID}.`);
+        await logActivity("sistema", "sistema", "PROVEEDOR_REGISTRADO", `Proveedor ${providerId} registrado con código de embajador ${embajadorUID}.`, {tipo: "prestador", id: providerId}, {embajadorUID, codigo: codigoEmbajador});
+      } else {
+        functions.logger.warn(`Código de embajador "${codigoEmbajador}" no encontrado. Registrando proveedor sin referencia.`);
+      }
+    }
+
+
     batch.set(providerRef, newProviderData, {merge: true});
     await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Usuario ${providerId} se registró como proveedor: ${name}.`, {tipo: "prestador", id: providerId});
 
@@ -2826,3 +2896,5 @@ export const onCategoryProposalUpdate = functions.firestore
     
 
     
+
+
