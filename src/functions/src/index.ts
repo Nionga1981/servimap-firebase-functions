@@ -44,11 +44,13 @@ export type ServiceRequestStatus =
   | "completado_por_usuario"
   | "cancelada_usuario"
   | "cancelada_prestador"
+  | "cancelada_admin"
   | "rechazada_prestador"
   | "en_disputa"
   | "cerrado_automaticamente"
   | "cerrado_con_calificacion"
-  | "cerrado_con_disputa_resuelta";
+  | "cerrado_con_disputa_resuelta"
+  | "cerrado_forzado_admin";
 
 export type EstadoFinalServicio =
   | "cerrado_automaticamente"
@@ -56,11 +58,13 @@ export type EstadoFinalServicio =
   | "cerrado_con_disputa_resuelta"
   | "cancelada_usuario"
   | "cancelada_prestador"
-  | "rechazada_prestador";
+  | "rechazada_prestador"
+  | "cancelada_admin"
+  | "cerrado_forzado_admin";
 
 const ESTADOS_FINALES_SERVICIO: EstadoFinalServicio[] = [
   "cerrado_automaticamente", "cerrado_con_calificacion", "cerrado_con_disputa_resuelta",
-  "cancelada_usuario", "cancelada_prestador", "rechazada_prestador",
+  "cancelada_usuario", "cancelada_prestador", "rechazada_prestador", "cancelada_admin", "cerrado_forzado_admin"
 ];
 
 export type PaymentStatus =
@@ -166,7 +170,7 @@ export interface ServiceRequest {
   cancellationWindowExpiresAt?: admin.firestore.Timestamp | number;
   titulo?: string;
   actorDelCambioId?: string;
-  actorDelCambioRol?: "usuario" | "prestador" | "sistema";
+  actorDelCambioRol?: "usuario" | "prestador" | "sistema" | "admin";
   calificacionUsuario?: CalificacionDetallada;
   calificacionPrestador?: CalificacionDetallada;
   paymentStatus?: PaymentStatus;
@@ -290,7 +294,9 @@ export type ActivityLogAction =
   | "RELACION_USUARIO_PRESTADOR_ACTUALIZADA"
   | "RECOMENDACION_RECONTRATACION_CREADA"
   | "RECONTRATACION_RECORDATORIO_ENVIADO"
-  | "REPORTE_PROBLEMA_RESUELTO";
+  | "REPORTE_PROBLEMA_RESUELTO"
+  | "ADMIN_CANCEL_SERVICE"
+  | "ADMIN_FORCE_COMPLETE_SERVICE";
 
 
 export interface PromocionFidelidad {
@@ -583,6 +589,16 @@ export interface RecomendacionData {
   estado: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
   fechaCreacion: admin.firestore.Timestamp;
   tipo?: 'sistema' | 'invita-prestador';
+}
+
+export interface MonitoredService {
+  id: string;
+  status: ServiceRequestStatus;
+  userName: string;
+  providerName: string;
+  serviceTitle: string;
+  scheduledDate: number; // Timestamp
+  createdAt: number; // Timestamp
 }
 
 
@@ -3280,5 +3296,181 @@ export const resolveReport = functions.https.onCall(async (data, context) => {
     functions.logger.error(`Error al resolver reporte ${reporteId}:`, error);
     if (error instanceof functions.https.HttpsError) throw error;
     throw new functions.https.HttpsError("internal", "Error al procesar la resolución del reporte.", error.message);
+  }
+});
+
+export const getActiveServices = functions.https.onCall(async (data, context) => {
+  // if (!context.auth || !context.auth.token.admin) {
+  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden ver esta información.");
+  // }
+
+  const activeStatuses: ServiceRequestStatus[] = [
+    "agendado",
+    "pendiente_confirmacion_usuario",
+    "confirmada_prestador",
+    "pagada",
+    "en_camino_proveedor",
+    "servicio_iniciado",
+    "completado_por_prestador",
+    "en_disputa",
+  ];
+
+  try {
+    const servicesSnapshot = await db.collection("solicitudes_servicio")
+      .where("status", "in", activeStatuses)
+      .orderBy("createdAt", "desc")
+      .get();
+      
+    if (servicesSnapshot.empty) {
+      return [];
+    }
+
+    const monitoredServicesPromises = servicesSnapshot.docs.map(async (doc) => {
+      const service = doc.data() as ServiceRequest;
+      
+      const userDoc = await db.collection("usuarios").doc(service.usuarioId).get();
+      const providerDoc = await db.collection("prestadores").doc(service.prestadorId).get();
+
+      const userName = userDoc.exists() ? (userDoc.data() as UserData).nombre : "Usuario no encontrado";
+      const providerName = providerDoc.exists() ? (providerDoc.data() as ProviderData).nombre : "Prestador no encontrado";
+      
+      const scheduledTimestamp = (service.serviceDate && service.serviceTime)
+        ? new Date(`${service.serviceDate}T${service.serviceTime}`).getTime()
+        : (service.createdAt as admin.firestore.Timestamp).toMillis();
+
+      const monitoredService: MonitoredService = {
+        id: doc.id,
+        status: service.status,
+        userName: userName || "Sin nombre",
+        providerName: providerName || "Sin nombre",
+        serviceTitle: service.titulo || "Servicio sin título",
+        scheduledDate: scheduledTimestamp,
+        createdAt: (service.createdAt as admin.firestore.Timestamp).toMillis(),
+      };
+      return monitoredService;
+    });
+
+    const monitoredServices = await Promise.all(monitoredServicesPromises);
+    return monitoredServices;
+
+  } catch (error: any) {
+    functions.logger.error("Error al obtener servicios activos:", error);
+    if (error.code === "failed-precondition") {
+      throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener servicios activos requiere un índice compuesto. Por favor, créalo desde el enlace en el log de Firebase Functions.");
+    }
+    throw new functions.https.HttpsError("internal", "Error al buscar servicios activos.", error.message);
+  }
+});
+
+
+export const adminCancelService = functions.https.onCall(async (data, context) => {
+  // if (!context.auth || !context.auth.token.admin) {
+  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden cancelar servicios.");
+  // }
+  const adminId = context.auth?.uid || "admin_sistema";
+  const { serviceId, reason } = data;
+
+  if (!serviceId || !reason) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'serviceId' y 'reason'.");
+  }
+
+  const serviceRef = db.collection("solicitudes_servicio").doc(serviceId);
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const serviceDoc = await transaction.get(serviceRef);
+      if (!serviceDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Servicio con ID ${serviceId} no encontrado.`);
+      }
+      const serviceData = serviceDoc.data() as ServiceRequest;
+
+      if (ESTADOS_FINALES_SERVICIO.includes(serviceData.status as EstadoFinalServicio)) {
+         throw new functions.https.HttpsError("failed-precondition", `El servicio ya está en un estado final (${serviceData.status}).`);
+      }
+
+      const updateData: Partial<ServiceRequest> = {
+        status: "cancelada_admin",
+        actorDelCambioId: adminId,
+        actorDelCambioRol: "admin",
+        updatedAt: admin.firestore.Timestamp.now(),
+        notes: `${serviceData.notes || ""}\nCancelado por Admin: ${reason}`,
+      };
+
+      if (serviceData.paymentStatus === "retenido_para_liberacion" || serviceData.paymentStatus === "congelado_por_disputa") {
+        updateData.paymentStatus = "reembolsado_total";
+      }
+
+      transaction.update(serviceRef, updateData);
+
+      await logActivity(adminId, "admin", "ADMIN_CANCEL_SERVICE", `Admin canceló servicio ${serviceId}. Razón: ${reason}`, { tipo: "solicitud_servicio", id: serviceId });
+      
+      const notifBody = `El servicio "${serviceData.titulo || "sin título"}" ha sido cancelado por un administrador. Razón: ${reason}.`;
+      await sendNotification(serviceData.usuarioId, "usuario", "Servicio Cancelado por Administración", notifBody, { serviceId });
+      await sendNotification(serviceData.prestadorId, "prestador", "Servicio Cancelado por Administración", notifBody, { serviceId });
+
+      return { success: true, message: `Servicio ${serviceId} cancelado.` };
+    });
+  } catch (error: any) {
+    functions.logger.error(`Error en adminCancelService para ${serviceId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al cancelar el servicio.", error.message);
+  }
+});
+
+
+export const adminForceCompleteService = functions.https.onCall(async (data, context) => {
+  // if (!context.auth || !context.auth.token.admin) {
+  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden forzar la finalización de servicios.");
+  // }
+  const adminId = context.auth?.uid || "admin_sistema";
+  const { serviceId, reason } = data;
+
+  if (!serviceId || !reason) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'serviceId' y 'reason'.");
+  }
+
+  const serviceRef = db.collection("solicitudes_servicio").doc(serviceId);
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const serviceDoc = await transaction.get(serviceRef);
+      if (!serviceDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Servicio con ID ${serviceId} no encontrado.`);
+      }
+      const serviceData = serviceDoc.data() as ServiceRequest;
+
+      if (serviceData.status !== "completado_por_prestador") {
+        throw new functions.https.HttpsError("failed-precondition", `El servicio debe estar en 'completado_por_prestador' para ser forzado a completar. Estado actual: ${serviceData.status}`);
+      }
+
+      const updateData: Partial<ServiceRequest> = {
+        status: "cerrado_forzado_admin",
+        actorDelCambioId: adminId,
+        actorDelCambioRol: "admin",
+        updatedAt: admin.firestore.Timestamp.now(),
+        notes: `${serviceData.notes || ""}\nCompletado forzosamente por Admin: ${reason}`,
+      };
+
+      if (serviceData.paymentStatus === "retenido_para_liberacion") {
+        updateData.paymentStatus = "liberado_al_proveedor";
+        updateData.paymentReleasedToProviderAt = admin.firestore.Timestamp.now();
+      }
+
+      transaction.update(serviceRef, updateData);
+
+      await logActivity(adminId, "admin", "ADMIN_FORCE_COMPLETE_SERVICE", `Admin forzó finalización de servicio ${serviceId}. Razón: ${reason}`, { tipo: "solicitud_servicio", id: serviceId });
+      
+      const notifBody = `El servicio "${serviceData.titulo || "sin título"}" fue marcado como completado por un administrador. Razón: ${reason}.`;
+      await sendNotification(serviceData.usuarioId, "usuario", "Servicio Completado por Administración", notifBody, { serviceId });
+      
+      const notifProviderBody = `El servicio "${serviceData.titulo || "sin título"}" fue completado por un administrador y el pago ha sido liberado.`;
+      await sendNotification(serviceData.prestadorId, "prestador", "Servicio Completado y Pago Liberado", notifProviderBody, { serviceId });
+
+      return { success: true, message: `Servicio ${serviceId} completado y pago liberado.` };
+    });
+  } catch (error: any) {
+    functions.logger.error(`Error en adminForceCompleteService para ${serviceId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al forzar la finalización del servicio.", error.message);
   }
 });

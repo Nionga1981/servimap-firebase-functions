@@ -99,11 +99,13 @@ export type ServiceRequestStatus =
   | 'completado_por_usuario'
   | 'cancelada_usuario'
   | 'cancelada_prestador'
+  | 'cancelada_admin' // New status for admin intervention
   | 'rechazada_prestador'
   | 'en_disputa'
   | 'cerrado_automaticamente'
   | 'cerrado_con_calificacion'
-  | 'cerrado_con_disputa_resuelta';
+  | 'cerrado_con_disputa_resuelta'
+  | 'cerrado_forzado_admin'; // New status for admin intervention
 
 export type EstadoFinalServicio =
   | 'cerrado_automaticamente'
@@ -111,7 +113,9 @@ export type EstadoFinalServicio =
   | 'cerrado_con_disputa_resuelta'
   | 'cancelada_usuario'
   | 'cancelada_prestador'
-  | 'rechazada_prestador';
+  | 'rechazada_prestador'
+  | 'cancelada_admin'
+  | 'cerrado_forzado_admin';
 
 export type PaymentStatus =
   | 'pendiente_confirmacion_usuario'
@@ -240,7 +244,7 @@ interface BaseServiceRequest {
   montoCobrado?: number;
   detallesFinancieros?: DetallesFinancieros;
   actorDelCambioId?: string;
-  actorDelCambioRol?: 'usuario' | 'prestador' | 'sistema';
+  actorDelCambioRol?: 'usuario' | 'prestador' | 'sistema' | 'admin';
   originatingServiceId?: string; // ID of the service being reactivated
   isRecurringAttempt?: boolean;  // Flag for reactivated service
   reactivationOfferedBy?: 'usuario' | 'prestador'; // Who initiated this reactivation
@@ -459,7 +463,9 @@ export type ActivityLogAction =
   | 'EMBAJADOR_COMISION_PAGADA'
   | 'RELACION_USUARIO_PRESTADOR_ACTUALIZADA'
   | 'RECOMENDACION_RECONTRATACION_CREADA'
-  | 'RECONTRATACION_RECORDATORIO_ENVIADO';
+  | 'RECONTRATACION_RECORDATORIO_ENVIADO'
+  | 'ADMIN_CANCEL_SERVICE'
+  | 'ADMIN_FORCE_COMPLETE_SERVICE';
 
 
 export interface ActivityLog {
@@ -807,4 +813,175 @@ export interface PastClientInfo {
   ultimaCategoriaId: string;
   ultimaCategoriaNombre: string;
   serviciosContratados: number;
+}
+
+export interface ReporteServicio {
+  id?: string;
+  idServicio: string;
+  idUsuarioReportante: string;
+  rolReportante: 'usuario' | 'prestador';
+  idReportado: string;
+  rolReportado: 'usuario' | 'prestador';
+  categoria: string;
+  descripcionProblema: string;
+  archivoAdjuntoURL?: string;
+  fechaReporte: number; // Timestamp
+  estadoReporte: 'pendiente_revision_admin' | 'en_investigacion' | 'resuelto_compensacion' | 'resuelto_sin_compensacion' | 'rechazado_reporte';
+  idServicioOriginalData?: Partial<ServiceRequest>;
+  garantiaActivada?: boolean;
+  idGarantiaPendiente?: string;
+  resolucionAdmin?: string; // Comentario del admin al resolver
+  fechaResolucion?: number; // Timestamp
+  resueltaPorAdminId?: string;
+}
+
+export interface GarantiaPendiente {
+  id?: string;
+  idServicio: string;
+  idUsuario: string;
+  idPrestador: string;
+  idReporte: string;
+  fechaSolicitudGarantia: number; // Timestamp
+  estadoGarantia: 'pendiente_revision' | 'aprobada_compensacion' | 'aprobada_re_servicio' | 'rechazada_garantia';
+  detallesServicioOriginal?: Partial<ServiceRequest>;
+  descripcionProblemaOriginal: string;
+  fechaResolucion?: number;
+  notasResolucion?: string;
+  resueltaPorAdminId?: string;
+}
+
+export interface ServicioConfirmado {
+  userId: string;
+  providerId: string;
+  serviceDetails?: string;
+  paymentAmount: number;
+  status: "confirmado";
+  confirmadoEn: number; // timestamp
+  puedeCancelarHasta: number; // timestamp
+  iniciado: boolean;
+}
+
+export interface PagoPendiente {
+  userId: string;
+  providerId: string;
+  paymentAmount: number;
+  retenido: boolean;
+  status: "esperando_calificacion";
+  creadoEn: number; // timestamp
+}
+
+export interface Cancelacion {
+  serviceId: string;
+  actor: 'usuario' | 'prestador';
+  penalizacionMonto?: number;
+  penalizacionPorcentaje?: number;
+  fechaCancelacion: number; // timestamp
+  motivo?: string;
+}
+
+interface BannerComunitarioDetails {
+  titulo: string;
+  imagenUrl: string;
+  link?: string;
+  activo: boolean;
+  dataAiHint?: string;
+}
+
+export interface Comunidad {
+  id: string; // Firestore document ID
+  nombre: string;
+  descripcion: string;
+  tipo: "publica" | "privada";
+  ubicacion: ProviderLocation; // Coordenadas aproximadas de la comunidad
+  bannerComunitario: BannerComunitarioDetails;
+  embajador_uid: string; // UID del usuario creador/embajador
+  miembros: string[]; // Array de UIDs de los miembros
+  solicitudesPendientes: string[]; // Array de UIDs de usuarios que quieren unirse (si es privada)
+  fechaCreacion: number; // Timestamp
+  updatedAt?: number; // Timestamp
+  tags?: string[]; // Para búsqueda y categorización
+  reglasComunidad?: string; // Texto con las reglas
+  lastActivity?: number; // Timestamp de la última actividad relevante
+}
+
+export interface RespuestaRecomendacion {
+  uid_responde: string;
+  prestador_tagged: string; // ID del proveedor etiquetado/recomendado
+  timestamp: number; // Timestamp de la respuesta
+}
+
+export interface RecomendacionComunidad {
+  id?: string; // ID del documento de recomendación
+  autor_uid: string; // UID del usuario que publica la pregunta o solicitud de recomendación
+  texto: string; // El texto de la pregunta o solicitud de recomendación
+  timestamp: number; // Timestamp de cuándo se creó la recomendación
+  respuestas: RespuestaRecomendacion[]; // Array de respuestas
+  estado: "activa" | "cerrada"; // Estado de la solicitud de recomendación
+}
+
+export interface AvisoComunidad {
+  id?: string; // ID del documento de aviso en Firestore
+  titulo: string;
+  descripcion: string;
+  fechaPublicacion: number; // Timestamp
+  activo: boolean;
+  anclado: boolean;
+  fechaExpiracion?: number; // Timestamp, opcional
+  autor_uid: string; // Debe coincidir con el embajador_uid de la comunidad
+}
+
+export interface CategoriaPropuesta {
+  id?: string;
+  providerId: string;
+  nombre_categoria_propuesta: string;
+  estado: 'pendiente' | 'aprobada' | 'rechazada';
+  fechaCreacion: number; // timestamp
+}
+
+export interface AmbassadorData {
+  referidos: { id: string; name: string; avatarUrl?: string }[];
+  comisionesAcumuladas: number;
+  historialComisiones: (HistorialComision & { providerName?: string })[];
+  codigoEmbajador?: string;
+}
+
+export interface RelacionUsuarioPrestador {
+  id?: string;
+  usuarioId: string;
+  prestadorId: string;
+  serviciosContratados: number;
+  ultimoServicioFecha: number; // timestamp
+  categoriasServicios: string[]; // array of category IDs
+  lastReminderSent?: number; // timestamp of the last reminder sent by the provider
+}
+
+export interface Recomendacion {
+  id?: string;
+  usuarioId: string;
+  prestadorId: string;
+  categoria: string;
+  mensaje: string;
+  estado: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
+  fechaCreacion: number; // timestamp
+  tipo?: 'sistema' | 'invita-prestador';
+}
+
+export interface PastClientInfo {
+  usuarioId: string;
+  nombreUsuario: string;
+  avatarUrl?: string;
+  ultimoServicioFecha: number;
+  ultimaCategoriaId: string;
+  ultimaCategoriaNombre: string;
+  serviciosContratados: number;
+}
+
+export interface MonitoredService {
+  id: string;
+  status: ServiceRequestStatus;
+  userName: string;
+  providerName: string;
+  serviceTitle: string;
+  scheduledDate: number; // Timestamp
+  createdAt: number; // Timestamp
 }
