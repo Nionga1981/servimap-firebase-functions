@@ -76,6 +76,9 @@ export interface Provider {
   documentosVerificables?: DocumentoVerificable[];
   documentosValidos?: boolean;
   comentarioValidacion?: string;
+  isBlocked?: boolean;
+  blockReason?: string;
+  blockDate?: number;
 }
 
 export interface ChatMessage {
@@ -172,6 +175,9 @@ export interface DemoUser {
   comisionesAcumuladas?: number;
   historialComisiones?: HistorialComision[];
   avatarUrl?: string; // Added for past clients list
+  isBlocked?: boolean;
+  blockReason?: string;
+  blockDate?: number;
 }
 
 
@@ -470,7 +476,9 @@ export type ActivityLogAction =
   | 'RECOMENDACION_RECONTRATACION_CREADA'
   | 'RECONTRATACION_RECORDATORIO_ENVIADO'
   | 'ADMIN_CANCEL_SERVICE'
-  | 'ADMIN_FORCE_COMPLETE_SERVICE';
+  | 'ADMIN_FORCE_COMPLETE_SERVICE'
+  | 'ADMIN_BLOCK_USER'
+  | 'ADMIN_UNBLOCK_USER';
 
 
 export interface ActivityLog {
@@ -828,4 +836,14 @@ export interface MonitoredService {
   serviceTitle: string;
   scheduledDate: number; // Timestamp
   createdAt: number; // Timestamp
+}
+
+export interface BlockedUser {
+  id: string;
+  type: 'usuario' | 'prestador';
+  name?: string;
+  email?: string; // Add email if available in your user/provider docs
+  isBlocked: boolean;
+  blockReason?: string;
+  blockDate?: number; // Timestamp
 }

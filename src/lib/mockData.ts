@@ -98,7 +98,8 @@ export const mockProviders: Provider[] = [
         fechaRegistro: Date.now() - 86400000 * 20,
         estadoVerificacion: 'verificado_manual'
       }
-    ]
+    ],
+    isBlocked: false,
   },
   {
     id: 'electrician1',
@@ -139,7 +140,8 @@ export const mockProviders: Provider[] = [
         fechaRegistro: Date.now() - 86400000 * 5,
         estadoVerificacion: 'pendiente'
       }
-    ]
+    ],
+    isBlocked: false,
   },
   {
     id: 'nanny1',
@@ -166,7 +168,8 @@ export const mockProviders: Provider[] = [
     aceptaViajes: false,
     aceptaTrabajosVirtuales: false,
     documentosValidos: true,
-    comentarioValidacion: "Validado."
+    comentarioValidacion: "Validado.",
+    isBlocked: false,
   },
   {
     id: 'gardener1',
@@ -194,7 +197,8 @@ export const mockProviders: Provider[] = [
     aceptaTrabajosVirtuales: false,
     documentosValidos: false,
     comentarioValidacion: 'Pendiente de revisar el comprobante de domicilio.',
-    documentosVerificables: [{ tipoDocumento: 'Identificación', urlDocumento: 'url_placeholder', fechaRegistro: Date.now(), estadoVerificacion: 'verificado_manual' }]
+    documentosVerificables: [{ tipoDocumento: 'Identificación', urlDocumento: 'url_placeholder', fechaRegistro: Date.now(), estadoVerificacion: 'verificado_manual' }],
+    isBlocked: false,
   },
   {
     id: 'doctor1',
@@ -222,7 +226,10 @@ export const mockProviders: Provider[] = [
     aceptaViajes: false,
     aceptaTrabajosVirtuales: true,
     documentosValidos: false,
-    documentosVerificables: [{ tipoDocumento: 'Cédula Profesional', urlDocumento: 'url_placeholder', fechaRegistro: Date.now(), estadoVerificacion: 'pendiente' }]
+    documentosVerificables: [{ tipoDocumento: 'Cédula Profesional', urlDocumento: 'url_placeholder', fechaRegistro: Date.now(), estadoVerificacion: 'pendiente' }],
+    isBlocked: true,
+    blockReason: "Múltiples reportes de mala conducta del cliente.",
+    blockDate: Date.now() - 86400000 * 3, // Blocked 3 days ago
   },
   {
     id: 'cleaner1',
@@ -249,6 +256,7 @@ export const mockProviders: Provider[] = [
     aceptaViajes: true,
     aceptaTrabajosVirtuales: false,
     documentosValidos: true,
+    isBlocked: false,
   },
 ];
 
@@ -271,9 +279,9 @@ export const mockProviderGalleries: ProviderGallery[] = [
 ];
 
 export const mockDemoUsers: DemoUser[] = [
-  { id: 'currentUserDemoId', isPremium: true, name: 'Usuario Premium Demo', idiomaPreferido: 'es', ubicacionExacta: USER_FIXED_LOCATION, puntosAcumulados: 150, historialPuntos: [{ tipo: 'ganados', puntos: 150, fecha: Date.now() - 86400000, servicioId: 'serv123', descripcion: 'Servicio Plomería Urgente' }], favoritos: ['plumber1', 'gardener1'], codigoEmbajador: 'EMBAJADOR123', comisionesAcumuladas: 0, historialComisiones: [] },
-  { id: 'standardUserDemoId', isPremium: false, name: 'Usuario Estándar Demo', idiomaPreferido: 'en', puntosAcumulados: 20, historialPuntos: [{ tipo: 'ganados', puntos: 20, fecha: Date.now() - 86400000*2, servicioId: 'serv456', descripcion: 'Consulta Eléctrica' }], favoritos: ['electrician1'], avatarUrl: 'https://placehold.co/100x100/8BC34A/FFFFFF.png?text=SD' },
-  { id: 'anotherUser', isPremium: false, name: 'Tercer Usuario', idiomaPreferido: 'es', puntosAcumulados: 0, historialPuntos: [], favoritos: [], avatarUrl: 'https://placehold.co/100x100/FFC107/FFFFFF.png?text=TU' },
+  { id: 'currentUserDemoId', isPremium: true, name: 'Usuario Premium Demo', idiomaPreferido: 'es', ubicacionExacta: USER_FIXED_LOCATION, puntosAcumulados: 150, historialPuntos: [{ tipo: 'ganados', puntos: 150, fecha: Date.now() - 86400000, servicioId: 'serv123', descripcion: 'Servicio Plomería Urgente' }], favoritos: ['plumber1', 'gardener1'], codigoEmbajador: 'EMBAJADOR123', comisionesAcumuladas: 0, historialComisiones: [], isBlocked: false },
+  { id: 'standardUserDemoId', isPremium: false, name: 'Usuario Estándar Demo', idiomaPreferido: 'en', puntosAcumulados: 20, historialPuntos: [{ tipo: 'ganados', puntos: 20, fecha: Date.now() - 86400000*2, servicioId: 'serv456', descripcion: 'Consulta Eléctrica' }], favoritos: ['electrician1'], avatarUrl: 'https://placehold.co/100x100/8BC34A/FFFFFF.png?text=SD', isBlocked: false },
+  { id: 'anotherUser', isPremium: false, name: 'Tercer Usuario', idiomaPreferido: 'es', puntosAcumulados: 0, historialPuntos: [], favoritos: [], avatarUrl: 'https://placehold.co/100x100/FFC107/FFFFFF.png?text=TU', isBlocked: true, blockReason: 'Violación de términos de servicio.', blockDate: Date.now() - 86400000 * 5 },
 
 ];
 

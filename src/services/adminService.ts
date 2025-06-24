@@ -3,7 +3,7 @@
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '@/lib/firebase';
-import type { ReporteServicio, MonitoredService, GarantiaPendiente } from '@/types';
+import type { ReporteServicio, MonitoredService, GarantiaPendiente, BlockedUser } from '@/types';
 
 /**
  * Fetches a list of reports that are pending review.
@@ -154,6 +154,51 @@ export const resolveWarranty = async (payload: ResolveWarrantyPayload): Promise<
         return result.data;
     } catch (error) {
         console.error(`[AdminService] Error calling 'resolveWarranty' for warranty ${payload.garantiaId}:`, error);
+        throw error;
+    }
+};
+
+/**
+ * Fetches a list of all blocked users and providers.
+ * @returns A promise that resolves to an array of blocked users.
+ */
+export const getBlockedUsers = async (): Promise<BlockedUser[]> => {
+    console.log("[AdminService] Fetching blocked users...");
+    const functions = getFunctions(app);
+    const getBlockedUsersFunction = httpsCallable(functions, 'getBlockedUsers');
+
+    try {
+        const result = await getBlockedUsersFunction();
+        return result.data as BlockedUser[];
+    } catch (error) {
+        console.error("[AdminService] Error calling 'getBlockedUsers':", error);
+        throw error;
+    }
+};
+
+interface UpdateBlockStatusPayload {
+    userId: string;
+    userType: 'usuario' | 'prestador';
+    blockStatus: boolean;
+    reason: string;
+}
+
+/**
+ * Updates the block status of a user or provider.
+ * @param payload - The data required to update the block status.
+ * @returns A promise that resolves to the result of the function call.
+ */
+export const updateUserBlockStatus = async (payload: UpdateBlockStatusPayload): Promise<any> => {
+    console.log(`[AdminService] Updating block status for ${payload.userType} ${payload.userId} to ${payload.blockStatus}`);
+    const functions = getFunctions(app);
+    const updateUserBlockStatusFunction = httpsCallable(functions, 'updateUserBlockStatus');
+
+    try {
+        const result = await updateUserBlockStatusFunction(payload);
+        console.log('[AdminService] User block status updated successfully:', result.data);
+        return result.data;
+    } catch (error) {
+        console.error(`[AdminService] Error calling 'updateUserBlockStatus' for user ${payload.userId}:`, error);
         throw error;
     }
 };

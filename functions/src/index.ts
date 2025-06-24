@@ -129,6 +129,9 @@ export interface UserData {
   referidos?: string[];
   comisionesAcumuladas?: number;
   historialComisiones?: admin.firestore.FieldValue | HistorialComision[];
+  isBlocked?: boolean;
+  blockReason?: string;
+  blockDate?: admin.firestore.Timestamp;
 }
 
 interface ProviderLocation {
@@ -153,6 +156,9 @@ export interface ProviderData {
   avatarUrl?: string;
   categoryIds?: string[];
   embajadorUID?: string;
+  isBlocked?: boolean;
+  blockReason?: string;
+  blockDate?: admin.firestore.Timestamp;
 }
 
 export interface ServiceRequest {
@@ -166,7 +172,7 @@ export interface ServiceRequest {
   cancellationWindowExpiresAt?: admin.firestore.Timestamp | number;
   titulo?: string;
   actorDelCambioId?: string;
-  actorDelCambioRol?: "usuario" | "prestador" | "sistema";
+  actorDelCambioRol?: "usuario" | "prestador" | "sistema" | "admin";
   calificacionUsuario?: CalificacionDetallada;
   calificacionPrestador?: CalificacionDetallada;
   paymentStatus?: PaymentStatus;
@@ -289,7 +295,9 @@ export type ActivityLogAction =
   | "EMBAJADOR_COMISION_PAGADA"
   | "RELACION_USUARIO_PRESTADOR_ACTUALIZADA"
   | "RECOMENDACION_RECONTRATACION_CREADA"
-  | "RECONTRATACION_RECORDATORIO_ENVIADO";
+  | "RECONTRATACION_RECORDATORIO_ENVIADO"
+  | "ADMIN_BLOCK_USER"
+  | "ADMIN_UNBLOCK_USER";
 
 
 export interface PromocionFidelidad {
@@ -3175,5 +3183,100 @@ export const getPastClientsForProvider = functions.https.onCall(async (data, con
              throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener clientes pasados requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
         }
         throw new functions.https.HttpsError("internal", "Error al obtener la lista de clientes.", error.message);
+    }
+});
+
+export const getBlockedUsers = functions.https.onCall(async (data, context) => {
+    // Ideally, this should be protected by an admin or moderator role check
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
+    }
+    // Example: if (!context.auth.token.admin) { throw new functions.https.HttpsError("permission-denied", "Admin role required."); }
+    
+    try {
+        const blockedUsersQuery = db.collection("usuarios").where("isBlocked", "==", true);
+        const blockedProvidersQuery = db.collection("prestadores").where("isBlocked", "==", true);
+
+        const [usersSnapshot, providersSnapshot] = await Promise.all([
+            blockedUsersQuery.get(),
+            blockedProvidersQuery.get(),
+        ]);
+
+        const blockedUsers = usersSnapshot.docs.map((doc) => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                type: 'usuario',
+                name: data.nombre,
+                email: data.email, // Assuming email is stored
+                isBlocked: data.isBlocked,
+                blockReason: data.blockReason,
+                blockDate: data.blockDate?.toMillis(),
+            };
+        });
+
+        const blockedProviders = providersSnapshot.docs.map((doc) => {
+            const data = doc.data();
+            return {
+                id: doc.id,
+                type: 'prestador',
+                name: data.nombre,
+                email: data.email, // Assuming email is stored
+                isBlocked: data.isBlocked,
+                blockReason: data.blockReason,
+                blockDate: data.blockDate?.toMillis(),
+            };
+        });
+
+        return [...blockedUsers, ...blockedProviders];
+    } catch (error: any) {
+        functions.logger.error("Error fetching blocked users:", error);
+        throw new functions.https.HttpsError("internal", "Failed to fetch blocked users.", error.message);
+    }
+});
+
+export const updateUserBlockStatus = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
+    }
+    const adminId = context.auth.uid;
+    // Add admin role check here
+
+    const { userId, userType, blockStatus, reason } = data;
+
+    if (!userId || !userType || typeof blockStatus !== 'boolean') {
+        throw new functions.https.HttpsError("invalid-argument", "Missing required parameters: userId, userType, blockStatus.");
+    }
+    if (userType !== 'usuario' && userType !== 'prestador') {
+        throw new functions.https.HttpsError("invalid-argument", "userType must be 'usuario' or 'prestador'.");
+    }
+
+    const collectionName = userType === 'usuario' ? 'usuarios' : 'prestadores';
+    const userRef = db.collection(collectionName).doc(userId);
+
+    try {
+        const updatePayload: { isBlocked: boolean; blockDate?: admin.firestore.Timestamp; blockReason?: string } = {
+            isBlocked: blockStatus,
+        };
+
+        if (blockStatus) {
+            updatePayload.blockDate = admin.firestore.Timestamp.now();
+            updatePayload.blockReason = reason || "No reason specified.";
+        } else {
+            // When unblocking, clear the reason and date
+            updatePayload.blockReason = admin.firestore.FieldValue.delete() as any;
+            updatePayload.blockDate = admin.firestore.FieldValue.delete() as any;
+        }
+
+        await userRef.update(updatePayload);
+        
+        const logAction = blockStatus ? "ADMIN_BLOCK_USER" : "ADMIN_UNBLOCK_USER";
+        const logDescription = `Admin ${adminId} ${blockStatus ? 'blocked' : 'unblocked'} ${userType} ${userId}. Reason: ${reason || 'N/A'}`;
+        await logActivity(adminId, "admin", logAction, logDescription, { type: userType, id: userId }, { reason });
+
+        return { success: true, message: `User ${userId} status updated to ${blockStatus ? 'blocked' : 'unblocked'}.` };
+    } catch (error: any) {
+        functions.logger.error(`Error updating block status for ${userType} ${userId}:`, error);
+        throw new functions.https.HttpsError("internal", "Failed to update user block status.", error.message);
     }
 });
