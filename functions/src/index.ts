@@ -287,7 +287,8 @@ export type ActivityLogAction =
   | "CATEGORIA_RECHAZADA"
   | "EMBAJADOR_COMISION_PAGADA"
   | "RELACION_USUARIO_PRESTADOR_ACTUALIZADA"
-  | "RECOMENDACION_RECONTRATACION_CREADA";
+  | "RECOMENDACION_RECONTRATACION_CREADA"
+  | "RECONTRATACION_RECORDATORIO_ENVIADO";
 
 
 export interface PromocionFidelidad {
@@ -3041,10 +3042,56 @@ export const generarRecomendacionesDeRecontratacion = functions.pubsub
     return null;
   });
 
+export const enviarRecordatorioRecontratacion = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar un recordatorio (prestador).");
+  }
+  const prestadorId = context.auth.uid;
+  const { usuarioId, categoriaId } = data;
 
+  if (!usuarioId || typeof usuarioId !== 'string' || !categoriaId || typeof categoriaId !== 'string') {
+    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'usuarioId' y 'categoriaId' válidos.");
+  }
+
+  try {
+    const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
+    if (!prestadorDoc.exists) {
+      throw new functions.https.HttpsError("not-found", "No se encontró tu perfil de prestador.");
+    }
+    const prestadorNombre = prestadorDoc.data()?.nombre || 'Tu prestador de confianza';
+
+    const categoria = SERVICE_CATEGORIES.find(c => c.id === categoriaId);
+    const nombreCategoria = categoria?.name || 'un servicio';
+
+    const notifTitle = `¿Necesitas ayuda de nuevo?`;
+    const notifBody = `${prestadorNombre} te invita a agendar de nuevo un servicio de ${nombreCategoria}.`;
+
+    await sendNotification(usuarioId, "usuario", notifTitle, notifBody, {
+      type: 'REHIRE_REMINDER',
+      providerId: prestadorId,
+      categoryId: categoriaId,
+    });
+
+    await logActivity(
+      prestadorId,
+      "prestador",
+      "RECONTRATACION_RECORDATORIO_ENVIADO",
+      `Prestador ${prestadorId} envió recordatorio a usuario ${usuarioId} para categoría ${categoriaId}.`,
+      { tipo: "usuario", id: usuarioId },
+      { prestadorId, categoriaId }
+    );
+
+    return { success: true, message: `Recordatorio enviado a usuario ${usuarioId}.` };
+  } catch (error: any) {
+    functions.logger.error(`Error al enviar recordatorio de ${prestadorId} a ${usuarioId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar el envío del recordatorio.", error.message);
+  }
+});
     
 
     
+
 
 
 

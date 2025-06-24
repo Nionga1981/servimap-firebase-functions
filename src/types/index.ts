@@ -152,6 +152,7 @@ export interface DemoUser {
   referidos?: string[];
   comisionesAcumuladas?: number;
   historialComisiones?: HistorialComision[];
+  avatarUrl?: string; // Added for past clients list
 }
 
 
@@ -441,7 +442,8 @@ export type ActivityLogAction =
   | 'CATEGORIA_RECHAZADA'
   | 'EMBAJADOR_COMISION_PAGADA'
   | 'RELACION_USUARIO_PRESTADOR_ACTUALIZADA'
-  | 'RECOMENDACION_RECONTRATACION_CREADA';
+  | 'RECOMENDACION_RECONTRATACION_CREADA'
+  | 'RECONTRATACION_RECORDATORIO_ENVIADO';
 
 
 export interface ActivityLog {
@@ -771,6 +773,16 @@ export interface Recomendacion {
   mensaje: string;
   estado: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
   fechaCreacion: number; // timestamp
+}
+
+export interface PastClientInfo {
+  usuarioId: string;
+  nombreUsuario: string;
+  avatarUrl?: string;
+  ultimoServicioFecha: number;
+  ultimaCategoriaId: string;
+  ultimaCategoriaNombre: string;
+  serviciosContratados: number;
 }
     
     

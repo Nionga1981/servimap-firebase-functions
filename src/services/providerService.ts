@@ -1,13 +1,11 @@
-
 // src/services/providerService.ts
-"use client"; // Necesario si usamos hooks o interactuamos con APIs de navegador
+"use client";
 
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '@/lib/firebase';
-
-// En una aplicación real, importarías tu instancia de Firestore y funciones de Firebase:
-// import { db } from '@/lib/firebase'; // Asumiendo que tienes firebase.ts configurado
-// import { doc, updateDoc, serverTimestamp, deleteField } from 'firebase/firestore';
+import type { PastClientInfo, RelacionUsuarioPrestador, DemoUser } from '@/types';
+import { mockRelaciones, mockDemoUsers } from '@/lib/mockData';
+import { SERVICE_CATEGORIES } from '@/lib/constants';
 
 interface ProviderUpdatePayload {
   isAvailable: boolean;
@@ -27,11 +25,6 @@ interface ProviderRegistrationData {
     codigoEmbajador?: string;
 }
 
-
-/**
- * Actualiza la disponibilidad y la ubicación en tiempo real de un proveedor.
- * En una app real, esto interactuaría con Firestore.
- */
 export const updateProviderRealtimeStatus = async (
   providerId: string,
   isAvailable: boolean,
@@ -42,7 +35,7 @@ export const updateProviderRealtimeStatus = async (
 
   const updates: ProviderUpdatePayload = {
     isAvailable: isAvailable,
-    lastConnection: Date.now(), // Usar serverTimestamp() de Firestore en una app real
+    lastConnection: Date.now(),
   };
 
   if (isAvailable && location) {
@@ -53,39 +46,22 @@ export const updateProviderRealtimeStatus = async (
     };
     console.log(`  Ubicación Actual: Lat ${location.lat}, Lng ${location.lng}`);
   } else if (!isAvailable) {
-    updates.currentLocation = null; // En Firestore real, usarías deleteField() o null
-    console.log(`  Ubicación Actual: Borrada/Nula`);
+    updates.currentLocation = null;
   }
-
-  // Simulación de la llamada a Firestore:
-  // const providerRef = doc(db, "prestadores", providerId);
-  // await updateDoc(providerRef, updates);
 
   console.log(`[ProviderService] Estado de ${providerId} actualizado (simulado).`);
 };
 
-/**
- * Detiene el seguimiento y actualiza el estado a no disponible.
- */
 export const disconnectProvider = async (providerId: string): Promise<void> => {
   console.log(`[ProviderService] Desconectando a ${providerId}...`);
-
   const updates: ProviderUpdatePayload = {
     isAvailable: false,
     currentLocation: null,
     lastConnection: Date.now(),
   };
-
-  // Simulación de la llamada a Firestore:
-  // const providerRef = doc(db, "prestadores", providerId);
-  // await updateDoc(providerRef, updates);
-
   console.log(`[ProviderService] ${providerId} desconectado (simulado).`);
 };
 
-/**
- * Llama a la Cloud Function para registrar un nuevo perfil de proveedor.
- */
 export const registerProvider = async (data: ProviderRegistrationData): Promise<any> => {
   console.log('[ProviderService] Llamando a la función registerProviderProfile...', data);
   const functions = getFunctions(app);
@@ -97,7 +73,45 @@ export const registerProvider = async (data: ProviderRegistrationData): Promise<
     return result.data;
   } catch (error) {
     console.error("[ProviderService] Error al llamar a la función 'registerProviderProfile':", error);
-    // Para que el componente que llama pueda manejar el error, lo relanzamos.
     throw error;
   }
+};
+
+export const getPastClients = async (providerId: string): Promise<PastClientInfo[]> => {
+  console.log(`[ProviderService] Obteniendo clientes pasados para el proveedor: ${providerId}`);
+  await new Promise(resolve => setTimeout(resolve, 500)); // Simular delay
+
+  const relaciones = mockRelaciones.filter(rel => rel.prestadorId === providerId);
+
+  const clientsInfo = relaciones.map(rel => {
+    const user = mockDemoUsers.find(u => u.id === rel.usuarioId);
+    const lastCategory = SERVICE_CATEGORIES.find(c => c.id === rel.categoriasServicios[rel.categoriasServicios.length - 1]);
+
+    return {
+      usuarioId: rel.usuarioId,
+      nombreUsuario: user?.name || 'Usuario Desconocido',
+      avatarUrl: user?.avatarUrl,
+      ultimoServicioFecha: rel.ultimoServicioFecha,
+      ultimaCategoriaId: lastCategory?.id || 'general',
+      ultimaCategoriaNombre: lastCategory?.name || 'Servicio General',
+      serviciosContratados: rel.serviciosContratados,
+    };
+  });
+
+  return clientsInfo.sort((a, b) => b.ultimoServicioFecha - a.ultimoServicioFecha);
+};
+
+export const sendRehireReminder = async (usuarioId: string, categoriaId: string): Promise<any> => {
+    console.log(`[ProviderService] Solicitando enviar recordatorio de recontratación a ${usuarioId} para categoría ${categoriaId}`);
+    const functions = getFunctions(app);
+    const callFunction = httpsCallable(functions, 'enviarRecordatorioRecontratacion');
+
+    try {
+        const result = await callFunction({ usuarioId, categoriaId });
+        console.log('[ProviderService] Respuesta de la función de recordatorio:', result.data);
+        return result.data;
+    } catch (error) {
+        console.error("[ProviderService] Error al llamar a la función 'enviarRecordatorioRecontratacion':", error);
+        throw error;
+    }
 };

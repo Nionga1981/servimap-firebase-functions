@@ -1,5 +1,5 @@
 // src/lib/mockData.ts
-import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad, IdiomaDocumento, ZonaPreferente, Comunidad, Service, Recomendacion } from '@/types';
+import type { Provider, ProviderGallery, GalleryItem, DemoUser, BannerPublicitario, CategoriaServicio, ProviderLocation, SolicitudCotizacion, Chat, MensajeChat, PromocionFidelidad, IdiomaDocumento, ZonaPreferente, Comunidad, Service, Recomendacion, RelacionUsuarioPrestador } from '@/types';
 import { SERVICE_CATEGORIES as LUCIDE_SERVICE_CATEGORIES } from './constants';
 
 const getApproximateLocation = (exactLoc: ProviderLocation, factor = 0.01): ProviderLocation => {
@@ -234,7 +234,9 @@ export const mockProviderGalleries: ProviderGallery[] = [
 
 export const mockDemoUsers: DemoUser[] = [
   { id: 'currentUserDemoId', isPremium: true, name: 'Usuario Premium Demo', idiomaPreferido: 'es', ubicacionExacta: USER_FIXED_LOCATION, puntosAcumulados: 150, historialPuntos: [{ tipo: 'ganados', puntos: 150, fecha: Date.now() - 86400000, servicioId: 'serv123', descripcion: 'Servicio Plomería Urgente' }], favoritos: ['plumber1', 'gardener1'], codigoEmbajador: 'EMBAJADOR123', comisionesAcumuladas: 0, historialComisiones: [] },
-  { id: 'standardUserDemoId', isPremium: false, name: 'Usuario Estándar Demo', idiomaPreferido: 'en', puntosAcumulados: 20, historialPuntos: [{ tipo: 'ganados', puntos: 20, fecha: Date.now() - 86400000*2, servicioId: 'serv456', descripcion: 'Consulta Eléctrica' }], favoritos: ['electrician1'] },
+  { id: 'standardUserDemoId', isPremium: false, name: 'Usuario Estándar Demo', idiomaPreferido: 'en', puntosAcumulados: 20, historialPuntos: [{ tipo: 'ganados', puntos: 20, fecha: Date.now() - 86400000*2, servicioId: 'serv456', descripcion: 'Consulta Eléctrica' }], favoritos: ['electrician1'], avatarUrl: 'https://placehold.co/100x100/8BC34A/FFFFFF.png?text=SD' },
+  { id: 'anotherUser', isPremium: false, name: 'Tercer Usuario', idiomaPreferido: 'es', puntosAcumulados: 0, historialPuntos: [], favoritos: [], avatarUrl: 'https://placehold.co/100x100/FFC107/FFFFFF.png?text=TU' },
+
 ];
 
 export const mockBannersPublicitarios: BannerPublicitario[] = [
@@ -482,6 +484,10 @@ export const mockRecomendaciones: Recomendacion[] = [
     fechaCreacion: Date.now() - (1000 * 60 * 60 * 24 * 1)
   }
 ];
-    
-    
 
+export const mockRelaciones: RelacionUsuarioPrestador[] = [
+  { id: 'rel1', usuarioId: 'standardUserDemoId', prestadorId: 'plumber1', serviciosContratados: 2, ultimoServicioFecha: Date.now() - (1000 * 60 * 60 * 24 * 15), categoriasServicios: ['plumbing'] },
+  { id: 'rel2', usuarioId: 'anotherUser', prestadorId: 'plumber1', serviciosContratados: 1, ultimoServicioFecha: Date.now() - (1000 * 60 * 60 * 24 * 40), categoriasServicios: ['plumbing'] },
+];
+    
+    
