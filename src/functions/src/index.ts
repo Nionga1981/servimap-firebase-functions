@@ -286,7 +286,9 @@ export type ActivityLogAction =
   | "CATEGORIA_APROBADA"
   | "CATEGORIA_RECHAZADA"
   | "EMBAJADOR_COMISION_PAGADA"
-  | "RELACION_USUARIO_PRESTADOR_ACTUALIZADA";
+  | "RELACION_USUARIO_PRESTADOR_ACTUALIZADA"
+  | "RECOMENDACION_RECONTRATACION_CREADA"
+  | "RECONTRATACION_RECORDATORIO_ENVIADO";
 
 
 export interface PromocionFidelidad {
@@ -561,6 +563,17 @@ export interface RelacionUsuarioPrestadorData {
   serviciosContratados: number;
   ultimoServicioFecha: admin.firestore.Timestamp;
   categoriasServicios: string[];
+}
+
+export interface RecomendacionData {
+  id?: string;
+  usuarioId: string;
+  prestadorId: string;
+  categoria: string;
+  mensaje: string;
+  estado: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
+  fechaCreacion: admin.firestore.Timestamp;
+  tipo?: 'sistema' | 'invita-prestador';
 }
 
 
@@ -2946,9 +2959,204 @@ export const onCategoryProposalUpdate = functions.firestore
     return null;
   });
 
+export const generarRecomendacionesDeRecontratacion = functions.pubsub
+  .schedule("every 24 hours")
+  .onRun(async (context) => {
+    functions.logger.info("Ejecutando generarRecomendacionesDeRecontratacion...");
+
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.setDate(now.getDate() - 30));
+    const thirtyDaysAgoTimestamp = admin.firestore.Timestamp.fromDate(thirtyDaysAgo);
+
+    const relacionesQuery = db.collection("relacionesUsuarioPrestador")
+        .where("ultimoServicioFecha", "<", thirtyDaysAgoTimestamp);
+
+    const snapshot = await relacionesQuery.get();
+
+    if (snapshot.empty) {
+        functions.logger.log("No hay relaciones de más de 30 días para procesar.");
+        return null;
+    }
+
+    const batch = db.batch();
+    const recomendacionesRef = db.collection("recomendaciones");
+
+    let recommendationsCreated = 0;
+
+    for (const doc of snapshot.docs) {
+        const relacion = doc.data() as RelacionUsuarioPrestadorData;
+        const categoriasRelacion = relacion.categoriasServicios || [];
+
+        const periodicCategory = categoriasRelacion.find((catId) =>
+            SERVICE_CATEGORIES.find((sc) => sc.id === catId)?.isPeriodic
+        );
+
+        if (periodicCategory) {
+            const categoriaInfo = SERVICE_CATEGORIES.find((sc) => sc.id === periodicCategory);
+            if (!categoriaInfo) continue;
+
+            const providerDoc = await db.collection("prestadores").doc(relacion.prestadorId).get();
+            if (!providerDoc.exists) continue;
+
+            const providerName = (providerDoc.data() as ProviderData)?.nombre || "un prestador";
+            const message = `¿Necesitas ayuda de nuevo con ${categoriaInfo.name}? Podrías volver a contratar a ${providerName}.`;
+
+            const recomendacionData: Omit<RecomendacionData, "id"> = {
+                usuarioId: relacion.usuarioId,
+                prestadorId: relacion.prestadorId,
+                categoria: periodicCategory,
+                mensaje: message,
+                estado: "pendiente",
+                fechaCreacion: admin.firestore.Timestamp.now(),
+                tipo: 'sistema',
+            };
+
+            const newRecomendacionRef = recomendacionesRef.doc();
+            batch.set(newRecomendacionRef, recomendacionData);
+            recommendationsCreated++;
+
+            await logActivity(
+                "sistema",
+                "sistema",
+                "RECOMENDACION_RECONTRATACION_CREADA",
+                `Recomendación creada para usuario ${relacion.usuarioId} de recontratar a prestador ${relacion.prestadorId} para ${periodicCategory}.`,
+                { tipo: "recomendacion", id: newRecomendacionRef.id },
+                { usuarioId: relacion.usuarioId, prestadorId: relacion.prestadorId, categoria: periodicCategory }
+            );
+
+            await sendNotification(
+                relacion.usuarioId,
+                "usuario",
+                `¿Necesitas ayuda de nuevo con ${categoriaInfo.name}?`,
+                `Notamos que ha pasado un tiempo. ¡${providerName} está disponible para ayudarte de nuevo!`,
+                { recomendacionId: newRecomendacionRef.id }
+            );
+        }
+    }
+
+    if (recommendationsCreated > 0) {
+        await batch.commit();
+        functions.logger.info(`Se crearon ${recommendationsCreated} recomendaciones de recontratación.`);
+    } else {
+        functions.logger.log("No se generaron nuevas recomendaciones en esta ejecución.");
+    }
+
+    return null;
+  });
+
+export const enviarRecordatorioRecontratacion = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar un recordatorio (prestador).");
+    }
+    const prestadorId = context.auth.uid;
+    const { usuarioId, categoriaId, mensajePersonalizado } = data;
+
+    if (!usuarioId || typeof usuarioId !== 'string' || !categoriaId || typeof categoriaId !== 'string') {
+        throw new functions.https.HttpsError("invalid-argument", "Se requieren 'usuarioId' y 'categoriaId' válidos.");
+    }
+
+    try {
+        const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
+        if (!prestadorDoc.exists) {
+            throw new functions.https.HttpsError("not-found", "No se encontró tu perfil de prestador.");
+        }
+        const prestadorNombre = prestadorDoc.data()?.nombre || 'Tu prestador de confianza';
+
+        const categoria = SERVICE_CATEGORIES.find(c => c.id === categoriaId);
+        const nombreCategoria = categoria?.name || 'un servicio';
+
+        const mensaje = mensajePersonalizado || `${prestadorNombre} te invita a agendar de nuevo un servicio de ${nombreCategoria}.`;
+
+        const recomendacionData: Omit<RecomendacionData, "id"> = {
+            usuarioId: usuarioId,
+            prestadorId: prestadorId,
+            categoria: categoriaId,
+            mensaje: mensaje,
+            estado: 'pendiente',
+            fechaCreacion: admin.firestore.Timestamp.now(),
+            tipo: 'invita-prestador',
+        };
+        const recomendacionRef = await db.collection("recomendaciones").add(recomendacionData);
+        
+        const notifTitle = `Un recordatorio de ${prestadorNombre}`;
+        const notifBody = mensaje;
+
+        await sendNotification(usuarioId, "usuario", notifTitle, notifBody, {
+            type: 'REHIRE_REMINDER',
+            providerId: prestadorId,
+            categoryId: categoriaId,
+            recommendationId: recomendacionRef.id,
+        });
+
+        await logActivity(
+            prestadorId,
+            "prestador",
+            "RECONTRATACION_RECORDATORIO_ENVIADO",
+            `Prestador ${prestadorId} envió recordatorio (creó recomendación ${recomendacionRef.id}) a usuario ${usuarioId} para categoría ${categoriaId}.`,
+            { tipo: "recomendacion", id: recomendacionRef.id },
+            { prestadorId, categoriaId, usuarioId }
+        );
+
+        return { success: true, message: `Recordatorio enviado a usuario ${usuarioId}.`, recomendacionId: recomendacionRef.id };
+    } catch (error: any) {
+        functions.logger.error(`Error al enviar recordatorio de ${prestadorId} a ${usuarioId}:`, error);
+        if (error instanceof functions.https.HttpsError) throw error;
+        throw new functions.https.HttpsError("internal", "Error al procesar el envío del recordatorio.", error.message);
+    }
+});
+    
+
+export const getPastClientsForProvider = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para ver tus clientes pasados (proveedor).");
+    }
+    const providerId = context.auth.uid;
+
+    try {
+        const relationsQuery = db.collection("relacionesUsuarioPrestador")
+            .where("prestadorId", "==", providerId)
+            .orderBy("ultimoServicioFecha", "desc");
+        
+        const snapshot = await relationsQuery.get();
+        if (snapshot.empty) {
+            return [];
+        }
+
+        const pastClientsPromises = snapshot.docs.map(async (doc) => {
+            const relacion = doc.data() as RelacionUsuarioPrestadorData;
+            const userDoc = await db.collection("usuarios").doc(relacion.usuarioId).get();
+            const userData = userDoc.exists() ? userDoc.data() as UserData : null;
+            const lastCategory = SERVICE_CATEGORIES.find(c => c.id === relacion.categoriasServicios[relacion.categoriasServicios.length - 1]);
+
+            return {
+                usuarioId: relacion.usuarioId,
+                nombreUsuario: userData?.nombre || 'Usuario Desconocido',
+                avatarUrl: "https://placehold.co/100x100.png", // UserData doesn't have avatarUrl yet, so using a placeholder.
+                ultimoServicioFecha: (relacion.ultimoServicioFecha as admin.firestore.Timestamp).toMillis(),
+                ultimaCategoriaId: lastCategory?.id || 'general',
+                ultimaCategoriaNombre: lastCategory?.name || 'Servicio General',
+                serviciosContratados: relacion.serviciosContratados,
+            };
+        });
+
+        const pastClients = await Promise.all(pastClientsPromises);
+        return pastClients;
+
+    } catch (error: any) {
+        functions.logger.error(`Error al obtener clientes pasados para proveedor ${providerId}:`, error);
+        if (error.code === 'failed-precondition') {
+             throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener clientes pasados requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
+        }
+        throw new functions.https.HttpsError("internal", "Error al obtener la lista de clientes.", error.message);
+    }
+});
+
+
 
     
 
-    
+
+
+
 
 

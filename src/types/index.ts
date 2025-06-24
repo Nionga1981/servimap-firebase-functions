@@ -773,6 +773,7 @@ export interface Recomendacion {
   mensaje: string;
   estado: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
   fechaCreacion: number; // timestamp
+  tipo?: 'sistema' | 'invita-prestador';
 }
 
 export interface PastClientInfo {
