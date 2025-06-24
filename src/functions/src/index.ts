@@ -602,6 +602,21 @@ export interface MonitoredService {
   createdAt: number; // Timestamp
 }
 
+export interface BannerPublicitario {
+  id?: string;
+  nombre: string;
+  imagenUrl: string;
+  linkDestino?: string;
+  orden: number;
+  activo: boolean;
+  dataAiHint?: string;
+  fechaInicio?: admin.firestore.Timestamp;
+  fechaFin?: admin.firestore.Timestamp;
+  regiones?: string[];
+  idiomas?: string[];
+  categorias?: string[];
+}
+
 
 // --- Helper para enviar notificaciones ---
 async function sendNotification(userId: string, userType: "usuario" | "prestador", title: string, body: string, data?: {[key: string]: string}) {
@@ -3184,101 +3199,45 @@ export const getPastClientsForProvider = functions.https.onCall(async (data, con
     }
 });
 
-export const getPendingWarranties = functions.https.onCall(async (data, context) => {
-  // if (!context.auth || !context.auth.token.admin) {
-  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden ver esta información.");
-  // }
+export const getBanners = functions.https.onCall(async (data, context) => {
+    functions.logger.info("Iniciando getBanners", { structuredData: true, data });
+    const { region, idioma, categoria } = data; // Targeting parameters
 
-  try {
-    const warrantiesSnapshot = await db.collection("garantiasPendientes")
-      .where("estadoGarantia", "==", "pendiente_revision")
-      .orderBy("fechaSolicitudGarantia", "asc")
-      .get();
-      
-    if (warrantiesSnapshot.empty) {
-      return [];
-    }
-    
-    const warranties = warrantiesSnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const now = admin.firestore.Timestamp.now();
+    let query: admin.firestore.Query = db.collection("banners")
+      .where("activo", "==", true)
+      .where("fechaInicio", "<=", now)
+      .orderBy("fechaInicio", "desc");
 
-    return warranties;
-  } catch (error: any) {
-    functions.logger.error("Error al obtener garantías pendientes:", error);
-    if (error.code === "failed-precondition") {
-      throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener garantías requiere un índice compuesto en Firestore.");
-    }
-    throw new functions.https.HttpsError("internal", "Error al buscar garantías pendientes.", error.message);
-  }
-});
+    try {
+        const snapshot = await query.get();
+        let banners = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BannerPublicitario));
 
-export const resolveWarranty = functions.https.onCall(async (data, context) => {
-  // if (!context.auth || !context.auth.token.admin) {
-  //   throw new functions.https.HttpsError("permission-denied", "Solo los administradores pueden resolver garantías.");
-  // }
-  const adminId = context.auth?.uid || "admin_sistema";
-  const { garantiaId, decision, notasAdmin } = data;
+        // Firestore limitation: cannot have inequality filters on multiple fields.
+        // So, we filter fechaFin in code.
+        banners = banners.filter(b => !b.fechaFin || b.fechaFin >= now);
 
-  if (!garantiaId || !decision || !notasAdmin) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'garantiaId', 'decision' y 'notasAdmin'.");
-  }
-  const validDecisions: Array<GarantiaPendienteData['estadoGarantia']> = ["aprobada_compensacion", "rechazada_garantia"];
-  if (!validDecisions.includes(decision)) {
-    throw new functions.https.HttpsError("invalid-argument", "La 'decision' no es válida.");
-  }
-  
-  const garantiaRef = db.collection("garantiasPendientes").doc(garantiaId);
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const garantiaDoc = await transaction.get(garantiaRef);
-      if (!garantiaDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Garantía con ID ${garantiaId} no encontrada.`);
-      }
-      const garantiaData = garantiaDoc.data() as GarantiaPendienteData;
-      
-      if (garantiaData.estadoGarantia !== "pendiente_revision") {
-        throw new functions.https.HttpsError("failed-precondition", `La garantía ya fue resuelta. Estado actual: ${garantiaData.estadoGarantia}.`);
-      }
-      
-      // 1. Actualizar el documento de la garantía
-      const updateGarantia: Partial<GarantiaPendienteData> = {
-        estadoGarantia: decision,
-        notasResolucion: notasAdmin,
-        resueltaPorAdminId: adminId,
-        fechaResolucion: admin.firestore.Timestamp.now(),
-      };
-      transaction.update(garantiaRef, updateGarantia);
-
-      // 2. Actualizar el servicio original si es necesario
-      const servicioRef = db.collection("solicitudes_servicio").doc(garantiaData.idServicio);
-      const servicioDoc = await transaction.get(servicioRef);
-      if (servicioDoc.exists && decision === "aprobada_compensacion") {
-        const servicioData = servicioDoc.data() as ServiceRequest;
-        const updateServicio: Partial<ServiceRequest> = {
-          updatedAt: admin.firestore.Timestamp.now(),
-        };
-        // Si el pago estaba congelado, se procesa un reembolso
-        if(servicioData.paymentStatus === 'congelado_por_disputa') {
-            updateServicio.paymentStatus = 'reembolsado_total'; // O parcial, según la lógica de negocio
+        // Filter by targeting parameters in code
+        if (region) {
+            banners = banners.filter(b => !b.regiones || b.regiones.length === 0 || b.regiones.includes(region));
         }
-        transaction.update(servicioRef, updateServicio);
-      }
-      
-      // 3. Log y Notificaciones
-      const logActionType: ActivityLogAction = decision === 'aprobada_compensacion' ? 'GARANTIA_APROBADA' : 'GARANTIA_RECHAZADA';
-      await logActivity(adminId, "admin", logActionType, `Admin resolvió garantía ${garantiaId} como ${decision}.`, { tipo: "garantia", id: garantiaId }, { notas: notasAdmin });
+        if (idioma) {
+            banners = banners.filter(b => !b.idiomas || b.idiomas.length === 0 || b.idiomas.includes(idioma));
+        }
+        if (categoria) {
+            banners = banners.filter(b => !b.categorias || b.categorias.length === 0 || b.categorias.includes(categoria));
+        }
 
-      const notifBody = `Tu solicitud de garantía para el servicio (ID: ${garantiaData.idServicio.substring(0,6)}...) ha sido resuelta como "${decision}". Comentario del admin: "${notasAdmin}"`;
-      await sendNotification(garantiaData.idUsuario, "usuario", "Garantía Resolvida", notifBody, {garantiaId, decision});
-      
-      return { success: true, message: `Garantía ${garantiaId} resuelta.` };
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error al resolver garantía ${garantiaId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar la resolución de la garantía.", error.message);
-  }
+        banners.sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
+        functions.logger.info(`[getBanners] Se encontraron ${banners.length} banners activos para los criterios.`);
+        return banners;
+
+    } catch (error: any) {
+        functions.logger.error("Error al obtener banners:", error);
+        if (error.code === 'failed-precondition') {
+             throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener banners requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
+        }
+        throw new functions.https.HttpsError("internal", "Error al buscar banners.", error.message);
+    }
 });

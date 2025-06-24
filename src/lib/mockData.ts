@@ -277,7 +277,7 @@ export const mockDemoUsers: DemoUser[] = [
 
 ];
 
-export const mockBannersPublicitarios: BannerPublicitario[] = [
+const mockBanners: BannerPublicitario[] = [
   {
     id: 'bp1',
     nombre: 'Promo Verano Limpieza',
@@ -285,7 +285,11 @@ export const mockBannersPublicitarios: BannerPublicitario[] = [
     linkDestino: '/promociones/verano-limpieza',
     orden: 1,
     activo: true,
-    dataAiHint: "cleaning summer promo"
+    dataAiHint: "cleaning summer promo",
+    fechaInicio: Date.now() - 86400000 * 5, // started 5 days ago
+    fechaFin: Date.now() + 86400000 * 10,   // ends in 10 days
+    categorias: ['cleaning'],
+    idiomas: ['es'],
   },
   {
     id: 'bp2',
@@ -294,16 +298,18 @@ export const mockBannersPublicitarios: BannerPublicitario[] = [
     linkDestino: '/servicios/electricidad?urgente=true',
     orden: 2,
     activo: true,
-    dataAiHint: "urgent electrician service"
+    dataAiHint: "urgent electrician service",
+    // No dates means it's always active within its active status
   },
   {
     id: 'bp3',
-    nombre: 'Descuento Plomería Primera Vez',
-    imagenUrl: 'https://placehold.co/400x150.png?text=Plomeria+10%25+OFF',
+    nombre: 'Descuento Plomería Primera Vez (Inglés)',
+    imagenUrl: 'https://placehold.co/400x150.png?text=Plumbing+10%25+OFF',
     linkDestino: '/ofertas/plomeria-novatos',
     orden: 3,
     activo: true,
-    dataAiHint: "plumbing first time discount"
+    dataAiHint: "plumbing first time discount",
+    idiomas: ['en']
   },
   {
     id: 'bp4_inactive',
@@ -315,6 +321,7 @@ export const mockBannersPublicitarios: BannerPublicitario[] = [
     dataAiHint: "autumn gardening"
   },
 ];
+export const getBanners = () => mockBanners;
 
 export const mockCategoriasServicio: CategoriaServicio[] = [
   { id: 'plumbing', nombre: 'Plomería', iconoUrl: 'https://placehold.co/80x80/3F51B5/FFFFFF.png?text=PLM', keywords: ['plomeria', 'fontaneria'], icon: LUCIDE_SERVICE_CATEGORIES.find(c => c.id === 'plumbing')?.icon },
@@ -528,5 +535,3 @@ export const mockRelaciones: RelacionUsuarioPrestador[] = [
   { id: 'rel2', usuarioId: 'anotherUser', prestadorId: 'plumber1', serviciosContratados: 1, ultimoServicioFecha: Date.now() - (1000 * 60 * 60 * 24 * 40), categoriasServicios: ['plumbing'], lastReminderSent: Date.now() - (1000 * 60 * 60 * 24 * 70) },
   { id: 'rel3', usuarioId: 'currentUserDemoId', prestadorId: 'electrician1', serviciosContratados: 1, ultimoServicioFecha: Date.now() - (1000 * 60 * 60 * 24 * 90), categoriasServicios: ['electrical'] },
 ];
-
-    

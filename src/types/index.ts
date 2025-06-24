@@ -354,8 +354,11 @@ export interface BannerPublicitario {
   orden: number;
   activo: boolean;
   dataAiHint?: string;
-  fechaInicio?: string;
-  fechaFin?: string;
+  fechaInicio?: number; // timestamp
+  fechaFin?: number; // timestamp
+  regiones?: string[]; // e.g., ['mx-cul', 'mx-mzt']
+  idiomas?: string[]; // e.g., ['es', 'en']
+  categorias?: string[]; // e.g., ['plumbing', 'electrical']
 }
 
 export interface CategoriaServicio {
