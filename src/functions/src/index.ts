@@ -1,4 +1,5 @@
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -28,6 +29,13 @@ const PENALIZACION_CLIENTE_CITA_MAS_2H_PCT = 0.10; // 10% of service total, all 
 const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_TOTAL = 0.25; // 25% of service total
 const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PLATAFORMA = 0.10; // 10% of service total to platform
 const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PRESTADOR = 0.15; // 15% of service total to provider
+
+// --- CONSTANTS FOR AMBASSADOR BONUSES ---
+const BONO_UMBRALES: { [key: number]: number } = {
+  5: 50,    // 5 referidos -> $50 bono
+  10: 120,  // 10 referidos -> $120 bono
+  25: 300,  // 25 referidos -> $300 bono
+};
 
 
 // --- INTERFACES (Locally defined for Cloud Functions context) ---
@@ -135,6 +143,8 @@ export interface UserData {
   isBlocked?: boolean;
   blockReason?: string;
   blockDate?: admin.firestore.Timestamp;
+  bonosRecibidos?: { [umbral: number]: boolean };
+  balanceBonos?: number;
 }
 
 interface ProviderLocation {
@@ -304,6 +314,7 @@ export type ActivityLogAction =
   | "CATEGORIA_APROBADA"
   | "CATEGORIA_RECHAZADA"
   | "EMBAJADOR_COMISION_PAGADA"
+  | "EMBAJADOR_BONO_ASIGNADO"
   | "RELACION_USUARIO_PRESTADOR_ACTUALIZADA"
   | "RECOMENDACION_RECONTRATACION_CREADA"
   | "RECONTRATACION_RECORDATORIO_ENVIADO"
@@ -319,6 +330,18 @@ export type ActivityLogAction =
   | "ADMIN_GET_PENDING_WARRANTIES"
   | "ADMIN_GET_BLOCKED_USERS"
   | "USER_GET_BANNERS";
+
+export interface BonificacionData {
+    id?: string;
+    usuarioId: string; // ID del embajador
+    monto: number;
+    motivo: 'bono_por_afiliaciones' | 'otro';
+    fecha: admin.firestore.Timestamp;
+    origen: 'sistema' | 'admin';
+    detalles?: {
+      umbralAlcanzado?: number;
+    };
+}
 
 
 export interface PromocionFidelidad {
@@ -2975,6 +2998,7 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
     }
 
     const providerRef = db.collection("prestadores").doc(providerId);
+    const bonificacionesRef = db.collection("bonificaciones");
 
     try {
         const providerDoc = await providerRef.get();
@@ -3001,23 +3025,41 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
             if (!embajadorSnapshot.empty) {
                 const embajadorDoc = embajadorSnapshot.docs[0];
                 const embajadorData = embajadorDoc.data() as UserData;
+                const embajadorUID = embajadorDoc.id;
 
                 if (embajadorData.isBlocked) {
-                    functions.logger.warn(`Intento de registro con código de embajador bloqueado. Embajador UID: ${embajadorDoc.id}, Código: ${codigoEmbajador}.`);
-                    await logActivity(
-                        providerId, "usuario", "PROVEEDOR_REGISTRADO",
-                        `Proveedor ${providerId} intentó registrarse con código de embajador bloqueado (${codigoEmbajador}). La afiliación no se completó.`,
-                        {tipo: "prestador", id: providerId},
-                        {codigoEmbajador, embajadorBloqueado: true}
-                    );
+                    functions.logger.warn(`Intento de registro con código de embajador bloqueado. Embajador UID: ${embajadorUID}, Código: ${codigoEmbajador}.`);
+                    await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Intento de registro con código bloqueado (${codigoEmbajador}).`, {tipo: "prestador", id: providerId});
                 } else {
-                    const embajadorUID = embajadorDoc.id;
                     newProviderData.embajadorUID = embajadorUID;
-                    const embajadorRef = db.collection("usuarios").doc(embajadorUID);
-                    batch.update(embajadorRef, {
-                        referidos: admin.firestore.FieldValue.arrayUnion(providerId),
-                    });
-                    functions.logger.info(`Proveedor ${providerId} referido por embajador activo ${embajadorUID}.`);
+                    
+                    const referidosActuales = embajadorData.referidos || [];
+                    const nuevoTotalReferidos = referidosActuales.length + 1;
+                    const bonosRecibidos = embajadorData.bonosRecibidos || {};
+
+                    const updatesEmbajador: Partial<UserData> = {
+                      referidos: admin.firestore.FieldValue.arrayUnion(providerId) as any,
+                    };
+                    
+                    // Lógica de Bonificación por Hitos
+                    const bonoPorEsteHito = BONO_UMBRALES[nuevoTotalReferidos];
+                    if (bonoPorEsteHito && !bonosRecibidos[nuevoTotalReferidos]) {
+                        updatesEmbajador.balanceBonos = admin.firestore.FieldValue.increment(bonoPorEsteHito) as any;
+                        updatesEmbajador.bonosRecibidos = { ...bonosRecibidos, [nuevoTotalReferidos]: true };
+                        
+                        const nuevaBonificacion: Omit<BonificacionData, "id"> = {
+                            usuarioId: embajadorUID,
+                            monto: bonoPorEsteHito,
+                            motivo: 'bono_por_afiliaciones',
+                            fecha: now,
+                            origen: 'sistema',
+                            detalles: { umbralAlcanzado: nuevoTotalReferidos },
+                        };
+                        batch.set(bonificacionesRef.doc(), nuevaBonificacion);
+                        await logActivity("sistema", "sistema", "EMBAJADOR_BONO_ASIGNADO", `Bono de $${bonoPorEsteHito} asignado a embajador ${embajadorUID} por alcanzar ${nuevoTotalReferidos} referidos.`, { tipo: "usuario", id: embajadorUID });
+                    }
+                    
+                    batch.update(embajadorDoc.ref, updatesEmbajador);
                     await logActivity("sistema", "sistema", "PROVEEDOR_REGISTRADO", `Proveedor ${providerId} registrado con código de embajador válido de ${embajadorUID}.`, {tipo: "prestador", id: providerId}, {embajadorUID, codigo: codigoEmbajador});
                 }
             } else {

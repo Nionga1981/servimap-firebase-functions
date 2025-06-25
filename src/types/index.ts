@@ -160,6 +160,18 @@ export interface IdiomaDocumento {
   recursos: IdiomaRecursos;
 }
 
+export interface BonificacionData {
+  id?: string;
+  usuarioId: string; // ID del embajador
+  monto: number;
+  motivo: 'bono_por_afiliaciones' | 'otro';
+  fecha: number; // timestamp
+  origen: 'sistema' | 'admin';
+  detalles?: {
+    umbralAlcanzado?: number;
+  };
+}
+
 export interface DemoUser {
   id: string;
   isPremium: boolean;
@@ -178,6 +190,8 @@ export interface DemoUser {
   isBlocked?: boolean;
   blockReason?: string;
   blockDate?: number;
+  bonosRecibidos?: { [umbral: number]: boolean };
+  balanceBonos?: number;
 }
 
 
@@ -479,6 +493,7 @@ export type ActivityLogAction =
   | 'CATEGORIA_APROBADA'
   | 'CATEGORIA_RECHAZADA'
   | 'EMBAJADOR_COMISION_PAGADA'
+  | 'EMBAJADOR_BONO_ASIGNADO'
   | 'RELACION_USUARIO_PRESTADOR_ACTUALIZADA'
   | 'RECOMENDACION_RECONTRATACION_CREADA'
   | 'RECONTRATACION_RECORDATORIO_ENVIADO'
