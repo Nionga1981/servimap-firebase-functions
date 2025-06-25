@@ -1,8 +1,4 @@
 
-
-
-
-
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -315,7 +311,14 @@ export type ActivityLogAction =
   | "ADMIN_CANCEL_SERVICE"
   | "ADMIN_FORCE_COMPLETE_SERVICE"
   | "ADMIN_BLOCK_USER"
-  | "ADMIN_UNBLOCK_USER";
+  | "ADMIN_UNBLOCK_USER"
+  | "PROVIDER_GET_PAST_CLIENTS"
+  | "ADMIN_GET_PROVIDERS_FOR_VALIDATION"
+  | "ADMIN_GET_PENDING_REPORTS"
+  | "ADMIN_GET_ACTIVE_SERVICES"
+  | "ADMIN_GET_PENDING_WARRANTIES"
+  | "ADMIN_GET_BLOCKED_USERS"
+  | "USER_GET_BANNERS";
 
 
 export interface PromocionFidelidad {
@@ -3298,6 +3301,7 @@ export const getPastClientsForProvider = functions.https.onCall(async (data, con
         throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para ver tus clientes pasados (proveedor).");
     }
     const providerId = context.auth.uid;
+    await logActivity(providerId, "prestador", "PROVIDER_GET_PAST_CLIENTS", `Proveedor ${providerId} solicitó su lista de clientes pasados.`);
 
     try {
         const relationsQuery = db.collection("relacionesUsuarioPrestador")
@@ -3339,11 +3343,11 @@ export const getPastClientsForProvider = functions.https.onCall(async (data, con
 });
 
 export const getBlockedUsers = functions.https.onCall(async (data, context) => {
-    // Ideally, this should be protected by an admin or moderator role check
     if (!context.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
     }
-    // Example: if (!context.auth.token.admin) { throw new functions.https.HttpsError("permission-denied", "Admin role required."); }
+    const adminId = context.auth.uid;
+    await logActivity(adminId, "admin", "ADMIN_GET_BLOCKED_USERS", `Admin ${adminId} solicitó la lista de usuarios bloqueados.`);
     
     try {
         const blockedUsersQuery = db.collection("usuarios").where("isBlocked", "==", true);
@@ -3433,10 +3437,13 @@ export const updateUserBlockStatus = functions.https.onCall(async (data, context
     }
 });
 
+
 export const getProvidersForValidation = functions.https.onCall(async (data, context) => {
   if (!context.auth /* && !context.auth.token.admin */) { // Descomentar para producción
     throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
   }
+  const adminId = context.auth.uid;
+  await logActivity(adminId, "admin", "ADMIN_GET_PROVIDERS_FOR_VALIDATION", `Admin ${adminId} solicitó la lista de proveedores para validación.`);
 
   try {
     const providersSnapshot = await db.collection("prestadores")
@@ -3448,13 +3455,13 @@ export const getProvidersForValidation = functions.https.onCall(async (data, con
     }
 
     const providersToValidate = providersSnapshot.docs.map(doc => {
-      const data = doc.data() as ProviderData;
+      const providerData = doc.data() as ProviderData;
       return {
         id: doc.id,
-        nombre: data.nombre,
-        avatarUrl: data.avatarUrl,
-        comentarioValidacion: data.comentarioValidacion,
-        documentosVerificables: data.documentosVerificables || [],
+        nombre: providerData.nombre,
+        avatarUrl: providerData.avatarUrl,
+        comentarioValidacion: (providerData as any).comentarioValidacion,
+        documentosVerificables: providerData.documentosVerificables || [],
       };
     });
 
@@ -3473,6 +3480,8 @@ export const getPendingReports = functions.https.onCall(async (data, context) =>
   if (!context.auth /* && !context.auth.token.admin */) {
     throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
   }
+  const adminId = context.auth.uid;
+  await logActivity(adminId, "admin", "ADMIN_GET_PENDING_REPORTS", `Admin ${adminId} solicitó la lista de reportes pendientes.`);
 
   try {
     const reportsSnapshot = await db.collection("reportes")
@@ -3549,6 +3558,8 @@ export const getActiveServices = functions.https.onCall(async (data, context) =>
   if (!context.auth) {
     throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
   }
+  const adminId = context.auth.uid;
+  await logActivity(adminId, "admin", "ADMIN_GET_ACTIVE_SERVICES", `Admin ${adminId} solicitó la lista de servicios activos.`);
 
   try {
     const servicesSnapshot = await db.collection("solicitudes_servicio")
@@ -3650,7 +3661,8 @@ export const adminForceCompleteService = functions.https.onCall(async (data, con
 
 export const getPendingWarranties = functions.https.onCall(async (data, context) => {
     if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-
+    const adminId = context.auth.uid;
+    await logActivity(adminId, "admin", "ADMIN_GET_PENDING_WARRANTIES", `Admin ${adminId} solicitó la lista de garantías pendientes.`);
     try {
         const snapshot = await db.collection("garantiasPendientes")
             .where("estadoGarantia", "==", "pendiente_revision")
@@ -3714,6 +3726,8 @@ export const getBanners = functions.https.onCall(async(data, context) => {
 
     const { region, idioma, categoria } = data;
     const now = admin.firestore.Timestamp.now();
+    const actorId = context.auth.uid;
+    await logActivity(actorId, "usuario", "USER_GET_BANNERS", `Usuario ${actorId} solicitó banners.`, undefined, { region, idioma, categoria });
     
     let query: admin.firestore.Query = db.collection("banners")
       .where("activo", "==", true)
