@@ -683,7 +683,7 @@ async function logActivity(
   detallesAdicionales?: Record<string, any>
 ) {
   try {
-    await db.collection("logs_actividad").add({
+    await db.collection("logEventos").add({
       actorId,
       actorRol,
       accion,
