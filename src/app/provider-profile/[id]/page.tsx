@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from '@/hooks/use-toast';
-import { Star, MapPin, Briefcase, DollarSign, Clock, CalendarDays, Mail, ChevronLeft, ShoppingBag, Image as ImageIcon, Video, BookOpen, CheckCircle, X } from 'lucide-react';
+import { Star, MapPin, Briefcase, DollarSign, Clock, CalendarDays, Mail, ChevronLeft, ShoppingBag, Image as ImageIcon, Video, BookOpen, CheckCircle, X, Tag } from 'lucide-react';
 import { createServiceRequest, createImmediateRequest } from '@/services/requestService'; 
 import { cn } from '@/lib/utils';
 
@@ -65,6 +65,8 @@ export default function ProviderProfilePage() {
   const [selectedServices, setSelectedServices] = useState<Record<string, boolean>>({});
   const [isSubmittingImmediate, setIsSubmittingImmediate] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'tarjeta' | 'efectivo' | 'transferencia' | 'wallet'>('tarjeta');
+  const [promoCode, setPromoCode] = useState('');
+
 
   // Estado para la galería
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
@@ -134,18 +136,20 @@ export default function ProviderProfilePage() {
             totalAmount: immediateServiceSubtotal,
             location: USER_FIXED_LOCATION, // Using fixed location for now
             metodoPago: paymentMethod,
+            codigoPromocion: promoCode.trim() || undefined,
         };
         const result = await createImmediateRequest(payload);
         
         toast({
             title: "¡Solicitud Exitosa!",
-            description: `Tu servicio ha sido solicitado y pagado. ID: ${result.solicitudId}`,
+            description: result.message || `Tu servicio ha sido solicitado. ID: ${result.solicitudId}`,
             duration: 7000,
         });
 
         // Redirect user to a confirmation/tracking page, or just clear the state
         router.push(`/?hiredProviderId=${provider.id}`); // Reusing existing param for en-route view
         setSelectedServices({});
+        setPromoCode('');
 
     } catch (error: any) {
          toast({
@@ -400,7 +404,7 @@ export default function ProviderProfilePage() {
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-80 md:w-96 p-4 space-y-4">
-                  <h4 className="font-medium text-center">Selecciona Servicios para Contratación Inmediata</h4>
+                  <h4 className="font-medium text-center">Selecciona Servicios</h4>
                   <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
                     {provider.services.map((service) => (
                       <Label
@@ -417,6 +421,11 @@ export default function ProviderProfilePage() {
                         <span className="text-sm font-semibold text-primary">${service.price.toFixed(2)}</span>
                       </Label>
                     ))}
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t">
+                      <Label htmlFor="promo-code" className="text-sm font-medium flex items-center gap-1"><Tag className="h-4 w-4"/>Código de Promoción</Label>
+                      <Input id="promo-code" placeholder="Ej: BIENVENIDO10" value={promoCode} onChange={(e) => setPromoCode(e.target.value)} />
                   </div>
 
                   <div className="pt-2 border-t">
@@ -451,7 +460,7 @@ export default function ProviderProfilePage() {
                     disabled={isSubmittingImmediate || selectedImmediateServicesDetails.length === 0}
                     className="w-full"
                   >
-                    {isSubmittingImmediate ? "Procesando..." : "Confirmar y Pagar Servicios Seleccionados"}
+                    {isSubmittingImmediate ? "Procesando..." : "Confirmar y Solicitar Servicios"}
                   </Button>
                 </PopoverContent>
               </Popover>

@@ -250,6 +250,11 @@ interface BaseServiceRequest {
   precio?: number;
   montoCobrado?: number;
   detallesFinancieros?: DetallesFinancieros;
+  promoAplicada?: {
+    codigo: string;
+    descripcion: string;
+    montoDescuento: number;
+  };
   actorDelCambioId?: string;
   actorDelCambioRol?: 'usuario' | 'prestador' | 'sistema' | 'admin';
   originatingServiceId?: string; // ID of the service being reactivated
@@ -431,6 +436,7 @@ export type ActivityLogAction =
   | 'PUNTOS_FIDELIDAD_CANJEADOS'
   | 'FONDO_FIDELIDAD_APORTE'
   | 'PAGO_PROCESADO_DETALLES'
+  | 'PROMO_APLICADA'
   | 'TRADUCCION_SOLICITADA'
   | 'NOTIFICACION_RECORDATORIO_PROGRAMADA'
   | 'NOTIFICACION_RECORDATORIO_ENVIADA'
@@ -568,14 +574,14 @@ export interface RegistroFondoFidelidad {
 export interface PromocionFidelidad {
   id?: string;
   descripcion: string;
-  puntosRequeridos: number;
+  puntosRequeridos?: number;
   tipoDescuento: 'porcentaje' | 'monto_fijo';
   valorDescuento: number;
   activo: boolean;
-  codigoPromocional?: string;
+  codigoPromocional: string;
   usosDisponibles?: number;
   fechaExpiracion?: number;
-  serviciosAplicables?: string[];
+  serviciosAplicables?: string[]; // IDs de categorías
 }
 
 export type RecordatorioTipo =

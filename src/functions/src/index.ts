@@ -2,6 +2,7 @@
 
 
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -188,6 +189,11 @@ export interface ServiceRequest {
   montoCobrado?: number;
   paymentReleasedToProviderAt?: admin.firestore.Timestamp | number;
   detallesFinancieros?: admin.firestore.FieldValue | DetallesFinancieros;
+  promoAplicada?: {
+    codigo: string;
+    descripcion: string;
+    montoDescuento: number;
+  };
   serviceDate?: string; // YYYY-MM-DD
   serviceTime?: string; // HH:MM
   reporteActivoId?: string;
@@ -266,7 +272,8 @@ export type ActivityLogAction =
   | "CONFIG_CAMBIADA" | "COTIZACION_CREADA" | "COTIZACION_PRECIO_PROPUESTO"
   | "COTIZACION_ACEPTADA_USUARIO" | "COTIZACION_RECHAZADA" | "CHAT_CREADO"
   | "PUNTOS_FIDELIDAD_GANADOS" | "PUNTOS_FIDELIDAD_CANJEADOS" | "FONDO_FIDELIDAD_APORTE"
-  | "PAGO_PROCESADO_DETALLES" | "TRADUCCION_SOLICITADA"
+  | "PAGO_PROCESADO_DETALLES" | "PROMO_APLICADA"
+  | "TRADUCCION_SOLICITADA"
   | "NOTIFICACION_RECORDATORIO_PROGRAMADA" | "NOTIFICACION_RECORDATORIO_ENVIADA"
   | "REGLAS_ZONA_CONSULTADAS" | "ADMIN_ZONA_MODIFICADA"
   | "TICKET_SOPORTE_CREADO" | "TICKET_SOPORTE_ACTUALIZADO"
@@ -314,11 +321,11 @@ export type ActivityLogAction =
 export interface PromocionFidelidad {
   id?: string;
   descripcion: string;
-  puntosRequeridos: number;
+  puntosRequeridos?: number;
   tipoDescuento: "porcentaje" | "monto_fijo";
   valorDescuento: number;
   activo: boolean;
-  codigoPromocional?: string;
+  codigoPromocional: string;
   usosDisponibles?: admin.firestore.FieldValue | number;
   fechaExpiracion?: admin.firestore.Timestamp;
   serviciosAplicables?: string[];
@@ -693,7 +700,7 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
         throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
     }
     const usuarioId = context.auth.uid;
-    const { providerId, selectedServices, totalAmount, location, metodoPago } = data;
+    const { providerId, selectedServices, totalAmount, location, metodoPago, codigoPromocion } = data;
 
     if (!providerId || !Array.isArray(selectedServices) || selectedServices.length === 0 || typeof totalAmount !== "number" || !location || !metodoPago) {
         throw new functions.https.HttpsError("invalid-argument", "Faltan parámetros requeridos o son inválidos.");
@@ -701,6 +708,45 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
 
     const now = admin.firestore.Timestamp.now();
     const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
+    let montoFinal = totalAmount;
+    let promoAplicada: ServiceRequest['promoAplicada'] | undefined = undefined;
+
+    // Lógica de Promoción
+    if (codigoPromocion && typeof codigoPromocion === 'string') {
+        const promoQuery = db.collection("promociones").where("codigoPromocional", "==", codigoPromocion).limit(1);
+        const promoSnapshot = await promoQuery.get();
+
+        if (promoSnapshot.empty) {
+            throw new functions.https.HttpsError("not-found", "El código de promoción no es válido o ha expirado.");
+        }
+
+        const promoDoc = promoSnapshot.docs[0];
+        const promoData = promoDoc.data() as PromocionFidelidad;
+
+        if (!promoData.activo || (promoData.fechaExpiracion && promoData.fechaExpiracion.toMillis() < now.toMillis()) || (typeof promoData.usosDisponibles === 'number' && promoData.usosDisponibles <= 0)) {
+            throw new functions.https.HttpsError("failed-precondition", "El código de promoción no está activo o ha expirado.");
+        }
+
+        let montoDescuento = 0;
+        if (promoData.tipoDescuento === 'porcentaje') {
+            montoDescuento = totalAmount * (promoData.valorDescuento / 100);
+        } else { // monto_fijo
+            montoDescuento = promoData.valorDescuento;
+        }
+
+        montoFinal = Math.max(0, totalAmount - montoDescuento);
+        promoAplicada = {
+            codigo: codigoPromocion,
+            descripcion: promoData.descripcion,
+            montoDescuento: montoDescuento,
+        };
+
+        // Decrementar usos si aplica
+        if (typeof promoData.usosDisponibles === 'number') {
+            await promoDoc.ref.update({ usosDisponibles: admin.firestore.FieldValue.increment(-1) });
+        }
+        await logActivity(usuarioId, "usuario", "PROMO_APLICADA", `Usuario aplicó promoción "${codigoPromocion}" al servicio ${nuevaSolicitudRef.id}. Descuento: $${montoDescuento.toFixed(2)}`, { tipo: 'solicitud_servicio', id: nuevaSolicitudRef.id }, promoAplicada);
+    }
 
     const providerDoc = await db.collection("prestadores").doc(providerId).get();
     if (!providerDoc.exists) {
@@ -710,19 +756,20 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
     const nuevaSolicitudData: Omit<ServiceRequest, "id" | "serviceType"> & { serviceType: "fixed" } = {
         usuarioId: usuarioId,
         prestadorId: providerId,
-        status: "pagada", // Servicio inmediato, se asume pagado y listo para empezar.
+        status: "pagada",
         createdAt: now,
         updatedAt: now,
         titulo: `Servicio inmediato: ${selectedServices.map((s: any) => s.title).join(", ")}`,
         serviceType: "fixed",
         selectedFixedServices: selectedServices,
         totalAmount: totalAmount,
-        montoCobrado: totalAmount,
+        montoCobrado: montoFinal, // Usar el monto final con descuento
         location: location,
         metodoPago: metodoPago,
-        paymentStatus: "retenido_para_liberacion", // El pago se retiene hasta la confirmación final
+        paymentStatus: "retenido_para_liberacion",
         actorDelCambioId: usuarioId,
         actorDelCambioRol: "usuario",
+        ...(promoAplicada && { promoAplicada }), // Añadir detalles de la promo
     };
 
     await nuevaSolicitudRef.set(nuevaSolicitudData);
@@ -731,9 +778,9 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
         usuarioId,
         "usuario",
         "SOLICITUD_CREADA",
-        `Usuario ${usuarioId} creó y pagó una solicitud de servicio inmediato #${nuevaSolicitudRef.id} para el proveedor ${providerId}.`,
+        `Usuario ${usuarioId} creó y pagó una solicitud #${nuevaSolicitudRef.id} para ${providerId}. Total: $${montoFinal.toFixed(2)}.`,
         { tipo: "solicitud_servicio", id: nuevaSolicitudRef.id },
-        { totalAmount, metodoPago }
+        { totalAmount: montoFinal, metodoPago, promoAplicada }
     );
 
     await sendNotification(
@@ -744,7 +791,7 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
         { solicitudId: nuevaSolicitudRef.id }
     );
 
-    return { success: true, message: "Servicio inmediato creado y pago procesado.", solicitudId: nuevaSolicitudRef.id };
+    return { success: true, message: `Servicio solicitado exitosamente. Total: $${montoFinal.toFixed(2)}.`, solicitudId: nuevaSolicitudRef.id };
 });
 
 
@@ -1249,19 +1296,19 @@ export const canjearPuntosPromocion = functions.https.onCall(async (data, contex
         transaction.update(promocionRef, {activo: false});
         throw new functions.https.HttpsError("failed-precondition", "Esta promoción se ha agotado.");
       }
-      if ((usuarioData.puntosAcumulados || 0) < promocionData.puntosRequeridos) {
+      if ((usuarioData.puntosAcumulados || 0) < (promocionData.puntosRequeridos || 0) ) {
         throw new functions.https.HttpsError("failed-precondition", `No tienes suficientes puntos. Necesitas ${promocionData.puntosRequeridos}, tienes ${usuarioData.puntosAcumulados || 0}.`);
       }
 
       const historialCanje: HistorialPuntoUsuario = {
         promocionId: promocionId,
         tipo: "canjeados",
-        puntos: -promocionData.puntosRequeridos,
+        puntos: -(promocionData.puntosRequeridos || 0),
         fecha: now,
         descripcion: `Canje de promoción: ${promocionData.descripcion}`,
       };
       transaction.update(usuarioRef, {
-        puntosAcumulados: admin.firestore.FieldValue.increment(-promocionData.puntosRequeridos),
+        puntosAcumulados: admin.firestore.FieldValue.increment(-(promocionData.puntosRequeridos || 0)),
         historialPuntos: admin.firestore.FieldValue.arrayUnion(historialCanje),
       });
 

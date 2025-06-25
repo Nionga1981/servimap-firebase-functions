@@ -133,6 +133,7 @@ interface ImmediateRequestPayload {
     totalAmount: number;
     location: ProviderLocation | { customAddress: string };
     metodoPago: 'tarjeta' | 'efectivo' | 'transferencia' | 'wallet';
+    codigoPromocion?: string;
 }
 
 export const createImmediateRequest = async (payload: ImmediateRequestPayload) => {
