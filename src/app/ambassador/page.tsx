@@ -3,6 +3,8 @@ import { AmbassadorDashboard } from '@/components/ambassador/AmbassadorDashboard
 import { getAmbassadorData } from '@/services/userService';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertCircle, Crown } from 'lucide-react';
+import { AdBanner } from '@/components/layout/AdBanner';
+
 
 // Simulación de ID de usuario actual. En una app real, esto vendría de una sesión de autenticación.
 const CURRENT_USER_ID = "currentUserDemoId";
@@ -12,6 +14,7 @@ export default async function AmbassadorPage() {
 
   return (
     <div className="container mx-auto py-8">
+      <AdBanner />
       <div className="flex items-center gap-3 mb-6">
         <Crown className="h-8 w-8 text-primary" />
         <div>

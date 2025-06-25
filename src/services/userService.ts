@@ -44,7 +44,7 @@ export const getAmbassadorData = async (userId: string): Promise<AmbassadorData 
   const data: AmbassadorData = {
     referidos: referidosConNombre,
     comisionesAcumuladas: user.comisionesAcumuladas || 0,
-    historialComisiones: historialConNombre,
+    historialComisiones: historialConNombre.sort((a, b) => b.fecha - a.fecha), // Sort by most recent
     codigoEmbajador: user.codigoEmbajador,
   };
 
