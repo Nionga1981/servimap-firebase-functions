@@ -88,7 +88,7 @@ export const mockProviders: Provider[] = [
     aceptaCotizacion: true,
     aceptaViajes: true,
     aceptaTrabajosVirtuales: false,
-    recomendadorUID: "currentUserDemoId",
+    referidoPor: "currentUserDemoId",
     documentosValidos: true,
     comentarioValidacion: "Documentos revisados y aprobados por admin.",
     documentosVerificables: [

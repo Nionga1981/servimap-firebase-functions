@@ -72,7 +72,7 @@ export interface Provider {
   aceptaTrabajosVirtuales?: boolean;
   empresa?: string;
   categoryIds?: string[];
-  recomendadorUID?: string;
+  referidoPor?: string;
   documentosVerificables?: DocumentoVerificable[];
   documentosValidos?: boolean;
   comentarioValidacion?: string;

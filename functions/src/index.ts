@@ -1,5 +1,6 @@
 
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -13,7 +14,7 @@ const db = admin.firestore();
 const COMISION_SISTEMA_PAGO_PORCENTAJE = 0.04; // 4% payment processor fee
 const COMISION_APP_SERVICIOMAP_PORCENTAJE = 0.06; // 6% ServiMap app commission on original total
 const PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD = 0.10; // 10% of ServiMap's commission goes to loyalty
-const PORCENTAJE_COMISION_EMBAJADOR = 0.05; // 5% ambassador commission on original total
+const PORCENTAJE_COMISION_EMBAJADOR = 0.05; // 5% of the app's revenue from a service, paid to the referring ambassador
 const FACTOR_CONVERSION_PUNTOS = 10; // $10 MXN (or monetary unit) per 1 loyalty point
 const DEFAULT_LANGUAGE_CODE = "es";
 const HORAS_ANTES_RECORDATORIO_SERVICIO = 24;
@@ -136,7 +137,7 @@ export interface UserData {
   isPremium?: boolean;
   idiomaPreferido?: string;
   favoritos?: string[];
-  codigoEmbajador?: string;
+  codigoPropio?: string;
   referidos?: string[];
   comisionesAcumuladas?: number;
   historialComisiones?: admin.firestore.FieldValue | HistorialComision[];
@@ -168,7 +169,7 @@ export interface ProviderData {
   rating?: number;
   avatarUrl?: string;
   categoryIds?: string[];
-  embajadorUID?: string;
+  referidoPor?: string;
   isBlocked?: boolean;
   blockReason?: string;
   blockDate?: admin.firestore.Timestamp;
@@ -1089,10 +1090,11 @@ export const logSolicitudServicioChanges = functions.firestore
         const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
         if (providerDoc.exists) {
             const providerData = providerDoc.data() as ProviderData;
-            if (providerData.embajadorUID) {
-                const embajadorUID = providerData.embajadorUID;
+            if (providerData.referidoPor) {
+                const embajadorUID = providerData.referidoPor;
                 const embajadorRef = db.collection("usuarios").doc(embajadorUID);
-                const comisionEmbajador = montoTotalPagadoPorUsuario * PORCENTAJE_COMISION_EMBAJADOR;
+                const comisionAppMonto = detallesFinancierosNuevos.comisionAppMonto || 0;
+                const comisionEmbajador = comisionAppMonto * PORCENTAJE_COMISION_EMBAJADOR;
 
                 if (comisionEmbajador > 0) {
                     const comisionHistoryEntry: HistorialComision = {
@@ -1106,6 +1108,18 @@ export const logSolicitudServicioChanges = functions.firestore
                         comisionesAcumuladas: admin.firestore.FieldValue.increment(comisionEmbajador),
                         historialComisiones: admin.firestore.FieldValue.arrayUnion(comisionHistoryEntry),
                     });
+
+                    const comisionesRef = db.collection("comisiones");
+                    const providerNameForCommission = providerData.nombre || `prestador ${afterData.prestadorId.substring(0, 5)}`;
+                    const comisionDataForCollection = {
+                        idUsuarioGanador: embajadorUID,
+                        tipo: "servicio_completado",
+                        monto: comisionEmbajador,
+                        detalle: `Comisión por servicio completado por @${providerNameForCommission}`,
+                        fecha: now,
+                        referenciaID: solicitudId,
+                    };
+                    await comisionesRef.add(comisionDataForCollection);
                     
                     await logActivity(
                         "sistema",
@@ -2988,7 +3002,7 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
         throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrarte como proveedor.");
     }
     const providerId = context.auth.uid;
-    const {name, specialties, selectedCategoryIds, newCategoryName, codigoEmbajador} = data;
+    const {name, specialties, selectedCategoryIds, newCategoryName, codigoInvitacion} = data;
 
     if (!name || typeof name !== "string" || name.length < 3) {
         throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre válido (mínimo 3 caracteres).");
@@ -3018,37 +3032,37 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
             avatarUrl: `https://placehold.co/100x100/7F7F7F/FFFFFF.png?text=${name.charAt(0)}`,
         };
 
-        if (codigoEmbajador && typeof codigoEmbajador === "string") {
-            const embajadorQuery = db.collection("usuarios").where("codigoEmbajador", "==", codigoEmbajador).limit(1);
-            const embajadorSnapshot = await embajadorQuery.get();
+        if (codigoInvitacion && typeof codigoInvitacion === "string") {
+            const referrerQuery = db.collection("usuarios").where("codigoPropio", "==", codigoInvitacion).limit(1);
+            const referrerSnapshot = await referrerQuery.get();
 
-            if (!embajadorSnapshot.empty) {
-                const embajadorDoc = embajadorSnapshot.docs[0];
-                const embajadorData = embajadorDoc.data() as UserData;
-                const embajadorUID = embajadorDoc.id;
+            if (!referrerSnapshot.empty) {
+                const referrerDoc = referrerSnapshot.docs[0];
+                const referrerData = referrerDoc.data() as UserData;
+                const referrerUID = referrerDoc.id;
 
-                if (embajadorData.isBlocked) {
-                    functions.logger.warn(`Intento de registro con código de embajador bloqueado. Embajador UID: ${embajadorUID}, Código: ${codigoEmbajador}.`);
-                    await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Intento de registro con código bloqueado (${codigoEmbajador}).`, {tipo: "prestador", id: providerId});
+                if (referrerData.isBlocked) {
+                    functions.logger.warn(`Intento de registro con código de embajador bloqueado. Embajador UID: ${referrerUID}, Código: ${codigoInvitacion}.`);
+                    await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Intento de registro con código de invitación bloqueado (${codigoInvitacion}).`, {tipo: "prestador", id: providerId});
                 } else {
-                    newProviderData.embajadorUID = embajadorUID;
+                    newProviderData.referidoPor = referrerUID;
                     
-                    const referidosActuales = embajadorData.referidos || [];
+                    const referidosActuales = referrerData.referidos || [];
                     const nuevoTotalReferidos = referidosActuales.length + 1;
-                    const bonosRecibidos = embajadorData.bonosRecibidos || {};
+                    const bonosRecibidos = referrerData.bonosRecibidos || {};
 
-                    const updatesEmbajador: Partial<UserData> = {
+                    const updatesReferrer: Partial<UserData> = {
                       referidos: admin.firestore.FieldValue.arrayUnion(providerId) as any,
                     };
                     
                     // Lógica de Bonificación por Hitos
                     const bonoPorEsteHito = BONO_UMBRALES[nuevoTotalReferidos];
                     if (bonoPorEsteHito && !bonosRecibidos[nuevoTotalReferidos]) {
-                        updatesEmbajador.balanceBonos = admin.firestore.FieldValue.increment(bonoPorEsteHito) as any;
-                        updatesEmbajador.bonosRecibidos = { ...bonosRecibidos, [nuevoTotalReferidos]: true };
+                        updatesReferrer.balanceBonos = admin.firestore.FieldValue.increment(bonoPorEsteHito) as any;
+                        updatesReferrer.bonosRecibidos = { ...bonosRecibidos, [nuevoTotalReferidos]: true };
                         
                         const nuevaBonificacion: Omit<BonificacionData, "id"> = {
-                            usuarioId: embajadorUID,
+                            usuarioId: referrerUID,
                             monto: bonoPorEsteHito,
                             motivo: 'bono_por_afiliaciones',
                             fecha: now,
@@ -3056,19 +3070,19 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
                             detalles: { umbralAlcanzado: nuevoTotalReferidos },
                         };
                         batch.set(bonificacionesRef.doc(), nuevaBonificacion);
-                        await logActivity("sistema", "sistema", "EMBAJADOR_BONO_ASIGNADO", `Bono de $${bonoPorEsteHito} asignado a embajador ${embajadorUID} por alcanzar ${nuevoTotalReferidos} referidos.`, { tipo: "usuario", id: embajadorUID });
+                        await logActivity("sistema", "sistema", "EMBAJADOR_BONO_ASIGNADO", `Bono de $${bonoPorEsteHito} asignado a embajador ${referrerUID} por alcanzar ${nuevoTotalReferidos} referidos.`, { tipo: "usuario", id: referrerUID });
                     }
                     
-                    batch.update(embajadorDoc.ref, updatesEmbajador);
-                    await logActivity("sistema", "sistema", "PROVEEDOR_REGISTRADO", `Proveedor ${providerId} registrado con código de embajador válido de ${embajadorUID}.`, {tipo: "prestador", id: providerId}, {embajadorUID, codigo: codigoEmbajador});
+                    batch.update(referrerDoc.ref, updatesReferrer);
+                    await logActivity("sistema", "sistema", "PROVEEDOR_REGISTRADO", `Proveedor ${providerId} registrado con código de invitación válido de ${referrerUID}.`, {tipo: "prestador", id: providerId}, {referidoPor: referrerUID, codigo: codigoInvitacion});
                 }
             } else {
-                functions.logger.warn(`Código de embajador "${codigoEmbajador}" no encontrado. Registrando proveedor sin referencia.`);
+                functions.logger.warn(`Código de invitación "${codigoInvitacion}" no encontrado. Registrando proveedor sin referencia.`);
             }
         }
 
         batch.set(providerRef, newProviderData, {merge: true});
-        if (!newProviderData.embajadorUID) {
+        if (!newProviderData.referidoPor) {
            await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Usuario ${providerId} se registró como proveedor: ${name}.`, {tipo: "prestador", id: providerId});
         }
         
@@ -3503,7 +3517,7 @@ export const getProvidersForValidation = functions.https.onCall(async (data, con
         nombre: providerData.nombre,
         avatarUrl: providerData.avatarUrl,
         comentarioValidacion: (providerData as any).comentarioValidacion,
-        documentosVerificables: providerData.documentosVerificables || [],
+        documentosVerificables: (providerData as any).documentosVerificables || [],
       };
     });
 
