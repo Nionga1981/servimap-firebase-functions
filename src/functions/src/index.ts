@@ -1,5 +1,6 @@
 
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -143,7 +144,7 @@ export interface UserData {
   isBlocked?: boolean;
   blockReason?: string;
   blockDate?: admin.firestore.Timestamp;
-  bonosRecibidos?: { [umbral: number]: boolean };
+  bonosRecibidos?: { [key: number]: boolean };
   balanceBonos?: number;
 }
 
@@ -731,6 +732,26 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
     if (!providerId || !Array.isArray(selectedServices) || selectedServices.length === 0 || typeof totalAmount !== "number" || !location || !metodoPago) {
         throw new functions.https.HttpsError("invalid-argument", "Faltan parámetros requeridos o son inválidos.");
     }
+    
+    const userRef = db.collection("usuarios").doc(usuarioId);
+    const providerRef = db.collection("prestadores").doc(providerId);
+
+    const [userDoc, providerDoc] = await Promise.all([userRef.get(), providerRef.get()]);
+
+    if (!userDoc.exists) {
+        throw new functions.https.HttpsError("not-found", "Tu perfil de usuario no fue encontrado.");
+    }
+    if (!providerDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
+    }
+
+    const userData = userDoc.data() as UserData;
+    const providerData = providerDoc.data() as ProviderData;
+
+    if (userData.isBlocked || providerData.isBlocked) {
+        throw new functions.https.HttpsError("permission-denied", "No se puede realizar esta acción porque una de las cuentas está bloqueada.");
+    }
+
 
     const now = admin.firestore.Timestamp.now();
     const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
@@ -772,11 +793,6 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
             await promoDoc.ref.update({ usosDisponibles: admin.firestore.FieldValue.increment(-1) });
         }
         await logActivity(usuarioId, "usuario", "PROMO_APLICADA", `Usuario aplicó promoción "${codigoPromocion}" al servicio ${nuevaSolicitudRef.id}. Descuento: $${montoDescuento.toFixed(2)}`, { tipo: 'solicitud_servicio', id: nuevaSolicitudRef.id }, promoAplicada);
-    }
-
-    const providerDoc = await db.collection("prestadores").doc(providerId).get();
-    if (!providerDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
     }
 
     const nuevaSolicitudData: Omit<ServiceRequest, "id" | "serviceType"> & { serviceType: "fixed" } = {
@@ -1204,6 +1220,21 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
       if (cotizacionData.estado !== "precio_propuesto_al_usuario") throw new functions.https.HttpsError("failed-precondition", `Estado inválido: ${cotizacionData.estado}`);
       if (typeof cotizacionData.precioSugerido !== "number" || cotizacionData.precioSugerido <= 0) throw new functions.https.HttpsError("failed-precondition", "Precio sugerido inválido.");
 
+      const userRef = db.collection("usuarios").doc(usuarioId);
+      const providerRef = db.collection("prestadores").doc(cotizacionData.prestadorId);
+      const [userDoc, providerDoc] = await Promise.all([transaction.get(userRef), transaction.get(providerRef)]);
+
+      if (!userDoc.exists || !providerDoc.exists) {
+          throw new functions.https.HttpsError("not-found", "No se encontró el perfil de usuario o proveedor.");
+      }
+
+      const userData = userDoc.data() as UserData;
+      const providerData = providerDoc.data() as ProviderData;
+
+      if (userData.isBlocked || providerData.isBlocked) {
+          throw new functions.https.HttpsError("permission-denied", "No se puede aceptar la cotización porque una de las cuentas está bloqueada.");
+      }
+      
       const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
       const ahora = admin.firestore.Timestamp.now();
 
@@ -1663,12 +1694,20 @@ export const rateServiceByUser = functions.https.onCall(async (data, context) =>
   }
 
   const servicioRef = db.collection("solicitudes_servicio").doc(servicioId);
+  const userRef = db.collection("usuarios").doc(userId);
 
   try {
     return await db.runTransaction(async (transaction) => {
-      const servicioDoc = await transaction.get(servicioRef);
+        const [servicioDoc, userDoc] = await Promise.all([
+            transaction.get(servicioRef),
+            transaction.get(userRef)
+        ]);
+        
       if (!servicioDoc.exists) {
         throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
+      }
+      if (!userDoc.exists || userDoc.data()?.isBlocked) {
+        throw new functions.https.HttpsError("permission-denied", "Tu cuenta está bloqueada y no puedes realizar esta acción.");
       }
       const servicioData = servicioDoc.data() as ServiceRequest;
 
@@ -1884,6 +1923,12 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
         throw new functions.https.HttpsError("not-found", `Servicio con ID ${idServicio} no encontrado.`);
       }
       const servicioData = servicioDoc.data() as ServiceRequest;
+      
+      const reporterCollection = rol === "usuario" ? "usuarios" : "prestadores";
+      const reporterDoc = await transaction.get(db.collection(reporterCollection).doc(idUsuarioReportante));
+      if(!reporterDoc.exists || reporterDoc.data()?.isBlocked) {
+          throw new functions.https.HttpsError("permission-denied", "Tu cuenta está bloqueada y no puedes reportar problemas.");
+      }
 
       const [idReportado, rolReportado] = rol === "usuario" ? [servicioData.prestadorId, "prestador"] : [servicioData.usuarioId, "usuario"];
       
@@ -3503,7 +3548,7 @@ export const getProvidersForValidation = functions.https.onCall(async (data, con
         nombre: providerData.nombre,
         avatarUrl: providerData.avatarUrl,
         comentarioValidacion: (providerData as any).comentarioValidacion,
-        documentosVerificables: providerData.documentosVerificables || [],
+        documentosVerificables: (providerData as any).documentosVerificables || [],
       };
     });
 
@@ -3795,3 +3840,4 @@ export const getBanners = functions.https.onCall(async(data, context) => {
         throw new functions.https.HttpsError("internal", "Error al obtener banners.");
     }
 });
+
