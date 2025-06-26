@@ -190,7 +190,7 @@ export interface DemoUser {
   isBlocked?: boolean;
   blockReason?: string;
   blockDate?: number;
-  bonosRecibidos?: { [umbral: number]: boolean };
+  bonosRecibidos?: { [key: number]: boolean };
   balanceBonos?: number;
 }
 
