@@ -1,5 +1,3 @@
-
-
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -13,7 +11,7 @@ const db = admin.firestore();
 const COMISION_SISTEMA_PAGO_PORCENTAJE = 0.04; // 4% payment processor fee
 const COMISION_APP_SERVICIOMAP_PORCENTAJE = 0.06; // 6% ServiMap app commission on original total
 const PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD = 0.10; // 10% of ServiMap's commission goes to loyalty
-const PORCENTAJE_COMISION_EMBAJADOR = 0.05; // 5% ambassador commission on original total
+const PORCENTAJE_COMISION_EMBAJADOR = 0.05; // 5% of the app's revenue from a service, paid to the referring ambassador
 const FACTOR_CONVERSION_PUNTOS = 10; // $10 MXN (or monetary unit) per 1 loyalty point
 const DEFAULT_LANGUAGE_CODE = "es";
 const HORAS_ANTES_RECORDATORIO_SERVICIO = 24;
@@ -35,6 +33,14 @@ const BONO_UMBRALES: { [key: number]: number } = {
   5: 50,    // 5 referidos -> $50 bono
   10: 120,  // 10 referidos -> $120 bono
   25: 300,  // 25 referidos -> $300 bono
+};
+
+const SUBSCRIPTION_PLANS = {
+  'premium_monthly': {
+    price: 5.00,
+    commissionRate: 0.10, // 10%
+    durationDays: 30,
+  }
 };
 
 
@@ -168,10 +174,11 @@ export interface ProviderData {
   rating?: number;
   avatarUrl?: string;
   categoryIds?: string[];
-  recomendadorUID?: string;
+  referidoPor?: string;
   isBlocked?: boolean;
   blockReason?: string;
   blockDate?: admin.firestore.Timestamp;
+  membresiaExpira?: admin.firestore.Timestamp;
 }
 
 export interface ServiceRequest {
@@ -314,6 +321,7 @@ export type ActivityLogAction =
   | "CATEGORIA_APROBADA"
   | "CATEGORIA_RECHAZADA"
   | "EMBAJADOR_COMISION_PAGADA"
+  | "EMBAJADOR_COMISION_SUSCRIPCION"
   | "EMBAJADOR_BONO_ASIGNADO"
   | "RELACION_USUARIO_PRESTADOR_ACTUALIZADA"
   | "RECOMENDACION_RECONTRATACION_CREADA"
@@ -1089,10 +1097,11 @@ export const logSolicitudServicioChanges = functions.firestore
         const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
         if (providerDoc.exists) {
             const providerData = providerDoc.data() as ProviderData;
-            if (providerData.recomendadorUID) {
-                const embajadorUID = providerData.recomendadorUID;
+            if (providerData.referidoPor) {
+                const embajadorUID = providerData.referidoPor;
                 const embajadorRef = db.collection("usuarios").doc(embajadorUID);
-                const comisionEmbajador = montoTotalPagadoPorUsuario * PORCENTAJE_COMISION_EMBAJADOR;
+                const comisionAppMonto = detallesFinancierosNuevos.comisionAppMonto || 0;
+                const comisionEmbajador = comisionAppMonto * PORCENTAJE_COMISION_EMBAJADOR;
 
                 if (comisionEmbajador > 0) {
                     const comisionHistoryEntry: HistorialComision = {
@@ -1106,6 +1115,18 @@ export const logSolicitudServicioChanges = functions.firestore
                         comisionesAcumuladas: admin.firestore.FieldValue.increment(comisionEmbajador),
                         historialComisiones: admin.firestore.FieldValue.arrayUnion(comisionHistoryEntry),
                     });
+
+                    const comisionesRef = db.collection("comisiones");
+                    const providerNameForCommission = providerData.nombre || `prestador ${afterData.prestadorId.substring(0, 5)}`;
+                    const comisionDataForCollection = {
+                        idUsuarioGanador: embajadorUID,
+                        tipo: "servicio_completado",
+                        monto: comisionEmbajador,
+                        detalle: `Comisión por servicio completado por @${providerNameForCommission}`,
+                        fecha: now,
+                        referenciaID: solicitudId,
+                    };
+                    await comisionesRef.add(comisionDataForCollection);
                     
                     await logActivity(
                         "sistema",
@@ -3002,7 +3023,7 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
 
     try {
         const providerDoc = await providerRef.get();
-        if (providerDoc.exists) {
+        if (!providerDoc.exists) {
             throw new functions.https.HttpsError("already-exists", "Ya existe un perfil de proveedor para este usuario.");
         }
 
@@ -3031,7 +3052,7 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
                     functions.logger.warn(`Intento de registro con código de embajador bloqueado. Embajador UID: ${referrerUID}, Código: ${codigoInvitacion}.`);
                     await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Intento de registro con código de invitación bloqueado (${codigoInvitacion}).`, {tipo: "prestador", id: providerId});
                 } else {
-                    newProviderData.recomendadorUID = referrerUID;
+                    newProviderData.referidoPor = referrerUID;
                     
                     const referidosActuales = referrerData.referidos || [];
                     const nuevoTotalReferidos = referidosActuales.length + 1;
@@ -3060,7 +3081,7 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
                     }
                     
                     batch.update(referrerDoc.ref, updatesReferrer);
-                    await logActivity("sistema", "sistema", "PROVEEDOR_REGISTRADO", `Proveedor ${providerId} registrado con código de invitación válido de ${referrerUID}.`, {tipo: "prestador", id: providerId}, {recomendadorUID: referrerUID, codigo: codigoInvitacion});
+                    await logActivity("sistema", "sistema", "PROVEEDOR_REGISTRADO", `Proveedor ${providerId} registrado con código de invitación válido de ${referrerUID}.`, {tipo: "prestador", id: providerId}, {referidoPor: referrerUID, codigo: codigoInvitacion});
                 }
             } else {
                 functions.logger.warn(`Código de invitación "${codigoInvitacion}" no encontrado. Registrando proveedor sin referencia.`);
@@ -3068,7 +3089,7 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
         }
 
         batch.set(providerRef, newProviderData, {merge: true});
-        if (!newProviderData.recomendadorUID) {
+        if (!newProviderData.referidoPor) {
            await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Usuario ${providerId} se registró como proveedor: ${name}.`, {tipo: "prestador", id: providerId});
         }
         
@@ -3795,3 +3816,82 @@ export const getBanners = functions.https.onCall(async(data, context) => {
         throw new functions.https.HttpsError("internal", "Error al obtener banners.");
     }
 });
+
+export const processSubscriptionPayment = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para procesar suscripciones.");
+    }
+    const { providerId, planId } = data;
+
+    if (!providerId || !planId || !SUBSCRIPTION_PLANS[planId as keyof typeof SUBSCRIPTION_PLANS]) {
+        throw new functions.https.HttpsError("invalid-argument", "Se requieren 'providerId' y 'planId' válidos.");
+    }
+
+    const plan = SUBSCRIPTION_PLANS[planId as keyof typeof SUBSCRIPTION_PLANS];
+    const now = admin.firestore.Timestamp.now();
+    const providerRef = db.collection("prestadores").doc(providerId);
+
+    try {
+        const providerDoc = await providerRef.get();
+        if (!providerDoc.exists) {
+            throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
+        }
+        const providerData = providerDoc.data() as ProviderData;
+
+        if (providerData.referidoPor) {
+            const embajadorUID = providerData.referidoPor;
+            const commissionAmount = plan.price * plan.commissionRate;
+
+            if (commissionAmount > 0) {
+                const comisionesRef = db.collection("comisiones");
+                const providerNameForCommission = providerData.nombre || `prestador ${providerId.substring(0, 5)}`;
+                
+                const comisionDataForCollection = {
+                    idUsuarioGanador: embajadorUID,
+                    tipo: "suscripcion",
+                    monto: commissionAmount,
+                    detalle: `Suscripción de @${providerNameForCommission}`,
+                    fecha: now,
+                    referenciaID: `sub_${providerId}_${now.toMillis()}`,
+                };
+                await comisionesRef.add(comisionDataForCollection);
+
+                const comisionHistoryEntry: HistorialComision = {
+                    servicioId: comisionDataForCollection.referenciaID,
+                    prestadorId: providerId,
+                    montoComision: commissionAmount,
+                    fecha: now,
+                };
+
+                const embajadorRef = db.collection("usuarios").doc(embajadorUID);
+                await embajadorRef.update({
+                    comisionesAcumuladas: admin.firestore.FieldValue.increment(commissionAmount),
+                    historialComisiones: admin.firestore.FieldValue.arrayUnion(comisionHistoryEntry),
+                });
+
+                await logActivity(
+                    "sistema",
+                    "sistema",
+                    "EMBAJADOR_COMISION_SUSCRIPCION",
+                    `Comisión de $${commissionAmount.toFixed(2)} pagada a embajador ${embajadorUID} por suscripción de ${providerId}.`,
+                    { tipo: "usuario", id: embajadorUID },
+                    { montoComision: commissionAmount, providerId, planId }
+                );
+            }
+        }
+        
+        const newExpirationDate = new Date(now.toDate().getTime() + plan.durationDays * 24 * 60 * 60 * 1000);
+        await providerRef.update({
+            isPremium: true,
+            membresiaExpira: admin.firestore.Timestamp.fromDate(newExpirationDate)
+        });
+
+        return { success: true, message: `Suscripción '${planId}' procesada para ${providerData.nombre}.` };
+
+    } catch (error: any) {
+        functions.logger.error(`Error procesando suscripción para ${providerId}:`, error);
+        if (error instanceof functions.https.HttpsError) throw error;
+        throw new functions.https.HttpsError("internal", "Error al procesar la suscripción.", error.message);
+    }
+});
+    

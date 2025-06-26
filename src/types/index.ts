@@ -79,6 +79,7 @@ export interface Provider {
   isBlocked?: boolean;
   blockReason?: string;
   blockDate?: number;
+  membresiaExpira?: number;
 }
 
 export interface ChatMessage {
@@ -493,6 +494,7 @@ export type ActivityLogAction =
   | 'CATEGORIA_APROBADA'
   | 'CATEGORIA_RECHAZADA'
   | 'EMBAJADOR_COMISION_PAGADA'
+  | 'EMBAJADOR_COMISION_SUSCRIPCION'
   | 'EMBAJADOR_BONO_ASIGNADO'
   | 'RELACION_USUARIO_PRESTADOR_ACTUALIZADA'
   | 'RECOMENDACION_RECONTRATACION_CREADA'
@@ -876,3 +878,4 @@ export interface BlockedUser {
   blockReason?: string;
   blockDate?: number; // Timestamp
 }
+    
