@@ -20,7 +20,7 @@ interface ProviderRegistrationData {
     specialties: string[];
     selectedCategoryIds: string[];
     newCategoryName?: string;
-    codigoEmbajador?: string;
+    codigoInvitacion?: string;
 }
 
 export const updateProviderRealtimeStatus = async (

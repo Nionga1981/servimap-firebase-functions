@@ -30,7 +30,7 @@ const providerSignupSchema = z.object({
   }),
   proposeNewCategory: z.boolean().default(false).optional(),
   newCategoryName: z.string().optional(),
-  codigoEmbajador: z.string().optional(),
+  codigoInvitacion: z.string().optional(),
 }).refine((data) => {
     if (data.proposeNewCategory && (!data.newCategoryName || data.newCategoryName.length < 3)) {
         return false;
@@ -53,7 +53,7 @@ export function ProviderSignupForm() {
       categoryIds: [],
       proposeNewCategory: false,
       newCategoryName: "",
-      codigoEmbajador: "",
+      codigoInvitacion: "",
     },
   });
 
@@ -67,7 +67,7 @@ export function ProviderSignupForm() {
             specialties: data.specialties.split(',').map(s => s.trim()),
             selectedCategoryIds: data.categoryIds,
             ...(data.proposeNewCategory && data.newCategoryName && { newCategoryName: data.newCategoryName }),
-            ...(data.codigoEmbajador && { codigoEmbajador: data.codigoEmbajador }),
+            ...(data.codigoInvitacion && { codigoInvitacion: data.codigoInvitacion }),
         };
 
         await registerProvider(registrationData);
@@ -219,17 +219,17 @@ export function ProviderSignupForm() {
 
         <FormField
           control={form.control}
-          name="codigoEmbajador"
+          name="codigoInvitacion"
           render={({ field }) => (
             <FormItem>
               <FormLabel className="text-base flex items-center gap-2">
-                <VenetianMask className="h-5 w-5 text-muted-foreground" /> Código de Embajador (Opcional)
+                <VenetianMask className="h-5 w-5 text-muted-foreground" /> Código de Invitación (Opcional)
               </FormLabel>
               <FormControl>
                 <Input placeholder="Ingresa el código si fuiste referido por alguien" {...field} />
               </FormControl>
               <FormDescription>
-                Si un embajador de ServiMap te invitó, ingresa su código aquí.
+                Si otro usuario o proveedor de ServiMap te invitó, ingresa su código aquí.
               </FormDescription>
               <FormMessage />
             </FormItem>

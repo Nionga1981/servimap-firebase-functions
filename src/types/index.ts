@@ -72,7 +72,7 @@ export interface Provider {
   aceptaTrabajosVirtuales?: boolean;
   empresa?: string;
   categoryIds?: string[];
-  embajadorUID?: string;
+  recomendadorUID?: string;
   documentosVerificables?: DocumentoVerificable[];
   documentosValidos?: boolean;
   comentarioValidacion?: string;
@@ -108,7 +108,7 @@ export type ServiceRequestStatus =
   | 'cerrado_automaticamente'
   | 'cerrado_con_calificacion'
   | 'cerrado_con_disputa_resuelta'
-  | 'cerrado_forzado_admin'; // New status for admin intervention
+  | 'cerrado_forzado_admin';
 
 export type EstadoFinalServicio =
   | 'cerrado_automaticamente'
@@ -182,7 +182,7 @@ export interface DemoUser {
   puntosAcumulados?: number;
   historialPuntos?: HistorialPuntoUsuario[];
   favoritos?: string[]; // Array of provider IDs
-  codigoEmbajador?: string;
+  codigoPropio?: string;
   referidos?: string[];
   comisionesAcumuladas?: number;
   historialComisiones?: HistorialComision[];
@@ -823,7 +823,7 @@ export interface AmbassadorData {
   referidos: { id: string; name: string; avatarUrl?: string }[];
   comisionesAcumuladas: number;
   historialComisiones: (HistorialComision & { providerName?: string })[];
-  codigoEmbajador?: string;
+  codigoPropio?: string;
 }
 
 export interface RelacionUsuarioPrestador {

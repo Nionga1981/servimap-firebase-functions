@@ -27,7 +27,7 @@ export function AmbassadorDashboard({ data }: AmbassadorDashboardProps) {
     );
   }
 
-  const { referidos, comisionesAcumuladas, historialComisiones, codigoEmbajador } = data;
+  const { referidos, comisionesAcumuladas, historialComisiones, codigoPropio } = data;
 
   return (
     <div className="space-y-6">
@@ -54,11 +54,11 @@ export function AmbassadorDashboard({ data }: AmbassadorDashboardProps) {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Tu Código de Embajador</CardTitle>
+            <CardTitle className="text-sm font-medium">Tu Código de Invitación</CardTitle>
             <Crown className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <Badge variant="secondary" className="text-xl font-bold tracking-widest py-1 px-3">{codigoEmbajador}</Badge>
+            <Badge variant="secondary" className="text-xl font-bold tracking-widest py-1 px-3">{codigoPropio}</Badge>
             <p className="text-xs text-muted-foreground mt-2">Comparte este código con nuevos proveedores</p>
           </CardContent>
         </Card>

@@ -10,14 +10,14 @@ export const getAmbassadorData = async (userId: string): Promise<AmbassadorData 
   
   const user = mockDemoUsers.find(u => u.id === userId);
 
-  if (!user || !user.codigoEmbajador) {
+  if (!user || !user.codigoPropio) {
     console.log(`[UserService] User ${userId} not found or is not an ambassador.`);
     // Return a default structure or null if the user is not an ambassador
     return {
       referidos: [],
       comisionesAcumuladas: 0,
       historialComisiones: [],
-      codigoEmbajador: user?.codigoEmbajador || "No asignado",
+      codigoPropio: user?.codigoPropio || "No asignado",
     };
   }
 
@@ -45,7 +45,7 @@ export const getAmbassadorData = async (userId: string): Promise<AmbassadorData 
     referidos: referidosConNombre,
     comisionesAcumuladas: user.comisionesAcumuladas || 0,
     historialComisiones: historialConNombre.sort((a, b) => b.fecha - a.fecha), // Sort by most recent
-    codigoEmbajador: user.codigoEmbajador,
+    codigoPropio: user.codigoPropio,
   };
 
   // Simulate network delay

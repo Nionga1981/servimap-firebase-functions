@@ -1,6 +1,5 @@
 
 
-
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -137,7 +136,7 @@ export interface UserData {
   isPremium?: boolean;
   idiomaPreferido?: string;
   favoritos?: string[];
-  codigoEmbajador?: string;
+  codigoPropio?: string;
   referidos?: string[];
   comisionesAcumuladas?: number;
   historialComisiones?: admin.firestore.FieldValue | HistorialComision[];
@@ -169,7 +168,7 @@ export interface ProviderData {
   rating?: number;
   avatarUrl?: string;
   categoryIds?: string[];
-  embajadorUID?: string;
+  recomendadorUID?: string;
   isBlocked?: boolean;
   blockReason?: string;
   blockDate?: admin.firestore.Timestamp;
@@ -732,26 +731,6 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
     if (!providerId || !Array.isArray(selectedServices) || selectedServices.length === 0 || typeof totalAmount !== "number" || !location || !metodoPago) {
         throw new functions.https.HttpsError("invalid-argument", "Faltan parámetros requeridos o son inválidos.");
     }
-    
-    const userRef = db.collection("usuarios").doc(usuarioId);
-    const providerRef = db.collection("prestadores").doc(providerId);
-
-    const [userDoc, providerDoc] = await Promise.all([userRef.get(), providerRef.get()]);
-
-    if (!userDoc.exists) {
-        throw new functions.https.HttpsError("not-found", "Tu perfil de usuario no fue encontrado.");
-    }
-    if (!providerDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
-    }
-
-    const userData = userDoc.data() as UserData;
-    const providerData = providerDoc.data() as ProviderData;
-
-    if (userData.isBlocked || providerData.isBlocked) {
-        throw new functions.https.HttpsError("permission-denied", "No se puede realizar esta acción porque una de las cuentas está bloqueada.");
-    }
-
 
     const now = admin.firestore.Timestamp.now();
     const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
@@ -793,6 +772,11 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
             await promoDoc.ref.update({ usosDisponibles: admin.firestore.FieldValue.increment(-1) });
         }
         await logActivity(usuarioId, "usuario", "PROMO_APLICADA", `Usuario aplicó promoción "${codigoPromocion}" al servicio ${nuevaSolicitudRef.id}. Descuento: $${montoDescuento.toFixed(2)}`, { tipo: 'solicitud_servicio', id: nuevaSolicitudRef.id }, promoAplicada);
+    }
+
+    const providerDoc = await db.collection("prestadores").doc(providerId).get();
+    if (!providerDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
     }
 
     const nuevaSolicitudData: Omit<ServiceRequest, "id" | "serviceType"> & { serviceType: "fixed" } = {
@@ -1105,8 +1089,8 @@ export const logSolicitudServicioChanges = functions.firestore
         const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
         if (providerDoc.exists) {
             const providerData = providerDoc.data() as ProviderData;
-            if (providerData.embajadorUID) {
-                const embajadorUID = providerData.embajadorUID;
+            if (providerData.recomendadorUID) {
+                const embajadorUID = providerData.recomendadorUID;
                 const embajadorRef = db.collection("usuarios").doc(embajadorUID);
                 const comisionEmbajador = montoTotalPagadoPorUsuario * PORCENTAJE_COMISION_EMBAJADOR;
 
@@ -1220,21 +1204,6 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
       if (cotizacionData.estado !== "precio_propuesto_al_usuario") throw new functions.https.HttpsError("failed-precondition", `Estado inválido: ${cotizacionData.estado}`);
       if (typeof cotizacionData.precioSugerido !== "number" || cotizacionData.precioSugerido <= 0) throw new functions.https.HttpsError("failed-precondition", "Precio sugerido inválido.");
 
-      const userRef = db.collection("usuarios").doc(usuarioId);
-      const providerRef = db.collection("prestadores").doc(cotizacionData.prestadorId);
-      const [userDoc, providerDoc] = await Promise.all([transaction.get(userRef), transaction.get(providerRef)]);
-
-      if (!userDoc.exists || !providerDoc.exists) {
-          throw new functions.https.HttpsError("not-found", "No se encontró el perfil de usuario o proveedor.");
-      }
-
-      const userData = userDoc.data() as UserData;
-      const providerData = providerDoc.data() as ProviderData;
-
-      if (userData.isBlocked || providerData.isBlocked) {
-          throw new functions.https.HttpsError("permission-denied", "No se puede aceptar la cotización porque una de las cuentas está bloqueada.");
-      }
-      
       const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
       const ahora = admin.firestore.Timestamp.now();
 
@@ -1694,20 +1663,12 @@ export const rateServiceByUser = functions.https.onCall(async (data, context) =>
   }
 
   const servicioRef = db.collection("solicitudes_servicio").doc(servicioId);
-  const userRef = db.collection("usuarios").doc(userId);
 
   try {
     return await db.runTransaction(async (transaction) => {
-        const [servicioDoc, userDoc] = await Promise.all([
-            transaction.get(servicioRef),
-            transaction.get(userRef)
-        ]);
-        
+      const servicioDoc = await transaction.get(servicioRef);
       if (!servicioDoc.exists) {
         throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
-      }
-      if (!userDoc.exists || userDoc.data()?.isBlocked) {
-        throw new functions.https.HttpsError("permission-denied", "Tu cuenta está bloqueada y no puedes realizar esta acción.");
       }
       const servicioData = servicioDoc.data() as ServiceRequest;
 
@@ -1923,12 +1884,6 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
         throw new functions.https.HttpsError("not-found", `Servicio con ID ${idServicio} no encontrado.`);
       }
       const servicioData = servicioDoc.data() as ServiceRequest;
-      
-      const reporterCollection = rol === "usuario" ? "usuarios" : "prestadores";
-      const reporterDoc = await transaction.get(db.collection(reporterCollection).doc(idUsuarioReportante));
-      if(!reporterDoc.exists || reporterDoc.data()?.isBlocked) {
-          throw new functions.https.HttpsError("permission-denied", "Tu cuenta está bloqueada y no puedes reportar problemas.");
-      }
 
       const [idReportado, rolReportado] = rol === "usuario" ? [servicioData.prestadorId, "prestador"] : [servicioData.usuarioId, "usuario"];
       
@@ -3033,7 +2988,7 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
         throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrarte como proveedor.");
     }
     const providerId = context.auth.uid;
-    const {name, specialties, selectedCategoryIds, newCategoryName, codigoEmbajador} = data;
+    const {name, specialties, selectedCategoryIds, newCategoryName, codigoInvitacion} = data;
 
     if (!name || typeof name !== "string" || name.length < 3) {
         throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre válido (mínimo 3 caracteres).");
@@ -3063,37 +3018,37 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
             avatarUrl: `https://placehold.co/100x100/7F7F7F/FFFFFF.png?text=${name.charAt(0)}`,
         };
 
-        if (codigoEmbajador && typeof codigoEmbajador === "string") {
-            const embajadorQuery = db.collection("usuarios").where("codigoEmbajador", "==", codigoEmbajador).limit(1);
-            const embajadorSnapshot = await embajadorQuery.get();
+        if (codigoInvitacion && typeof codigoInvitacion === "string") {
+            const referrerQuery = db.collection("usuarios").where("codigoPropio", "==", codigoInvitacion).limit(1);
+            const referrerSnapshot = await referrerQuery.get();
 
-            if (!embajadorSnapshot.empty) {
-                const embajadorDoc = embajadorSnapshot.docs[0];
-                const embajadorData = embajadorDoc.data() as UserData;
-                const embajadorUID = embajadorDoc.id;
+            if (!referrerSnapshot.empty) {
+                const referrerDoc = referrerSnapshot.docs[0];
+                const referrerData = referrerDoc.data() as UserData;
+                const referrerUID = referrerDoc.id;
 
-                if (embajadorData.isBlocked) {
-                    functions.logger.warn(`Intento de registro con código de embajador bloqueado. Embajador UID: ${embajadorUID}, Código: ${codigoEmbajador}.`);
-                    await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Intento de registro con código bloqueado (${codigoEmbajador}).`, {tipo: "prestador", id: providerId});
+                if (referrerData.isBlocked) {
+                    functions.logger.warn(`Intento de registro con código de embajador bloqueado. Embajador UID: ${referrerUID}, Código: ${codigoInvitacion}.`);
+                    await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Intento de registro con código de invitación bloqueado (${codigoInvitacion}).`, {tipo: "prestador", id: providerId});
                 } else {
-                    newProviderData.embajadorUID = embajadorUID;
+                    newProviderData.recomendadorUID = referrerUID;
                     
-                    const referidosActuales = embajadorData.referidos || [];
+                    const referidosActuales = referrerData.referidos || [];
                     const nuevoTotalReferidos = referidosActuales.length + 1;
-                    const bonosRecibidos = embajadorData.bonosRecibidos || {};
+                    const bonosRecibidos = referrerData.bonosRecibidos || {};
 
-                    const updatesEmbajador: Partial<UserData> = {
+                    const updatesReferrer: Partial<UserData> = {
                       referidos: admin.firestore.FieldValue.arrayUnion(providerId) as any,
                     };
                     
                     // Lógica de Bonificación por Hitos
                     const bonoPorEsteHito = BONO_UMBRALES[nuevoTotalReferidos];
                     if (bonoPorEsteHito && !bonosRecibidos[nuevoTotalReferidos]) {
-                        updatesEmbajador.balanceBonos = admin.firestore.FieldValue.increment(bonoPorEsteHito) as any;
-                        updatesEmbajador.bonosRecibidos = { ...bonosRecibidos, [nuevoTotalReferidos]: true };
+                        updatesReferrer.balanceBonos = admin.firestore.FieldValue.increment(bonoPorEsteHito) as any;
+                        updatesReferrer.bonosRecibidos = { ...bonosRecibidos, [nuevoTotalReferidos]: true };
                         
                         const nuevaBonificacion: Omit<BonificacionData, "id"> = {
-                            usuarioId: embajadorUID,
+                            usuarioId: referrerUID,
                             monto: bonoPorEsteHito,
                             motivo: 'bono_por_afiliaciones',
                             fecha: now,
@@ -3101,19 +3056,19 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
                             detalles: { umbralAlcanzado: nuevoTotalReferidos },
                         };
                         batch.set(bonificacionesRef.doc(), nuevaBonificacion);
-                        await logActivity("sistema", "sistema", "EMBAJADOR_BONO_ASIGNADO", `Bono de $${bonoPorEsteHito} asignado a embajador ${embajadorUID} por alcanzar ${nuevoTotalReferidos} referidos.`, { tipo: "usuario", id: embajadorUID });
+                        await logActivity("sistema", "sistema", "EMBAJADOR_BONO_ASIGNADO", `Bono de $${bonoPorEsteHito} asignado a embajador ${referrerUID} por alcanzar ${nuevoTotalReferidos} referidos.`, { tipo: "usuario", id: referrerUID });
                     }
                     
-                    batch.update(embajadorDoc.ref, updatesEmbajador);
-                    await logActivity("sistema", "sistema", "PROVEEDOR_REGISTRADO", `Proveedor ${providerId} registrado con código de embajador válido de ${embajadorUID}.`, {tipo: "prestador", id: providerId}, {embajadorUID, codigo: codigoEmbajador});
+                    batch.update(referrerDoc.ref, updatesReferrer);
+                    await logActivity("sistema", "sistema", "PROVEEDOR_REGISTRADO", `Proveedor ${providerId} registrado con código de invitación válido de ${referrerUID}.`, {tipo: "prestador", id: providerId}, {recomendadorUID: referrerUID, codigo: codigoInvitacion});
                 }
             } else {
-                functions.logger.warn(`Código de embajador "${codigoEmbajador}" no encontrado. Registrando proveedor sin referencia.`);
+                functions.logger.warn(`Código de invitación "${codigoInvitacion}" no encontrado. Registrando proveedor sin referencia.`);
             }
         }
 
         batch.set(providerRef, newProviderData, {merge: true});
-        if (!newProviderData.embajadorUID) {
+        if (!newProviderData.recomendadorUID) {
            await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Usuario ${providerId} se registró como proveedor: ${name}.`, {tipo: "prestador", id: providerId});
         }
         
@@ -3840,4 +3795,3 @@ export const getBanners = functions.https.onCall(async(data, context) => {
         throw new functions.https.HttpsError("internal", "Error al obtener banners.");
     }
 });
-
