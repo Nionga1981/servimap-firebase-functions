@@ -305,6 +305,7 @@ export type ActivityLogAction =
   | "COMUNIDAD_AVISO_ACTUALIZADO"
   | "COMUNIDAD_AVISO_ELIMINADO"
   | "COMUNIDAD_NUEVO_AVISO_NOTIFICADO"
+  | "COMUNIDAD_PREGUNTA_PUBLICADA"
   | "CITA_CREADA"
   | "CITA_CONFIRMADA_PRESTADOR"
   | "CITA_RECHAZADA_PRESTADOR"
@@ -677,6 +678,24 @@ export interface BannerPublicitario {
   regiones?: string[];
   idiomas?: string[];
   categorias?: string[];
+}
+
+export interface RespuestaPreguntaComunidadData {
+  id?: string;
+  autorId: string;
+  texto: string;
+  fecha: admin.firestore.Timestamp;
+  prestadorRecomendadoId?: string;
+}
+
+export interface PreguntaComunidadData {
+  id?: string;
+  idUsuario: string;
+  pregunta: string;
+  ubicacion?: ProviderLocation;
+  fecha: admin.firestore.Timestamp;
+  respuestas?: RespuestaPreguntaComunidadData[];
+  tags?: string[];
 }
 
 
@@ -3932,3 +3951,46 @@ export const onCommissionCreated = functions.firestore
       return null;
     }
   });
+
+
+export const publicarPreguntaComunidad = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const idUsuario = context.auth.uid;
+  const { pregunta, ubicacion } = data;
+
+  if (!pregunta || typeof pregunta !== "string" || pregunta.length < 10) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere una pregunta válida (mínimo 10 caracteres).");
+  }
+  if (!ubicacion || typeof ubicacion.lat !== 'number' || typeof ubicacion.lng !== 'number') {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere una ubicación válida.");
+  }
+
+  const nuevaPregunta: PreguntaComunidadData = {
+    idUsuario,
+    pregunta,
+    ubicacion,
+    fecha: admin.firestore.Timestamp.now(),
+    respuestas: [],
+    // A future improvement could be to use AI to generate tags from the question
+  };
+  
+  try {
+    const preguntaRef = await db.collection("preguntasComunidad").add(nuevaPregunta);
+
+    await logActivity(
+      idUsuario,
+      "usuario",
+      "COMUNIDAD_PREGUNTA_PUBLICADA",
+      `Usuario ${idUsuario} publicó una nueva pregunta en la comunidad: "${pregunta.substring(0, 50)}..."`,
+      { tipo: "preguntaComunidad", id: preguntaRef.id },
+      { pregunta: pregunta }
+    );
+    
+    return { success: true, message: "Pregunta publicada exitosamente.", preguntaId: preguntaRef.id };
+  } catch (error) {
+    functions.logger.error("Error al publicar pregunta en comunidad:", error);
+    throw new functions.https.HttpsError("internal", "No se pudo publicar tu pregunta.", error);
+  }
+});

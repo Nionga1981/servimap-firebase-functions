@@ -1,35 +1,41 @@
-
 // src/app/communities/page.tsx
+import { CommunityQuestionForm } from '@/components/communities/CommunityQuestionForm';
+import { CommunityQuestionList } from '@/components/communities/CommunityQuestionList';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users } from "lucide-react";
+import { Separator } from '@/components/ui/separator';
 
 export default function CommunitiesPage() {
+  // En una aplicación real, aquí podrías obtener los datos del usuario para pasarlos a los componentes.
+  // const userData = await getUserData(); // Función hipotética
+  const mockUserId = 'currentUserDemoId'; // Simulación
+  const mockUserLocation = { lat: 24.8093, lng: -107.4255 }; // Simulación
+
   return (
     <div className="container mx-auto py-8">
-      <Card className="max-w-3xl mx-auto shadow-lg">
+      <Card className="mb-8 shadow-lg">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-2xl text-primary">
             <Users className="h-6 w-6" />
             Comunidades ServiMap
           </CardTitle>
           <CardDescription>
-            Explora, únete y participa en comunidades de usuarios y proveedores.
+            Haz una pregunta a la comunidad o ayuda a otros con tus recomendaciones.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-12">
-            <h2 className="text-xl font-semibold text-muted-foreground">¡Próximamente!</h2>
-            <p className="text-muted-foreground mt-2">
-              Estamos trabajando en esta sección para que puedas conectar con otros miembros de ServiMap.
-            </p>
-            <p className="text-sm text-muted-foreground/80 mt-1">
-              Aquí podrás encontrar grupos locales, discutir sobre servicios, compartir experiencias y mucho más.
-            </p>
-          </div>
+            <CommunityQuestionForm 
+              userId={mockUserId}
+              userLocation={mockUserLocation}
+            />
         </CardContent>
       </Card>
+
+      <Separator className="my-8" />
+      
+      <h2 className="text-xl font-semibold mb-4">Preguntas Recientes de la Comunidad</h2>
+      <CommunityQuestionList />
+
     </div>
   );
 }
-
-    

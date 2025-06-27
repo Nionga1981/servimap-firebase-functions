@@ -479,6 +479,7 @@ export type ActivityLogAction =
   | 'COMUNIDAD_AVISO_ACTUALIZADO'
   | 'COMUNIDAD_AVISO_ELIMINADO'
   | 'COMUNIDAD_NUEVO_AVISO_NOTIFICADO'
+  | 'COMUNIDAD_PREGUNTA_PUBLICADA'
   | 'CITA_CREADA'
   | 'CITA_CONFIRMADA_PRESTADOR'
   | 'CITA_RECHAZADA_PRESTADOR'
@@ -521,7 +522,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad' | 'categoria_propuesta' | 'relacionUsuarioPrestador' | 'recomendacion';
+    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad' | 'categoria_propuesta' | 'relacionUsuarioPrestador' | 'recomendacion' | 'preguntaComunidad';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -878,5 +879,26 @@ export interface BlockedUser {
   isBlocked: boolean;
   blockReason?: string;
   blockDate?: number; // Timestamp
+}
+
+export interface RespuestaPreguntaComunidad {
+  id?: string;
+  autorId: string;
+  texto: string;
+  fecha: number;
+  prestadorRecomendadoId?: string;
+}
+
+export interface PreguntaComunidad {
+  id: string;
+  idUsuario: string;
+  pregunta: string;
+  ubicacion?: ProviderLocation;
+  fecha: number;
+  respuestas?: RespuestaPreguntaComunidad[];
+  tags?: string[];
+  // Para enriquecer la UI
+  nombreUsuario?: string;
+  avatarUsuario?: string;
 }
     
