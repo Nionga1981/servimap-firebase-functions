@@ -27,18 +27,18 @@ export function AmbassadorDashboard({ data }: AmbassadorDashboardProps) {
     );
   }
 
-  const { referidos, comisionesAcumuladas, historialComisiones, codigoPropio } = data;
+  const { referidos, gananciasTotales, historialComisiones, codigoPropio } = data;
 
   return (
     <div className="space-y-6">
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Comisiones Totales</CardTitle>
+            <CardTitle className="text-sm font-medium">Ganancias Totales</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${comisionesAcumuladas.toFixed(2)}</div>
+            <div className="text-2xl font-bold">${gananciasTotales.toFixed(2)}</div>
             <p className="text-xs text-muted-foreground">Ganancias totales generadas</p>
           </CardContent>
         </Card>

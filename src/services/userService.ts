@@ -15,7 +15,7 @@ export const getAmbassadorData = async (userId: string): Promise<AmbassadorData 
     // Return a default structure or null if the user is not an ambassador
     return {
       referidos: [],
-      comisionesAcumuladas: 0,
+      gananciasTotales: 0,
       historialComisiones: [],
       codigoPropio: user?.codigoPropio || "No asignado",
     };
@@ -43,7 +43,7 @@ export const getAmbassadorData = async (userId: string): Promise<AmbassadorData 
 
   const data: AmbassadorData = {
     referidos: referidosConNombre,
-    comisionesAcumuladas: user.comisionesAcumuladas || 0,
+    gananciasTotales: user.gananciasTotales || 0,
     historialComisiones: historialConNombre.sort((a, b) => b.fecha - a.fecha), // Sort by most recent
     codigoPropio: user.codigoPropio,
   };

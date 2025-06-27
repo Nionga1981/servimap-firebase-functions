@@ -185,7 +185,7 @@ export interface DemoUser {
   favoritos?: string[]; // Array of provider IDs
   codigoPropio?: string;
   referidos?: string[];
-  comisionesAcumuladas?: number;
+  gananciasTotales?: number;
   historialComisiones?: HistorialComision[];
   avatarUrl?: string; // Added for past clients list
   isBlocked?: boolean;
@@ -823,7 +823,7 @@ export interface CategoriaPropuesta {
 
 export interface AmbassadorData {
   referidos: { id: string; name: string; avatarUrl?: string }[];
-  comisionesAcumuladas: number;
+  gananciasTotales: number;
   historialComisiones: (HistorialComision & { providerName?: string })[];
   codigoPropio?: string;
 }

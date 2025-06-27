@@ -144,7 +144,7 @@ export interface UserData {
   favoritos?: string[];
   codigoPropio?: string;
   referidos?: string[];
-  comisionesAcumuladas?: number;
+  gananciasTotales?: number;
   historialComisiones?: admin.firestore.FieldValue | HistorialComision[];
   isBlocked?: boolean;
   blockReason?: string;
@@ -1112,7 +1112,6 @@ export const logSolicitudServicioChanges = functions.firestore
                     };
                     
                     await embajadorRef.update({
-                        comisionesAcumuladas: admin.firestore.FieldValue.increment(comisionEmbajador),
                         historialComisiones: admin.firestore.FieldValue.arrayUnion(comisionHistoryEntry),
                     });
 
@@ -1132,7 +1131,7 @@ export const logSolicitudServicioChanges = functions.firestore
                         "sistema",
                         "sistema",
                         "EMBAJADOR_COMISION_PAGADA",
-                        `Comisión de $${comisionEmbajador.toFixed(2)} pagada a embajador ${embajadorUID} por servicio ${solicitudId} de prestador ${afterData.prestadorId}.`,
+                        `Comisión de $${comisionEmbajador.toFixed(2)} generada para embajador ${embajadorUID} por servicio ${solicitudId} de prestador ${afterData.prestadorId}.`,
                         { tipo: "usuario", id: embajadorUID },
                         { montoComision: comisionEmbajador, servicioId, prestadorId: afterData.prestadorId }
                     );
@@ -3023,7 +3022,7 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
 
     try {
         const providerDoc = await providerRef.get();
-        if (!providerDoc.exists) {
+        if (providerDoc.exists) {
             throw new functions.https.HttpsError("already-exists", "Ya existe un perfil de proveedor para este usuario.");
         }
 
@@ -3865,7 +3864,6 @@ export const processSubscriptionPayment = functions.https.onCall(async (data, co
 
                 const embajadorRef = db.collection("usuarios").doc(embajadorUID);
                 await embajadorRef.update({
-                    comisionesAcumuladas: admin.firestore.FieldValue.increment(commissionAmount),
                     historialComisiones: admin.firestore.FieldValue.arrayUnion(comisionHistoryEntry),
                 });
 
@@ -3894,4 +3892,43 @@ export const processSubscriptionPayment = functions.https.onCall(async (data, co
         throw new functions.https.HttpsError("internal", "Error al procesar la suscripción.", error.message);
     }
 });
-    
+
+export const onCommissionCreated = functions.firestore
+  .document("comisiones/{commissionId}")
+  .onCreate(async (snapshot, context) => {
+    const commissionData = snapshot.data();
+    if (!commissionData) {
+      functions.logger.error("No data found in commission document.", {commissionId: context.params.commissionId});
+      return null;
+    }
+
+    const { idUsuarioGanador, monto } = commissionData;
+
+    if (!idUsuarioGanador || typeof monto !== "number" || monto <= 0) {
+      functions.logger.error("Commission document is missing idUsuarioGanador or has invalid monto.", {commissionId: context.params.commissionId, data: commissionData});
+      return null;
+    }
+
+    const userRef = db.collection("usuarios").doc(idUsuarioGanador);
+
+    try {
+      await userRef.update({
+        gananciasTotales: admin.firestore.FieldValue.increment(monto),
+      });
+      functions.logger.info(`Updated gananciasTotales for user ${idUsuarioGanador} by ${monto}.`);
+      
+      await logActivity(
+        "sistema",
+        "sistema",
+        "EMBAJADOR_COMISION_PAGADA",
+        `$${monto.toFixed(2)} agregados a las ganancias totales del embajador ${idUsuarioGanador} desde la comisión ${context.params.commissionId}.`,
+        { tipo: "usuario", id: idUsuarioGanador },
+        { monto, commissionId: context.params.commissionId }
+      );
+
+      return null;
+    } catch (error) {
+      functions.logger.error(`Failed to update gananciasTotales for user ${idUsuarioGanador}.`, { error: error });
+      return null;
+    }
+  });
