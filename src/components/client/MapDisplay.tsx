@@ -211,23 +211,26 @@ const MapContentComponent = React.memo(({
         }
 
         // Standard marker for other providers
-        const mainCategoryData = SERVICE_CATEGORIES.find(c => c.id === (provider.services[0]?.category));
-        const mainCategoryLucideIcon = mainCategoryData?.icon;
+        const isFixedBusiness = provider.type === 'fixed';
+        const mainCategoryData = !isFixedBusiness ? SERVICE_CATEGORIES.find(c => c.id === (provider.services[0]?.category)) : null;
+        const LucideIconForMarker = isFixedBusiness ? Building2 : mainCategoryData?.icon;
+        
         let markerIconUrl = '';
 
         if (isMapApiLoaded) {
-          const cacheKey = provider.services[0]?.category || 'default_marker';
+          const cacheKey = isFixedBusiness ? 'fixed_business_marker' : (provider.services[0]?.category || 'default_marker');
           if (categoryIconCache.current[cacheKey]) {
             markerIconUrl = categoryIconCache.current[cacheKey];
           } else {
-            const generatedUri = lucideIconToDataUri(mainCategoryLucideIcon, "#008080", 32); // Standard color
+            const markerColor = isFixedBusiness ? '#8A2BE2' : '#008080'; // BlueViolet for businesses, Teal for mobile
+            const generatedUri = lucideIconToDataUri(LucideIconForMarker, markerColor, 32);
             if (generatedUri) {
               markerIconUrl = generatedUri;
               categoryIconCache.current[cacheKey] = markerIconUrl;
             }
           }
         }
-
+        
         const markerIconConfig = markerIconUrl && typeof window !== 'undefined' && window.google?.maps ? {
           url: markerIconUrl,
           scaledSize: new window.google.maps.Size(32, 32),
@@ -413,7 +416,7 @@ export function MapDisplay() {
 
     // Browsing mode filtering
     let providersFilteredByLocationAndStatus = allProviders.filter(p => {
-      if (!p.estadoOnline || !p.ubicacionAproximada) return false;
+      if (!p.isAvailable || !p.ubicacionAproximada) return false;
       const distance = calculateDistance(
         userLocation.lat,
         userLocation.lng,

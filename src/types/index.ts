@@ -80,6 +80,7 @@ export interface Provider {
   blockReason?: string;
   blockDate?: number;
   membresiaExpira?: number;
+  type?: 'mobile' | 'fixed'; // Type to differentiate providers
 }
 
 export interface ChatMessage {
