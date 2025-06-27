@@ -64,3 +64,21 @@ export const postCommunityQuestion = async (
         throw error; // Re-lanzar para que el componente UI pueda manejarlo
     }
 };
+
+export const postCommunityAnswer = async (
+  preguntaId: string,
+  textoRespuesta: string,
+  prestadorRecomendadoId?: string,
+): Promise<{ success: boolean; message: string; }> => {
+  console.log('[CommunityService] Posting new community answer...');
+  const functions = getFunctions(app);
+  const postAnswerFunction = httpsCallable(functions, 'responderPreguntaComunidad');
+
+  try {
+    const result = await postAnswerFunction({ preguntaId, textoRespuesta, prestadorRecomendadoId });
+    return result.data as { success: boolean; message: string; };
+  } catch (error) {
+    console.error("Error calling 'responderPreguntaComunidad':", error);
+    throw error;
+  }
+};

@@ -306,6 +306,7 @@ export type ActivityLogAction =
   | "COMUNIDAD_AVISO_ELIMINADO"
   | "COMUNIDAD_NUEVO_AVISO_NOTIFICADO"
   | "COMUNIDAD_PREGUNTA_PUBLICADA"
+  | "COMUNIDAD_PREGUNTA_RESPUESTA"
   | "CITA_CREADA"
   | "CITA_CONFIRMADA_PRESTADOR"
   | "CITA_RECHAZADA_PRESTADOR"
@@ -3992,5 +3993,74 @@ export const publicarPreguntaComunidad = functions.https.onCall(async (data, con
   } catch (error) {
     functions.logger.error("Error al publicar pregunta en comunidad:", error);
     throw new functions.https.HttpsError("internal", "No se pudo publicar tu pregunta.", error);
+  }
+});
+
+
+export const responderPreguntaComunidad = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para responder.");
+  }
+  const idUsuarioResponde = context.auth.uid;
+  const { preguntaId, textoRespuesta, prestadorRecomendadoId } = data;
+
+  if (!preguntaId || typeof preguntaId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'preguntaId'.");
+  }
+  if (!textoRespuesta || typeof textoRespuesta !== "string" || textoRespuesta.length < 5) {
+    throw new functions.https.HttpsError("invalid-argument", "La respuesta debe tener al menos 5 caracteres.");
+  }
+  if (prestadorRecomendadoId && typeof prestadorRecomendadoId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "El ID del prestador recomendado es inválido.");
+  }
+
+  const preguntaRef = db.collection("preguntasComunidad").doc(preguntaId);
+
+  try {
+    const preguntaDoc = await preguntaRef.get();
+    if (!preguntaDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Pregunta con ID ${preguntaId} no encontrada.`);
+    }
+    const preguntaData = preguntaDoc.data() as PreguntaComunidadData;
+
+    const nuevaRespuesta: RespuestaPreguntaComunidadData = {
+      autorId: idUsuarioResponde,
+      texto: textoRespuesta,
+      fecha: admin.firestore.Timestamp.now(),
+      ...(prestadorRecomendadoId && { prestadorRecomendadoId }),
+    };
+
+    await preguntaRef.update({
+      respuestas: admin.firestore.FieldValue.arrayUnion(nuevaRespuesta)
+    });
+
+    await logActivity(
+      idUsuarioResponde,
+      "usuario",
+      "COMUNIDAD_PREGUNTA_RESPUESTA",
+      `Usuario ${idUsuarioResponde} respondió a la pregunta ${preguntaId}.`,
+      { tipo: "preguntaComunidad", id: preguntaId },
+      { texto: textoRespuesta, prestadorRecomendadoId }
+    );
+    
+    // Notify the original poster
+    if(preguntaData.idUsuario && preguntaData.idUsuario !== idUsuarioResponde) {
+      const autorDoc = await db.collection("usuarios").doc(idUsuarioResponde).get();
+      const nombreAutorRespuesta = autorDoc.exists() ? (autorDoc.data() as UserData)?.nombre || `Usuario ${idUsuarioResponde.substring(0,5)}` : "Alguien";
+
+      await sendNotification(
+          preguntaData.idUsuario,
+          "usuario",
+          "Nueva respuesta a tu pregunta",
+          `${nombreAutorRespuesta} ha respondido a tu pregunta en la comunidad: "${preguntaData.pregunta.substring(0, 40)}..."`,
+          { preguntaId: preguntaId, tipo: "NUEVA_RESPUESTA_COMUNIDAD" }
+      );
+    }
+
+    return { success: true, message: "Respuesta publicada exitosamente." };
+  } catch (error: any) {
+    functions.logger.error(`Error al responder pregunta ${preguntaId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "No se pudo publicar tu respuesta.", error);
   }
 });
