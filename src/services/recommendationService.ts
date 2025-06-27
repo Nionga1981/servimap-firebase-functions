@@ -3,6 +3,8 @@
 
 import type { Recomendacion, Provider } from '@/types';
 import { mockRecomendaciones, mockProviders } from '@/lib/mockData';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { app } from '@/lib/firebase';
 
 export interface RichRecomendacion extends Recomendacion {
   provider?: Provider;
@@ -29,3 +31,19 @@ export const getRehireRecommendations = async (userId: string): Promise<RichReco
   console.log(`[RecommendationService] Found ${richRecommendations.length} recommendations.`);
   return richRecommendations.sort((a, b) => b.fechaCreacion - a.fechaCreacion); // Sort by most recent
 };
+
+export const recomendarNegocio = async (idNegocio: string, comentarioOpcional?: string): Promise<{ success: boolean; message: string; recomendacionId: string; }> => {
+    console.log(`[RecommendationService] Recommending business ${idNegocio}`);
+    const functions = getFunctions(app);
+    const recomendarNegocioFunction = httpsCallable(functions, 'recomendarNegocio');
+
+    try {
+        const result = await recomendarNegocioFunction({ idNegocio, comentarioOpcional });
+        return result.data as { success: boolean; message: string; recomendacionId: string; };
+    } catch (error) {
+        console.error("Error calling 'recomendarNegocio':", error);
+        throw error;
+    }
+};
+
+    

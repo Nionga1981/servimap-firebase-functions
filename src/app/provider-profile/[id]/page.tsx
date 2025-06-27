@@ -19,8 +19,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from '@/hooks/use-toast';
-import { Star, MapPin, Briefcase, DollarSign, Clock, CalendarDays, Mail, ChevronLeft, ShoppingBag, Image as ImageIcon, Video, BookOpen, CheckCircle, X, Tag } from 'lucide-react';
+import { Star, MapPin, Briefcase, DollarSign, Clock, CalendarDays, Mail, ChevronLeft, ShoppingBag, Image as ImageIcon, Video, BookOpen, CheckCircle, X, Tag, Heart, Loader2 } from 'lucide-react';
 import { createServiceRequest, createImmediateRequest } from '@/services/requestService'; 
+import { recomendarNegocio } from '@/services/recommendationService';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -70,6 +72,10 @@ export default function ProviderProfilePage() {
 
   // Estado para la galería
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  
+  // Estado para recomendación
+  const [recommendationComment, setRecommendationComment] = useState('');
+  const [isRecommending, setIsRecommending] = useState(false);
 
 
   console.log(`[ProviderProfilePage] Rendering for providerId: ${providerId}`);
@@ -252,6 +258,28 @@ export default function ProviderProfilePage() {
       setIsSubmittingHourly(false);
     }
   };
+
+  const handleRecommendBusiness = async () => {
+    if (!provider) return;
+    setIsRecommending(true);
+    try {
+        const result = await recomendarNegocio(provider.id, recommendationComment);
+        toast({
+            title: "¡Recomendación Enviada!",
+            description: result.message,
+        });
+        setRecommendationComment('');
+    } catch (error: any) {
+        toast({
+            title: "Error al Recomendar",
+            description: error.message || "No se pudo enviar tu recomendación.",
+            variant: "destructive",
+        });
+    } finally {
+        setIsRecommending(false);
+    }
+  };
+
 
   if (!provider) {
     return (
@@ -629,16 +657,54 @@ export default function ProviderProfilePage() {
           {/* --- END: Sección Agendar Cita General --- */}
 
 
-          <CardFooter className="pt-6 border-t flex-col items-start gap-2">
-            <p className="text-sm font-semibold">Contactar al Prestador:</p>
-            <Button variant="outline" asChild>
-              <Link href={`/chat?providerId=${provider.id}`}>
-                <Mail className="mr-2 h-4 w-4" /> Enviar Mensaje (Demo Chat)
-              </Link>
-            </Button>
+          <CardFooter className="pt-6 border-t flex-col items-start gap-2 md:flex-row md:items-center md:justify-start">
+            <p className="text-sm font-semibold mb-2 md:mb-0 md:mr-4">Otras Acciones:</p>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" asChild>
+                <Link href={`/chat?providerId=${provider.id}`}>
+                  <Mail className="mr-2 h-4 w-4" /> Enviar Mensaje
+                </Link>
+              </Button>
+              
+              {provider.type === 'fixed' && (
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button variant="default" className="bg-rose-500 hover:bg-rose-600 text-white">
+                      <Heart className="mr-2 h-4 w-4" /> Recomendar Negocio
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Recomendar a {provider.name}</DialogTitle>
+                      <DialogDescription>
+                        Tu recomendación ayuda a otros a encontrar servicios de confianza. Puedes añadir un comentario si lo deseas.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                      <Textarea 
+                        placeholder="¿Por qué los recomiendas? (Opcional)"
+                        value={recommendationComment}
+                        onChange={(e) => setRecommendationComment(e.target.value)}
+                      />
+                    </div>
+                    <DialogFooter>
+                      <DialogClose asChild>
+                        <Button type="button" variant="secondary">Cancelar</Button>
+                      </DialogClose>
+                      <Button onClick={handleRecommendBusiness} disabled={isRecommending}>
+                        {isRecommending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Heart className="mr-2 h-4 w-4" />}
+                        {isRecommending ? "Enviando..." : "Confirmar Recomendación"}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              )}
+            </div>
           </CardFooter>
         </CardContent>
       </Card>
     </div>
   );
 }
+
+    

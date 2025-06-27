@@ -1,6 +1,3 @@
-
-
-
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -36,6 +33,14 @@ const BONO_UMBRALES: { [key: number]: number } = {
   5: 50,    // 5 referidos -> $50 bono
   10: 120,  // 10 referidos -> $120 bono
   25: 300,  // 25 referidos -> $300 bono
+};
+
+const SUBSCRIPTION_PLANS = {
+  'premium_monthly': {
+    price: 5.00,
+    commissionRate: 0.10, // 10%
+    durationDays: 30,
+  }
 };
 
 
@@ -139,7 +144,7 @@ export interface UserData {
   favoritos?: string[];
   codigoPropio?: string;
   referidos?: string[];
-  comisionesAcumuladas?: number;
+  gananciasTotales?: number;
   historialComisiones?: admin.firestore.FieldValue | HistorialComision[];
   isBlocked?: boolean;
   blockReason?: string;
@@ -173,6 +178,8 @@ export interface ProviderData {
   isBlocked?: boolean;
   blockReason?: string;
   blockDate?: admin.firestore.Timestamp;
+  membresiaExpira?: admin.firestore.Timestamp;
+  recommendationCount?: number;
 }
 
 export interface ServiceRequest {
@@ -299,6 +306,8 @@ export type ActivityLogAction =
   | "COMUNIDAD_AVISO_ACTUALIZADO"
   | "COMUNIDAD_AVISO_ELIMINADO"
   | "COMUNIDAD_NUEVO_AVISO_NOTIFICADO"
+  | "COMUNIDAD_PREGUNTA_PUBLICADA"
+  | "COMUNIDAD_PREGUNTA_RESPUESTA"
   | "CITA_CREADA"
   | "CITA_CONFIRMADA_PRESTADOR"
   | "CITA_RECHAZADA_PRESTADOR"
@@ -315,11 +324,13 @@ export type ActivityLogAction =
   | "CATEGORIA_APROBADA"
   | "CATEGORIA_RECHAZADA"
   | "EMBAJADOR_COMISION_PAGADA"
+  | "EMBAJADOR_COMISION_SUSCRIPCION"
   | "EMBAJADOR_BONO_ASIGNADO"
   | "RELACION_USUARIO_PRESTADOR_ACTUALIZADA"
   | "RECOMENDACION_RECONTRATACION_CREADA"
   | "RECONTRATACION_RECORDATORIO_ENVIADO"
   | "REPORTE_PROBLEMA_RESUELTO"
+  | "NEGOCIO_RECOMENDADO"
   | "ADMIN_CANCEL_SERVICE"
   | "ADMIN_FORCE_COMPLETE_SERVICE"
   | "ADMIN_BLOCK_USER"
@@ -628,13 +639,14 @@ export interface RelacionUsuarioPrestadorData {
 
 export interface RecomendacionData {
   id?: string;
+  type: 're-hire-suggestion' | 'endorsement';
   usuarioId: string;
   prestadorId: string;
-  categoria: string;
-  mensaje: string;
-  estado: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
   fechaCreacion: admin.firestore.Timestamp;
-  tipo?: 'sistema' | 'invita-prestador';
+  categoria?: string;
+  mensaje?: string;
+  estado?: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
+  suggestionSource?: 'sistema' | 'invita-prestador';
 }
 
 export interface MonitoredService {
@@ -670,6 +682,24 @@ export interface BannerPublicitario {
   regiones?: string[];
   idiomas?: string[];
   categorias?: string[];
+}
+
+export interface RespuestaPreguntaComunidadData {
+  id?: string;
+  autorId: string;
+  texto: string;
+  fecha: admin.firestore.Timestamp;
+  prestadorRecomendadoId?: string;
+}
+
+export interface PreguntaComunidadData {
+  id?: string;
+  idUsuario: string;
+  pregunta: string;
+  ubicacion?: ProviderLocation;
+  fecha: admin.firestore.Timestamp;
+  respuestas?: RespuestaPreguntaComunidadData[];
+  tags?: string[];
 }
 
 
@@ -779,6 +809,17 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
     if (!providerDoc.exists) {
         throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
     }
+
+    const providerData = providerDoc.data() as ProviderData;
+    if (providerData.isBlocked) {
+        throw new functions.https.HttpsError("failed-precondition", "Este proveedor no puede ser contratado en este momento.");
+    }
+    const userDoc = await db.collection("usuarios").doc(usuarioId).get();
+    const userData = userDoc.data() as UserData;
+    if (userData.isBlocked) {
+        throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes contratar servicios.");
+    }
+
 
     const nuevaSolicitudData: Omit<ServiceRequest, "id" | "serviceType"> & { serviceType: "fixed" } = {
         usuarioId: usuarioId,
@@ -1105,7 +1146,6 @@ export const logSolicitudServicioChanges = functions.firestore
                     };
                     
                     await embajadorRef.update({
-                        comisionesAcumuladas: admin.firestore.FieldValue.increment(comisionEmbajador),
                         historialComisiones: admin.firestore.FieldValue.arrayUnion(comisionHistoryEntry),
                     });
 
@@ -1217,6 +1257,15 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
       if (cotizacionData.usuarioId !== usuarioId) throw new functions.https.HttpsError("permission-denied", "No eres el propietario.");
       if (cotizacionData.estado !== "precio_propuesto_al_usuario") throw new functions.https.HttpsError("failed-precondition", `Estado inválido: ${cotizacionData.estado}`);
       if (typeof cotizacionData.precioSugerido !== "number" || cotizacionData.precioSugerido <= 0) throw new functions.https.HttpsError("failed-precondition", "Precio sugerido inválido.");
+
+      const prestadorDoc = await db.collection("prestadores").doc(cotizacionData.prestadorId).get();
+      if (!prestadorDoc.exists || prestadorDoc.data()?.isBlocked) {
+          throw new functions.https.HttpsError("failed-precondition", "Este proveedor no puede ser contratado en este momento.");
+      }
+      const usuarioDoc = await db.collection("usuarios").doc(usuarioId).get();
+      if (usuarioDoc.data()?.isBlocked) {
+          throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes contratar servicios.");
+      }
 
       const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
       const ahora = admin.firestore.Timestamp.now();
@@ -1686,6 +1735,11 @@ export const rateServiceByUser = functions.https.onCall(async (data, context) =>
       }
       const servicioData = servicioDoc.data() as ServiceRequest;
 
+      const userDoc = await db.collection("usuarios").doc(userId).get();
+      if (userDoc.data()?.isBlocked) {
+          throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes calificar servicios.");
+      }
+
       if (servicioData.usuarioId !== userId) {
         throw new functions.https.HttpsError("permission-denied", "No puedes calificar este servicio.");
       }
@@ -1898,6 +1952,12 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
         throw new functions.https.HttpsError("not-found", `Servicio con ID ${idServicio} no encontrado.`);
       }
       const servicioData = servicioDoc.data() as ServiceRequest;
+      
+      const userDoc = await db.collection("usuarios").doc(idUsuarioReportante).get();
+      if (userDoc.data()?.isBlocked) {
+          throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes reportar problemas.");
+      }
+
 
       const [idReportado, rolReportado] = rol === "usuario" ? [servicioData.prestadorId, "prestador"] : [servicioData.usuarioId, "usuario"];
       
@@ -3229,7 +3289,8 @@ export const generarRecomendacionesDeRecontratacion = functions.pubsub
                 mensaje: message,
                 estado: "pendiente",
                 fechaCreacion: admin.firestore.Timestamp.now(),
-                tipo: 'sistema',
+                type: 're-hire-suggestion',
+                suggestionSource: 'sistema',
             };
 
             const newRecomendacionRef = recomendacionesRef.doc();
@@ -3318,7 +3379,8 @@ export const enviarRecordatorioRecontratacion = functions.https.onCall(async (da
                 mensaje: mensaje,
                 estado: 'pendiente',
                 fechaCreacion: now,
-                tipo: 'invita-prestador',
+                type: 're-hire-suggestion',
+                suggestionSource: 'invita-prestador',
             };
             const recomendacionRef = db.collection("recomendaciones").doc();
             transaction.set(recomendacionRef, recomendacionData);
@@ -3809,3 +3871,285 @@ export const getBanners = functions.https.onCall(async(data, context) => {
         throw new functions.https.HttpsError("internal", "Error al obtener banners.");
     }
 });
+
+export const processSubscriptionPayment = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para procesar suscripciones.");
+    }
+    const { providerId, planId } = data;
+
+    if (!providerId || !planId || !SUBSCRIPTION_PLANS[planId as keyof typeof SUBSCRIPTION_PLANS]) {
+        throw new functions.https.HttpsError("invalid-argument", "Se requieren 'providerId' y 'planId' válidos.");
+    }
+
+    const plan = SUBSCRIPTION_PLANS[planId as keyof typeof SUBSCRIPTION_PLANS];
+    const now = admin.firestore.Timestamp.now();
+    const providerRef = db.collection("prestadores").doc(providerId);
+
+    try {
+        const providerDoc = await providerRef.get();
+        if (!providerDoc.exists) {
+            throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
+        }
+        const providerData = providerDoc.data() as ProviderData;
+
+        if (providerData.referidoPor) {
+            const embajadorUID = providerData.referidoPor;
+            const commissionAmount = plan.price * plan.commissionRate;
+
+            if (commissionAmount > 0) {
+                const comisionesRef = db.collection("comisiones");
+                const providerNameForCommission = providerData.nombre || `prestador ${providerId.substring(0, 5)}`;
+                
+                const comisionDataForCollection = {
+                    idUsuarioGanador: embajadorUID,
+                    tipo: "suscripcion",
+                    monto: commissionAmount,
+                    detalle: `Suscripción de @${providerNameForCommission}`,
+                    fecha: now,
+                    referenciaID: `sub_${providerId}_${now.toMillis()}`,
+                };
+                await comisionesRef.add(comisionDataForCollection);
+
+                const comisionHistoryEntry: HistorialComision = {
+                    servicioId: comisionDataForCollection.referenciaID,
+                    prestadorId: providerId,
+                    montoComision: commissionAmount,
+                    fecha: now,
+                };
+
+                const embajadorRef = db.collection("usuarios").doc(embajadorUID);
+                await embajadorRef.update({
+                    historialComisiones: admin.firestore.FieldValue.arrayUnion(comisionHistoryEntry),
+                });
+
+                await logActivity(
+                    "sistema",
+                    "sistema",
+                    "EMBAJADOR_COMISION_SUSCRIPCION",
+                    `Comisión de $${commissionAmount.toFixed(2)} pagada a embajador ${embajadorUID} por suscripción de ${providerId}.`,
+                    { tipo: "usuario", id: embajadorUID },
+                    { montoComision: commissionAmount, providerId, planId }
+                );
+            }
+        }
+        
+        const newExpirationDate = new Date(now.toDate().getTime() + plan.durationDays * 24 * 60 * 60 * 1000);
+        await providerRef.update({
+            isPremium: true,
+            membresiaExpira: admin.firestore.Timestamp.fromDate(newExpirationDate)
+        });
+
+        return { success: true, message: `Suscripción '${planId}' procesada para ${providerData.nombre}.` };
+
+    } catch (error: any) {
+        functions.logger.error(`Error procesando suscripción para ${providerId}:`, error);
+        if (error instanceof functions.https.HttpsError) throw error;
+        throw new functions.https.HttpsError("internal", "Error al procesar la suscripción.", error.message);
+    }
+});
+
+export const onCommissionCreated = functions.firestore
+  .document("comisiones/{commissionId}")
+  .onCreate(async (snapshot, context) => {
+    const commissionData = snapshot.data();
+    if (!commissionData) {
+      functions.logger.error("No data found in commission document.", {commissionId: context.params.commissionId});
+      return null;
+    }
+
+    const { idUsuarioGanador, monto } = commissionData;
+
+    if (!idUsuarioGanador || typeof monto !== "number" || monto <= 0) {
+      functions.logger.error("Commission document is missing idUsuarioGanador or has invalid monto.", {commissionId: context.params.commissionId, data: commissionData});
+      return null;
+    }
+
+    const userRef = db.collection("usuarios").doc(idUsuarioGanador);
+
+    try {
+      await userRef.update({
+        gananciasTotales: admin.firestore.FieldValue.increment(monto),
+      });
+      functions.logger.info(`Updated gananciasTotales for user ${idUsuarioGanador} by ${monto}.`);
+      
+      await logActivity(
+        "sistema",
+        "sistema",
+        "EMBAJADOR_COMISION_PAGADA",
+        `$${monto.toFixed(2)} agregados a las ganancias totales del embajador ${idUsuarioGanador} desde la comisión ${context.params.commissionId}.`,
+        { tipo: "usuario", id: idUsuarioGanador },
+        { monto, commissionId: context.params.commissionId }
+      );
+
+      return null;
+    } catch (error) {
+      functions.logger.error(`Failed to update gananciasTotales for user ${idUsuarioGanador}.`, { error: error });
+      return null;
+    }
+  });
+
+
+export const publicarPreguntaComunidad = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const idUsuario = context.auth.uid;
+  const { pregunta, ubicacion } = data;
+
+  if (!pregunta || typeof pregunta !== "string" || pregunta.length < 10) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere una pregunta válida (mínimo 10 caracteres).");
+  }
+  if (!ubicacion || typeof ubicacion.lat !== 'number' || typeof ubicacion.lng !== 'number') {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere una ubicación válida.");
+  }
+
+  const nuevaPregunta: PreguntaComunidadData = {
+    idUsuario,
+    pregunta,
+    ubicacion,
+    fecha: admin.firestore.Timestamp.now(),
+    respuestas: [],
+    // A future improvement could be to use AI to generate tags from the question
+  };
+  
+  try {
+    const preguntaRef = await db.collection("preguntasComunidad").add(nuevaPregunta);
+
+    await logActivity(
+      idUsuario,
+      "usuario",
+      "COMUNIDAD_PREGUNTA_PUBLICADA",
+      `Usuario ${idUsuario} publicó una nueva pregunta en la comunidad: "${pregunta.substring(0, 50)}..."`,
+      { tipo: "preguntaComunidad", id: preguntaRef.id },
+      { pregunta: pregunta }
+    );
+    
+    return { success: true, message: "Pregunta publicada exitosamente.", preguntaId: preguntaRef.id };
+  } catch (error) {
+    functions.logger.error("Error al publicar pregunta en comunidad:", error);
+    throw new functions.https.HttpsError("internal", "No se pudo publicar tu pregunta.", error);
+  }
+});
+
+
+export const responderPreguntaComunidad = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para responder.");
+  }
+  const idUsuarioResponde = context.auth.uid;
+  const { preguntaId, textoRespuesta, prestadorRecomendadoId } = data;
+
+  if (!preguntaId || typeof preguntaId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'preguntaId'.");
+  }
+  if (!textoRespuesta || typeof textoRespuesta !== "string" || textoRespuesta.length < 5) {
+    throw new functions.https.HttpsError("invalid-argument", "La respuesta debe tener al menos 5 caracteres.");
+  }
+  if (prestadorRecomendadoId && typeof prestadorRecomendadoId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "El ID del prestador recomendado es inválido.");
+  }
+
+  const preguntaRef = db.collection("preguntasComunidad").doc(preguntaId);
+
+  try {
+    const preguntaDoc = await preguntaRef.get();
+    if (!preguntaDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Pregunta con ID ${preguntaId} no encontrada.`);
+    }
+    const preguntaData = preguntaDoc.data() as PreguntaComunidadData;
+
+    const nuevaRespuesta: RespuestaPreguntaComunidadData = {
+      autorId: idUsuarioResponde,
+      texto: textoRespuesta,
+      fecha: admin.firestore.Timestamp.now(),
+      ...(prestadorRecomendadoId && { prestadorRecomendadoId }),
+    };
+
+    await preguntaRef.update({
+      respuestas: admin.firestore.FieldValue.arrayUnion(nuevaRespuesta)
+    });
+
+    await logActivity(
+      idUsuarioResponde,
+      "usuario",
+      "COMUNIDAD_PREGUNTA_RESPUESTA",
+      `Usuario ${idUsuarioResponde} respondió a la pregunta ${preguntaId}.`,
+      { tipo: "preguntaComunidad", id: preguntaId },
+      { texto: textoRespuesta, prestadorRecomendadoId }
+    );
+    
+    // Notify the original poster
+    if(preguntaData.idUsuario && preguntaData.idUsuario !== idUsuarioResponde) {
+      const autorDoc = await db.collection("usuarios").doc(idUsuarioResponde).get();
+      const nombreAutorRespuesta = autorDoc.exists() ? (autorDoc.data() as UserData)?.nombre || `Usuario ${idUsuarioResponde.substring(0,5)}` : "Alguien";
+
+      await sendNotification(
+          preguntaData.idUsuario,
+          "usuario",
+          "Nueva respuesta a tu pregunta",
+          `${nombreAutorRespuesta} ha respondido a tu pregunta en la comunidad: "${preguntaData.pregunta.substring(0, 40)}..."`,
+          { preguntaId: preguntaId, tipo: "NUEVA_RESPUESTA_COMUNIDAD" }
+      );
+    }
+
+    return { success: true, message: "Respuesta publicada exitosamente." };
+  } catch (error: any) {
+    functions.logger.error(`Error al responder pregunta ${preguntaId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "No se pudo publicar tu respuesta.", error);
+  }
+});
+
+export const recomendarNegocio = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para recomendar un negocio.");
+    }
+    const idUsuario = context.auth.uid;
+    const { idNegocio, comentarioOpcional } = data;
+
+    if (!idNegocio || typeof idNegocio !== 'string') {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idNegocio'.");
+    }
+
+    const negocioRef = db.collection("prestadores").doc(idNegocio);
+    const recomendacionRef = db.collection("recomendaciones").doc();
+    const batch = db.batch();
+
+    try {
+        const negocioDoc = await negocioRef.get();
+        if (!negocioDoc.exists) {
+            throw new functions.https.HttpsError("not-found", `El negocio con ID ${idNegocio} no fue encontrado.`);
+        }
+
+        const nuevaRecomendacion: RecomendacionData = {
+            type: 'endorsement',
+            usuarioId: idUsuario,
+            prestadorId: idNegocio,
+            fechaCreacion: admin.firestore.Timestamp.now(),
+            ...(comentarioOpcional && { mensaje: comentarioOpcional }),
+        };
+        
+        batch.set(recomendacionRef, nuevaRecomendacion);
+        batch.update(negocioRef, { recommendationCount: admin.firestore.FieldValue.increment(1) });
+        
+        await batch.commit();
+
+        await logActivity(
+            idUsuario,
+            "usuario",
+            "NEGOCIO_RECOMENDADO",
+            `Usuario ${idUsuario} recomendó al negocio ${idNegocio}.`,
+            { tipo: "recomendacionNegocio", id: recomendacionRef.id },
+            { idNegocio, comentario: comentarioOpcional || "Sin comentario" }
+        );
+
+        return { success: true, message: "¡Gracias por tu recomendación!", recomendacionId: recomendacionRef.id };
+    } catch (error: any) {
+        functions.logger.error(`Error al recomendar negocio ${idNegocio} por usuario ${idUsuario}:`, error);
+        if (error instanceof functions.https.HttpsError) throw error;
+        throw new functions.https.HttpsError("internal", "Error al procesar la recomendación.", error.message);
+    }
+});
+
+    

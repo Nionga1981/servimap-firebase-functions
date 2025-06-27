@@ -81,6 +81,7 @@ export interface Provider {
   blockDate?: number;
   membresiaExpira?: number;
   type?: 'mobile' | 'fixed'; // Type to differentiate providers
+  recommendationCount?: number;
 }
 
 export interface ChatMessage {
@@ -501,6 +502,7 @@ export type ActivityLogAction =
   | 'RELACION_USUARIO_PRESTADOR_ACTUALIZADA'
   | 'RECOMENDACION_RECONTRATACION_CREADA'
   | 'RECONTRATACION_RECORDATORIO_ENVIADO'
+  | 'NEGOCIO_RECOMENDADO'
   | 'ADMIN_CANCEL_SERVICE'
   | 'ADMIN_FORCE_COMPLETE_SERVICE'
   | 'ADMIN_BLOCK_USER'
@@ -522,7 +524,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad' | 'categoria_propuesta' | 'relacionUsuarioPrestador' | 'recomendacion' | 'preguntaComunidad';
+    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad' | 'categoria_propuesta' | 'relacionUsuarioPrestador' | 'recomendacion' | 'preguntaComunidad' | 'recomendacionNegocio';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -842,13 +844,14 @@ export interface RelacionUsuarioPrestador {
 
 export interface Recomendacion {
   id?: string;
+  type: 're-hire-suggestion' | 'endorsement';
   usuarioId: string;
   prestadorId: string;
-  categoria: string;
-  mensaje: string;
-  estado: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
-  fechaCreacion: number; // timestamp
-  tipo?: 'sistema' | 'invita-prestador';
+  fechaCreacion: number;
+  categoria?: string;
+  mensaje?: string;
+  estado?: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
+  suggestionSource?: 'sistema' | 'invita-prestador';
 }
 
 export interface PastClientInfo {
@@ -901,4 +904,6 @@ export interface PreguntaComunidad {
   nombreUsuario?: string;
   avatarUsuario?: string;
 }
+    
+
     
