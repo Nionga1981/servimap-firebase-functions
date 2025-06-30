@@ -1,7 +1,7 @@
 
 
 import * as functions from "firebase-functions";
-import * * as admin from "firebase-admin";
+import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
 
 if (admin.apps.length === 0) {
@@ -3143,7 +3143,6 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
     }
 
     const providerRef = db.collection("prestadores").doc(providerId);
-    const bonificacionesRef = db.collection("bonificaciones");
 
     try {
         const providerDoc = await providerRef.get();
@@ -3173,11 +3172,12 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
                 const referrerUID = referrerDoc.id;
 
                 if (referrerData.isBlocked) {
-                    functions.logger.warn(`Intento de registro con código de invitación bloqueado. Embajador UID: ${referrerUID}, Código: ${codigoInvitacion}.`);
+                    functions.logger.warn(`Intento de registro con código de embajador bloqueado. Embajador UID: ${referrerUID}, Código: ${codigoInvitacion}.`);
                     await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Intento de registro con código de invitación bloqueado (${codigoInvitacion}).`, {tipo: "prestador", id: providerId});
                 } else {
                     newProviderData.referidoPor = referrerUID;
                     
+                    const bonificacionesRef = db.collection("bonificaciones");
                     const updatesReferrer: Partial<UserData> = {
                         referidos: admin.firestore.FieldValue.arrayUnion(providerId) as any,
                         balanceBonos: admin.firestore.FieldValue.increment(BONO_POR_AFILIACION) as any,
@@ -4372,5 +4372,7 @@ export const cerrarServiciosAntiguos = functions.pubsub.schedule("every 24 hours
 });
 
 
+
+    
 
     
