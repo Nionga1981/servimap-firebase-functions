@@ -22,19 +22,13 @@ const COMISION_CANCELACION_TARDIA_PORCENTAJE = 0.10; // 10%
 const MAX_ACTIVE_COMMUNITY_NOTICES = 3;
 const DOS_HORAS_EN_MS = 2 * 60 * 60 * 1000;
 const TREINTA_MINUTOS_EN_MS = 30 * 60 * 1000;
+const BONO_POR_AFILIACION = 50;
 
 // --- CONSTANTS FOR CANCELLATION PENALTIES (CITAS) ---
 const PENALIZACION_CLIENTE_CITA_MAS_2H_PCT = 0.10; // 10% of service total, all to platform
 const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_TOTAL = 0.25; // 25% of service total
 const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PLATAFORMA = 0.10; // 10% of service total to platform
 const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PRESTADOR = 0.15; // 15% of service total to provider
-
-// --- CONSTANTS FOR AMBASSADOR BONUSES ---
-const BONO_UMBRALES: { [key: number]: number } = {
-  5: 50,    // 5 referidos -> $50 bono
-  10: 120,  // 10 referidos -> $120 bono
-  25: 300,  // 25 referidos -> $300 bono
-};
 
 const SUBSCRIPTION_PLANS = {
   'premium_monthly': {
@@ -351,11 +345,13 @@ export interface BonificacionData {
     id?: string;
     usuarioId: string; // ID del embajador
     monto: number;
-    motivo: 'bono_por_afiliaciones' | 'otro';
+    motivo: 'bono_por_afiliaciones' | 'otro' | 'afiliacion_exitosa';
     fecha: admin.firestore.Timestamp;
     origen: 'sistema' | 'admin';
     detalles?: {
       umbralAlcanzado?: number;
+      afiliadoId?: string;
+      origenTexto?: string;
     };
 }
 
@@ -3133,34 +3129,34 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
                 } else {
                     newProviderData.referidoPor = referrerUID;
                     
-                    const referidosActuales = referrerData.referidos || [];
-                    const nuevoTotalReferidos = referidosActuales.length + 1;
-                    const bonosRecibidos = referrerData.bonosRecibidos || {};
-
                     const updatesReferrer: Partial<UserData> = {
-                      referidos: admin.firestore.FieldValue.arrayUnion(providerId) as any,
+                        referidos: admin.firestore.FieldValue.arrayUnion(providerId) as any,
+                        balanceBonos: admin.firestore.FieldValue.increment(BONO_POR_AFILIACION) as any,
                     };
-                    
-                    // Lógica de Bonificación por Hitos
-                    const bonoPorEsteHito = BONO_UMBRALES[nuevoTotalReferidos];
-                    if (bonoPorEsteHito && !bonosRecibidos[nuevoTotalReferidos]) {
-                        updatesReferrer.balanceBonos = admin.firestore.FieldValue.increment(bonoPorEsteHito) as any;
-                        updatesReferrer.bonosRecibidos = { ...bonosRecibidos, [nuevoTotalReferidos]: true };
-                        
-                        const nuevaBonificacion: Omit<BonificacionData, "id"> = {
-                            usuarioId: referrerUID,
-                            monto: bonoPorEsteHito,
-                            motivo: 'bono_por_afiliaciones',
-                            fecha: now,
-                            origen: 'sistema',
-                            detalles: { umbralAlcanzado: nuevoTotalReferidos },
-                        };
-                        batch.set(bonificacionesRef.doc(), nuevaBonificacion);
-                        await logActivity("sistema", "sistema", "EMBAJADOR_BONO_ASIGNADO", `Bono de $${bonoPorEsteHito} asignado a embajador ${referrerUID} por alcanzar ${nuevoTotalReferidos} referidos.`, { tipo: "usuario", id: referrerUID });
-                    }
-                    
                     batch.update(referrerDoc.ref, updatesReferrer);
-                    await logActivity("sistema", "sistema", "PROVEEDOR_REGISTRADO", `Proveedor ${providerId} registrado con código de invitación válido de ${referrerUID}.`, {tipo: "prestador", id: providerId}, {referidoPor: referrerUID, codigo: codigoInvitacion});
+
+                    const nuevaBonificacionData: Omit<BonificacionData, "id"> = {
+                        usuarioId: referrerUID,
+                        monto: BONO_POR_AFILIACION,
+                        motivo: 'afiliacion_exitosa',
+                        fecha: now,
+                        origen: 'sistema',
+                        detalles: {
+                            origenTexto: "Bonificación por referir a un nuevo usuario",
+                            afiliadoId: providerId,
+                        },
+                    };
+                    const nuevaBonificacionRef = bonificacionesRef.doc();
+                    batch.set(nuevaBonificacionRef, nuevaBonificacionData);
+                    
+                    await logActivity(
+                        "sistema",
+                        "sistema",
+                        "EMBAJADOR_BONO_ASIGNADO",
+                        `Bono de $${BONO_POR_AFILIACION} asignado a embajador ${referrerUID} por nueva afiliación de ${providerId}.`,
+                        { tipo: "usuario", id: referrerUID },
+                        { monto: BONO_POR_AFILIACION, afiliadoId: providerId, bonificacionId: nuevaBonificacionRef.id }
+                    );
                 }
             } else {
                 functions.logger.warn(`Código de invitación "${codigoInvitacion}" no encontrado. Registrando proveedor sin referencia.`);
@@ -3309,14 +3305,14 @@ export const generarRecomendacionesDeRecontratacion = functions.pubsub
             const message = `¿Necesitas ayuda de nuevo con ${categoriaInfo.name}? Podrías volver a contratar a ${providerName}.`;
 
             const recomendacionData: Omit<RecomendacionData, "id"> = {
+                type: 're-hire-suggestion',
+                suggestionSource: 'sistema',
                 usuarioId: relacion.usuarioId,
                 prestadorId: relacion.prestadorId,
                 categoria: periodicCategory,
                 mensaje: message,
                 estado: "pendiente",
                 fechaCreacion: admin.firestore.Timestamp.now(),
-                type: 're-hire-suggestion',
-                suggestionSource: 'sistema',
             };
 
             const newRecomendacionRef = recomendacionesRef.doc();
@@ -4236,4 +4232,5 @@ export const onTransactionCreate = functions.firestore
     }
   });
     
+
 
