@@ -281,7 +281,8 @@ export interface ChatData {
 }
 
 export type ActivityLogAction =
-  | "CAMBIO_ESTADO_SOLICITUD" | "CALIFICACION_USUARIO" | "CALIFICACION_PRESTADOR"
+  | "CAMBIO_ESTADO_SOLICITUD" | "SERVICIO_FINALIZADO" | "SERVICIO_CANCELADO" | "SERVICIO_EN_DISPUTA"
+  | "CALIFICACION_USUARIO" | "CALIFICACION_PRESTADOR"
   | "SOLICITUD_CREADA" | "PAGO_RETENIDO" | "PAGO_LIBERADO"
   | "GARANTIA_ACTIVADA" | "GARANTIA_APROBADA" | "GARANTIA_RECHAZADA"
   | "INICIO_SESION" | "CIERRE_SESION"
@@ -1021,9 +1022,35 @@ export const logSolicitudServicioChanges = functions.firestore
 
 
     if (beforeData.status !== afterData.status) {
-      const descLog = `Solicitud ${solicitudId} cambió de ${beforeData.status} a ${afterData.status} por ${actorRol} ${actorId}.`;
-      await logActivity(actorId, actorRol, "CAMBIO_ESTADO_SOLICITUD", descLog, {tipo: "solicitud_servicio", id: solicitudId}, {estadoAnterior: beforeData.status, estadoNuevo: afterData.status});
-      if (ESTADOS_FINALES_SERVICIO.includes(afterData.status as EstadoFinalServicio) && !ESTADOS_FINALES_SERVICIO.includes(beforeData.status as EstadoFinalServicio)) {
+      let logAction: ActivityLogAction = "CAMBIO_ESTADO_SOLICITUD";
+      let logDescription = `Solicitud ${solicitudId} cambió de ${beforeData.status} a ${afterData.status} por ${actorRol} ${actorId}.`;
+
+      const newStatus = afterData.status as ServiceRequestStatus;
+      const isFinalState = ESTADOS_FINALES_SERVICIO.includes(newStatus as EstadoFinalServicio);
+      const isCancelledState = newStatus.startsWith("cancelada_") || newStatus === "rechazada_prestador";
+      const isDisputeState = newStatus === "en_disputa";
+
+      if (isFinalState && !isCancelledState) {
+        logAction = "SERVICIO_FINALIZADO";
+        logDescription = `Servicio ${solicitudId} finalizado por ${actorRol}. Estado final: ${newStatus}.`;
+      } else if (isCancelledState) {
+        logAction = "SERVICIO_CANCELADO";
+        logDescription = `Servicio ${solicitudId} cancelado por ${actorRol}. Estado: ${newStatus}.`;
+      } else if (isDisputeState) {
+        logAction = "SERVICIO_EN_DISPUTA";
+        logDescription = `Servicio ${solicitudId} puesto en disputa por ${actorRol}.`;
+      }
+
+      await logActivity(
+        actorId,
+        actorRol,
+        logAction,
+        logDescription,
+        {tipo: "solicitud_servicio", id: solicitudId},
+        {estadoAnterior: beforeData.status, estadoNuevo: afterData.status}
+      );
+
+      if (isFinalState && !ESTADOS_FINALES_SERVICIO.includes(beforeData.status as EstadoFinalServicio)) {
         updatesToServiceRequest.fechaFinalizacionEfectiva = now;
       }
     }
@@ -1144,7 +1171,6 @@ export const logSolicitudServicioChanges = functions.firestore
             const providerData = providerDoc.data() as ProviderData;
             if (providerData.referidoPor) {
                 const embajadorUID = providerData.referidoPor;
-                const embajadorRef = db.collection("usuarios").doc(embajadorUID);
                 const comisionAppMonto = detallesFinancierosNuevos.comisionAppMonto || 0;
                 const comisionEmbajador = comisionAppMonto * PORCENTAJE_COMISION_EMBAJADOR;
 
@@ -4210,3 +4236,4 @@ export const onTransactionCreate = functions.firestore
     }
   });
     
+
