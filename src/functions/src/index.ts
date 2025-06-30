@@ -1,7 +1,7 @@
 
 
 import * as functions from "firebase-functions";
-import * as admin from "firebase-admin";
+import * * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
 
 if (admin.apps.length === 0) {
@@ -1058,6 +1058,10 @@ export const logSolicitudServicioChanges = functions.firestore
         {tipo: "solicitud_servicio", id: solicitudId},
         {estadoAnterior: beforeData.status, estadoNuevo: afterData.status}
       );
+      
+      if (afterData.status === "completado_por_usuario") {
+        updatesToServiceRequest.userConfirmedCompletionAt = now.toMillis();
+      }
 
       if (isFinalState && !ESTADOS_FINALES_SERVICIO.includes(beforeData.status as EstadoFinalServicio)) {
         updatesToServiceRequest.fechaFinalizacionEfectiva = now;
@@ -1225,7 +1229,7 @@ export const logSolicitudServicioChanges = functions.firestore
       }
     }
 
-    if (Object.keys(updatesToServiceRequest).length > 1 || updatesToServiceRequest.fechaFinalizacionEfectiva || updatesToServiceRequest.detallesFinancieros) {
+    if (Object.keys(updatesToServiceRequest).length > 1 || updatesToServiceRequest.fechaFinalizacionEfectiva || updatesToServiceRequest.detallesFinancieros || updatesToServiceRequest.userConfirmedCompletionAt) {
       await change.after.ref.update(updatesToServiceRequest);
     }
 
@@ -4147,6 +4151,25 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
   }
 });
 
+export const onNewCommunityResponse = functions.firestore
+  .document('respuestasComunidad/{respuestaId}')
+  .onCreate(async (snap, context) => {
+    const respuestaData = snap.data() as RespuestaPreguntaComunidadData;
+    const { preguntaId } = respuestaData;
+
+    if (!preguntaId) {
+      console.log('La respuesta no tiene preguntaId. Saliendo.');
+      return null;
+    }
+
+    const preguntaRef = db.collection('preguntasComunidad').doc(preguntaId);
+    
+    // Incrementar el contador de respuestas
+    return preguntaRef.update({
+      respuestasCount: admin.firestore.FieldValue.increment(1)
+    });
+});
+
 export const recomendarNegocio = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para recomendar un negocio.");
@@ -4158,17 +4181,10 @@ export const recomendarNegocio = functions.https.onCall(async (data, context) =>
         throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idNegocio'.");
     }
 
-    const negocioRef = db.collection("prestadores").doc(idNegocio);
     const recomendacionRef = db.collection("recomendaciones").doc();
-    const batch = db.batch();
 
     try {
-        const negocioDoc = await negocioRef.get();
-        if (!negocioDoc.exists) {
-            throw new functions.https.HttpsError("not-found", `El negocio con ID ${idNegocio} no fue encontrado.`);
-        }
-
-        const nuevaRecomendacion: RecomendacionData = {
+        const nuevaRecomendacion: Omit<RecomendacionData, "id"> = {
             type: 'endorsement',
             usuarioId: idUsuario,
             prestadorId: idNegocio,
@@ -4176,10 +4192,7 @@ export const recomendarNegocio = functions.https.onCall(async (data, context) =>
             ...(comentarioOpcional && { mensaje: comentarioOpcional }),
         };
         
-        batch.set(recomendacionRef, nuevaRecomendacion);
-        // The recommendation count is now handled by the `onRecomendacionCreate` trigger.
-        
-        await batch.commit();
+        await recomendacionRef.set(nuevaRecomendacion);
 
         await logActivity(
             idUsuario,
@@ -4209,7 +4222,6 @@ export const onRecomendacionCreate = functions.firestore
       return null;
     }
 
-    // Only increment count for user endorsements, not system-generated re-hire suggestions
     if (recomendacionData.type !== 'endorsement') {
         functions.logger.info(`[onRecomendacionCreate] Recommendation ${recomendacionId} is of type '${recomendacionData.type}', not 'endorsement'. No count increment needed.`);
         return null;
@@ -4225,9 +4237,9 @@ export const onRecomendacionCreate = functions.firestore
     const prestadorRef = db.collection("prestadores").doc(prestadorId);
 
     try {
-      await prestadorRef.update({
+      await prestadorRef.set({ // Use set with merge to create the field if it doesn't exist
         recommendationCount: admin.firestore.FieldValue.increment(1),
-      });
+      }, { merge: true });
       functions.logger.info(`[onRecomendacionCreate] Incremented recommendationCount for provider ${prestadorId} due to new recommendation ${recomendacionId}.`);
     } catch (error) {
       functions.logger.error(`[onRecomendacionCreate] Failed to increment recommendationCount for provider ${prestadorId}.`, { error: error });
@@ -4307,9 +4319,58 @@ export const onTransactionCreate = functions.firestore
   });
     
 
+export const cerrarServiciosAntiguos = functions.pubsub.schedule("every 24 hours").onRun(async (context) => {
+    const now = admin.firestore.Timestamp.now();
+    const plazoMillis = PLAZO_REPORTE_DIAS * 24 * 60 * 60 * 1000;
+    const limiteTimestamp = now.toMillis() - plazoMillis;
+
+    const serviciosQuery = db.collection("solicitudes_servicio")
+        .where("status", "==", "completado_por_usuario")
+        .where("userConfirmedCompletionAt", "<=", limiteTimestamp);
+
+    const snapshot = await serviciosQuery.get();
+
+    if (snapshot.empty) {
+        functions.logger.log("[CerrarServicios] No hay servicios antiguos para cerrar.");
+        return null;
+    }
+
+    const batch = db.batch();
+    let processedCount = 0;
+
+    for (const doc of snapshot.docs) {
+        const servicio = doc.data() as ServiceRequest;
+        if (servicio.calificacionUsuario) {
+            // Si por alguna razón fue calificado pero el estado no se actualizó, lo ignoramos.
+            continue;
+        }
+
+        await logActivity(
+            "sistema",
+            "sistema",
+            "CAMBIO_ESTADO_SOLICITUD", // Reusing an existing action type
+            `Servicio ${doc.id} cerrado automáticamente por falta de calificación tras ${PLAZO_REPORTE_DIAS} días.`,
+            {tipo: "solicitud_servicio", id: doc.id},
+            {estadoAnterior: servicio.status, estadoNuevo: "cerrado_automaticamente"}
+        );
+
+        batch.update(doc.ref, {
+            status: "cerrado_automaticamente",
+            updatedAt: now,
+            actorDelCambioId: "sistema",
+            actorDelCambioRol: "sistema"
+        });
+        processedCount++;
+    }
+
+    if (processedCount > 0) {
+        await batch.commit();
+        functions.logger.info(`[CerrarServicios] Se cerraron automáticamente ${processedCount} servicios.`);
+    }
+
+    return null;
+});
 
 
-
-    
 
     
