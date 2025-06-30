@@ -1,4 +1,5 @@
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -686,7 +687,6 @@ export interface BannerPublicitario {
 
 export interface RespuestaPreguntaComunidadData {
   id?: string;
-  preguntaId: string;
   autorId: string;
   texto: string;
   fecha: admin.firestore.Timestamp;
@@ -699,8 +699,7 @@ export interface PreguntaComunidadData {
   pregunta: string;
   ubicacion?: ProviderLocation;
   fecha: admin.firestore.Timestamp;
-  respuestasRefs?: admin.firestore.DocumentReference[];
-  respuestasCount?: number;
+  respuestas?: RespuestaPreguntaComunidadData[];
   tags?: string[];
 }
 
@@ -3126,7 +3125,7 @@ export const registerProviderProfile = functions.https.onCall(async (data, conte
                 const referrerUID = referrerDoc.id;
 
                 if (referrerData.isBlocked) {
-                    functions.logger.warn(`Intento de registro con código de embajador bloqueado. Embajador UID: ${referrerUID}, Código: ${codigoInvitacion}.`);
+                    functions.logger.warn(`Intento de registro con código de invitación bloqueado. Embajador UID: ${referrerUID}, Código: ${codigoInvitacion}.`);
                     await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Intento de registro con código de invitación bloqueado (${codigoInvitacion}).`, {tipo: "prestador", id: providerId});
                 } else {
                     newProviderData.referidoPor = referrerUID;
@@ -3934,15 +3933,6 @@ export const processSubscriptionPayment = functions.https.onCall(async (data, co
                     referenciaID: `sub_${providerId}_${now.toMillis()}`,
                 };
                 await comisionesRef.add(comisionDataForCollection);
-                
-                await logActivity(
-                    "sistema",
-                    "sistema",
-                    "EMBAJADOR_COMISION_SUSCRIPCION",
-                    `Comisión de $${commissionAmount.toFixed(2)} pagada a embajador ${embajadorUID} por suscripción de ${providerId}.`,
-                    { tipo: "usuario", id: embajadorUID },
-                    { montoComision: commissionAmount, providerId, planId }
-                );
             }
         }
         
@@ -4016,12 +4006,12 @@ export const publicarPreguntaComunidad = functions.https.onCall(async (data, con
     throw new functions.https.HttpsError("invalid-argument", "Se requiere una ubicación válida.");
   }
 
-  const nuevaPregunta: Omit<PreguntaComunidadData, "id"> = {
+  const nuevaPregunta: PreguntaComunidadData = {
     idUsuario,
     pregunta,
     ubicacion,
     fecha: admin.firestore.Timestamp.now(),
-    respuestasCount: 0,
+    respuestas: [],
     // A future improvement could be to use AI to generate tags from the question
   };
   
@@ -4071,23 +4061,24 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
     }
     const preguntaData = preguntaDoc.data() as PreguntaComunidadData;
 
-    const nuevaRespuesta: Omit<RespuestaPreguntaComunidadData, "id"> = {
-      preguntaId: preguntaId,
+    const nuevaRespuesta: RespuestaPreguntaComunidadData = {
       autorId: idUsuarioResponde,
       texto: textoRespuesta,
       fecha: admin.firestore.Timestamp.now(),
       ...(prestadorRecomendadoId && { prestadorRecomendadoId }),
     };
 
-    const respuestaRef = await db.collection("respuestasComunidad").add(nuevaRespuesta);
+    await preguntaRef.update({
+      respuestas: admin.firestore.FieldValue.arrayUnion(nuevaRespuesta)
+    });
 
     await logActivity(
       idUsuarioResponde,
       "usuario",
       "COMUNIDAD_PREGUNTA_RESPUESTA",
-      `Usuario ${idUsuarioResponde} respondió a la pregunta ${preguntaId}. Respuesta ID: ${respuestaRef.id}`,
+      `Usuario ${idUsuarioResponde} respondió a la pregunta ${preguntaId}.`,
       { tipo: "preguntaComunidad", id: preguntaId },
-      { texto: textoRespuesta, prestadorRecomendadoId, respuestaId: respuestaRef.id }
+      { texto: textoRespuesta, prestadorRecomendadoId }
     );
     
     // Notify the original poster
@@ -4112,36 +4103,6 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
   }
 });
 
-export const onNewCommunityResponse = functions.firestore
-  .document("respuestasComunidad/{respuestaId}")
-  .onCreate(async (snapshot, context) => {
-    const respuestaData = snapshot.data();
-    if (!respuestaData) {
-      functions.logger.error(`[onNewCommunityResponse] No data found in new response doc: ${context.params.respuestaId}`);
-      return null;
-    }
-
-    const { preguntaId } = respuestaData as { preguntaId: string };
-    if (!preguntaId) {
-      functions.logger.error(`[onNewCommunityResponse] New response ${context.params.respuestaId} is missing 'preguntaId'.`);
-      return null;
-    }
-
-    const preguntaRef = db.collection("preguntasComunidad").doc(preguntaId);
-
-    try {
-      await preguntaRef.update({
-        respuestasRefs: admin.firestore.FieldValue.arrayUnion(snapshot.ref),
-        respuestasCount: admin.firestore.FieldValue.increment(1),
-      });
-      functions.logger.info(`[onNewCommunityResponse] Question ${preguntaId} updated with new response ref ${context.params.respuestaId}`);
-    } catch (error) {
-      functions.logger.error(`[onNewCommunityResponse] Failed to update question ${preguntaId}:`, error);
-    }
-    
-    return null;
-  });
-
 export const recomendarNegocio = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para recomendar un negocio.");
@@ -4155,7 +4116,6 @@ export const recomendarNegocio = functions.https.onCall(async (data, context) =>
 
     const negocioRef = db.collection("prestadores").doc(idNegocio);
     const recomendacionRef = db.collection("recomendaciones").doc();
-    const batch = db.batch();
 
     try {
         const negocioDoc = await negocioRef.get();
@@ -4171,17 +4131,15 @@ export const recomendarNegocio = functions.https.onCall(async (data, context) =>
             ...(comentarioOpcional && { mensaje: comentarioOpcional }),
         };
         
-        batch.set(recomendacionRef, nuevaRecomendacion);
-        batch.update(negocioRef, { recommendationCount: admin.firestore.FieldValue.increment(1) });
+        await recomendacionRef.set(nuevaRecomendacion);
+        // The recommendation count is now handled by the `onRecomendacionCreate` trigger.
         
-        await batch.commit();
-
         await logActivity(
             idUsuario,
             "usuario",
             "NEGOCIO_RECOMENDADO",
             `Usuario ${idUsuario} recomendó al negocio ${idNegocio}.`,
-            { tipo: "recomendacionNegocio", id: recomendacionRef.id },
+            { tipo: "recomendacion", id: recomendacionRef.id },
             { idNegocio, comentario: comentarioOpcional || "Sin comentario" }
         );
 
@@ -4192,6 +4150,44 @@ export const recomendarNegocio = functions.https.onCall(async (data, context) =>
         throw new functions.https.HttpsError("internal", "Error al procesar la recomendación.", error.message);
     }
 });
+
+export const onRecomendacionCreate = functions.firestore
+  .document("recomendaciones/{recomendacionId}")
+  .onCreate(async (snapshot, context) => {
+    const recomendacionData = snapshot.data() as RecomendacionData | undefined;
+    const recomendacionId = context.params.recomendacionId;
+
+    if (!recomendacionData) {
+      functions.logger.error(`[onRecomendacionCreate] No data found in new recommendation doc: ${recomendacionId}`);
+      return null;
+    }
+
+    // Only increment count for user endorsements, not system-generated re-hire suggestions
+    if (recomendacionData.type !== 'endorsement') {
+        functions.logger.info(`[onRecomendacionCreate] Recommendation ${recomendacionId} is of type '${recomendacionData.type}', not 'endorsement'. No count increment needed.`);
+        return null;
+    }
+
+    const { prestadorId } = recomendacionData;
+
+    if (!prestadorId) {
+      functions.logger.error(`[onRecomendacionCreate] New recommendation ${recomendacionId} is missing 'prestadorId'.`);
+      return null;
+    }
+
+    const prestadorRef = db.collection("prestadores").doc(prestadorId);
+
+    try {
+      await prestadorRef.update({
+        recommendationCount: admin.firestore.FieldValue.increment(1),
+      });
+      functions.logger.info(`[onRecomendacionCreate] Incremented recommendationCount for provider ${prestadorId} due to new recommendation ${recomendacionId}.`);
+    } catch (error) {
+      functions.logger.error(`[onRecomendacionCreate] Failed to increment recommendationCount for provider ${prestadorId}.`, { error: error });
+    }
+    
+    return null;
+  });
 
 export const onTransactionCreate = functions.firestore
   .document("transacciones/{transactionId}")
@@ -4266,5 +4262,7 @@ export const onTransactionCreate = functions.firestore
 
 
 
+
+    
 
     
