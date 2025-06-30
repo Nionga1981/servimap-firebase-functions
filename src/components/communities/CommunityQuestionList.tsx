@@ -1,3 +1,4 @@
+
 // src/components/communities/CommunityQuestionList.tsx
 "use client";
 
@@ -165,7 +166,7 @@ export function CommunityQuestionList() {
              </Button>
              <Button variant="ghost" size="sm" className="flex items-center gap-1 text-muted-foreground" onClick={() => handleReplyClick(q.id)}>
                 <MessageCircle className="h-4 w-4" />
-                Responder ({q.respuestas?.length || 0})
+                Responder ({q.respuestasCount || 0})
              </Button>
           </CardFooter>
             {replyingTo === q.id && (
@@ -184,3 +185,5 @@ export function CommunityQuestionList() {
     </div>
   );
 }
+
+    

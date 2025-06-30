@@ -1,7 +1,8 @@
+
 // src/services/communityService.ts
 "use client";
 
-import type { PreguntaComunidad, ProviderLocation, DemoUser } from '@/types';
+import type { PreguntaComunidad, ProviderLocation, DemoUser, RespuestaPreguntaComunidad } from '@/types';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '@/lib/firebase';
 import { mockDemoUsers, mockProviders } from '@/lib/mockData'; // Para enriquecer los datos
@@ -23,6 +24,7 @@ export const getCommunityQuestions = async (): Promise<PreguntaComunidad[]> => {
             pregunta: '¿Alguien conoce un buen lugar para reparar zapatos de cuero en el centro?',
             fecha: Date.now() - (1000 * 60 * 60 * 2), // hace 2 horas
             ubicacion: { lat: 24.81, lng: -107.4 },
+            respuestasCount: 1,
         },
         {
             id: 'q2',
@@ -30,6 +32,7 @@ export const getCommunityQuestions = async (): Promise<PreguntaComunidad[]> => {
             pregunta: 'Busco recomendación de un electricista de confianza para una instalación completa. Es en la zona norte.',
             fecha: Date.now() - (1000 * 60 * 60 * 24), // hace 1 día
             ubicacion: { lat: 24.84, lng: -107.4 },
+            respuestasCount: 0,
         }
     ];
 
@@ -82,3 +85,34 @@ export const postCommunityAnswer = async (
     throw error;
   }
 };
+
+export const getCommunityAnswers = async (questionId: string): Promise<RespuestaPreguntaComunidad[]> => {
+    console.log(`[CommunityService] Fetching answers for question ${questionId} (simulated)...`);
+    // En una app real, esto llamaría a una función que obtiene las respuestas por questionId
+    const mockAnswers: (RespuestaPreguntaComunidad & {nombreUsuario?: string, avatarUsuario?: string})[] = [
+        {
+            id: 'ans1',
+            preguntaId: 'q1',
+            autorId: 'currentUserDemoId',
+            texto: '¡Claro! Te recomiendo "El Taller del Abuelo" en la calle Rosales. Son artesanos de verdad.',
+            fecha: Date.now() - (1000 * 60 * 55), // hace 55 minutos
+            prestadorRecomendadoId: 'business123' // ID de un negocio fijo (simulado)
+        }
+    ];
+
+    const questionAnswers = mockAnswers.filter(a => a.preguntaId === questionId);
+    
+    const enrichedAnswers = questionAnswers.map(a => {
+        const user = mockDemoUsers.find(u => u.id === a.autorId);
+        return {
+            ...a,
+            nombreUsuario: user?.name || 'Usuario Anónimo',
+            avatarUsuario: user?.avatarUrl,
+        };
+    });
+    
+    await new Promise(resolve => setTimeout(resolve, 300));
+    return enrichedAnswers.sort((a,b) => a.fecha - b.fecha);
+};
+
+    

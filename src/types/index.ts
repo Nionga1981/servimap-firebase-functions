@@ -1,3 +1,4 @@
+
 // src/types/index.ts
 import type { LucideIcon } from 'lucide-react';
 
@@ -481,6 +482,7 @@ export type ActivityLogAction =
   | 'COMUNIDAD_AVISO_ELIMINADO'
   | 'COMUNIDAD_NUEVO_AVISO_NOTIFICADO'
   | 'COMUNIDAD_PREGUNTA_PUBLICADA'
+  | 'COMUNIDAD_PREGUNTA_RESPUESTA'
   | 'CITA_CREADA'
   | 'CITA_CONFIRMADA_PRESTADOR'
   | 'CITA_RECHAZADA_PRESTADOR'
@@ -498,6 +500,7 @@ export type ActivityLogAction =
   | 'CATEGORIA_RECHAZADA'
   | 'EMBAJADOR_COMISION_PAGADA'
   | 'EMBAJADOR_COMISION_SUSCRIPCION'
+  | 'EMBAJADOR_COMISION_AFILIADO'
   | 'EMBAJADOR_BONO_ASIGNADO'
   | 'RELACION_USUARIO_PRESTADOR_ACTUALIZADA'
   | 'RECOMENDACION_RECONTRATACION_CREADA'
@@ -524,7 +527,7 @@ export interface ActivityLog {
   descripcion: string;
   fecha: number; // timestamp
   entidadAfectada?: {
-    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad' | 'categoria_propuesta' | 'relacionUsuarioPrestador' | 'recomendacion' | 'preguntaComunidad' | 'recomendacionNegocio';
+    tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad' | 'categoria_propuesta' | 'relacionUsuarioPrestador' | 'recomendacion' | 'preguntaComunidad' | 'recomendacionNegocio' | 'respuestaComunidad';
     id: string;
   };
   detallesAdicionales?: Record<string, any>;
@@ -886,6 +889,7 @@ export interface BlockedUser {
 
 export interface RespuestaPreguntaComunidad {
   id?: string;
+  preguntaId: string;
   autorId: string;
   texto: string;
   fecha: number;
@@ -898,12 +902,14 @@ export interface PreguntaComunidad {
   pregunta: string;
   ubicacion?: ProviderLocation;
   fecha: number;
-  respuestas?: RespuestaPreguntaComunidad[];
+  respuestasCount?: number;
   tags?: string[];
   // Para enriquecer la UI
   nombreUsuario?: string;
   avatarUsuario?: string;
 }
+    
+
     
 
     
