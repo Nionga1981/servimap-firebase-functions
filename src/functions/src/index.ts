@@ -828,6 +828,18 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
     if (userData.isBlocked) {
         throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes contratar servicios.");
     }
+    
+    // Check for user-to-user blocks
+    const userBlocksProviderQuery = db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", providerId).limit(1);
+    const userBlocksProviderSnap = await userBlocksProviderQuery.get();
+    if (!userBlocksProviderSnap.empty) {
+        throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor porque lo has bloqueado.");
+    }
+    const providerBlocksUserQuery = db.collection("bloqueos").where("bloqueadorRef", "==", providerId).where("bloqueadoRef", "==", usuarioId).limit(1);
+    const providerBlocksUserSnap = await providerBlocksUserQuery.get();
+    if (!providerBlocksUserSnap.empty) {
+        throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor en este momento.");
+    }
 
 
     const nuevaSolicitudData: Omit<ServiceRequest, "id" | "serviceType"> & { serviceType: "fixed" } = {
@@ -1183,15 +1195,6 @@ export const logSolicitudServicioChanges = functions.firestore
                         referenciaID: solicitudId,
                     };
                     await comisionesRef.add(comisionDataForCollection);
-                    
-                    await logActivity(
-                        "sistema",
-                        "sistema",
-                        "EMBAJADOR_COMISION_PAGADA",
-                        `Comisión de $${comisionEmbajador.toFixed(2)} pagada a embajador ${embajadorUID} por servicio ${solicitudId} de prestador ${afterData.prestadorId}.`,
-                        { tipo: "usuario", id: embajadorUID },
-                        { montoComision: comisionEmbajador, servicioId, prestadorId: afterData.prestadorId }
-                    );
                 }
             }
         }
@@ -1281,13 +1284,27 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
       if (cotizacionData.estado !== "precio_propuesto_al_usuario") throw new functions.https.HttpsError("failed-precondition", `Estado inválido: ${cotizacionData.estado}`);
       if (typeof cotizacionData.precioSugerido !== "number" || cotizacionData.precioSugerido <= 0) throw new functions.https.HttpsError("failed-precondition", "Precio sugerido inválido.");
 
-      const prestadorDoc = await db.collection("prestadores").doc(cotizacionData.prestadorId).get();
+      const prestadorId = cotizacionData.prestadorId;
+
+      const prestadorDoc = await transaction.get(db.collection("prestadores").doc(prestadorId));
       if (!prestadorDoc.exists || prestadorDoc.data()?.isBlocked) {
           throw new functions.https.HttpsError("failed-precondition", "Este proveedor no puede ser contratado en este momento.");
       }
-      const usuarioDoc = await db.collection("usuarios").doc(usuarioId).get();
+      const usuarioDoc = await transaction.get(db.collection("usuarios").doc(usuarioId));
       if (usuarioDoc.data()?.isBlocked) {
           throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes contratar servicios.");
+      }
+      
+      const userBlocksProviderQuery = db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", prestadorId).limit(1);
+      const userBlocksProviderSnap = await transaction.get(userBlocksProviderQuery);
+      if (!userBlocksProviderSnap.empty) {
+          throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor porque lo has bloqueado.");
+      }
+  
+      const providerBlocksUserQuery = db.collection("bloqueos").where("bloqueadorRef", "==", prestadorId).where("bloqueadoRef", "==", usuarioId).limit(1);
+      const providerBlocksUserSnap = await transaction.get(providerBlocksUserQuery);
+      if (!providerBlocksUserSnap.empty) {
+          throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor en este momento.");
       }
 
       const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
@@ -2102,6 +2119,33 @@ export const reactivarServicioRecurrente = functions.https.onCall(async (data, c
     }
     if (accion === "ofrecer_nuevamente" && initiatorRoleInOldService !== "prestador") {
       throw new functions.https.HttpsError("failed-precondition", "Solo el prestador original puede 'ofrecer_nuevamente'.");
+    }
+
+    const usuarioId = servicioAnteriorData.usuarioId;
+    const prestadorId = servicioAnteriorData.prestadorId;
+
+    const [usuarioDoc, prestadorDoc] = await Promise.all([
+        db.collection("usuarios").doc(usuarioId).get(),
+        db.collection("prestadores").doc(prestadorId).get()
+    ]);
+
+    if (usuarioDoc.data()?.isBlocked) {
+        throw new functions.https.HttpsError("failed-precondition", "La cuenta del usuario está bloqueada y no puede reactivar servicios.");
+    }
+    if (prestadorDoc.data()?.isBlocked) {
+        throw new functions.https.HttpsError("failed-precondition", "El proveedor no está disponible para ser contratado en este momento.");
+    }
+
+    const userBlocksProviderQuery = db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", prestadorId).limit(1);
+    const userBlocksProviderSnap = await userBlocksProviderQuery.get();
+    if (!userBlocksProviderSnap.empty) {
+        throw new functions.https.HttpsError("permission-denied", "No puedes reactivar servicios con este proveedor porque lo has bloqueado.");
+    }
+
+    const providerBlocksUserQuery = db.collection("bloqueos").where("bloqueadorRef", "==", prestadorId).where("bloqueadoRef", "==", usuarioId).limit(1);
+    const providerBlocksUserSnap = await providerBlocksUserQuery.get();
+    if (!providerBlocksUserSnap.empty) {
+        throw new functions.https.HttpsError("permission-denied", "No puedes reactivar servicios con este proveedor en este momento.");
     }
 
     const now = admin.firestore.Timestamp.now();
@@ -4116,6 +4160,7 @@ export const recomendarNegocio = functions.https.onCall(async (data, context) =>
 
     const negocioRef = db.collection("prestadores").doc(idNegocio);
     const recomendacionRef = db.collection("recomendaciones").doc();
+    const batch = db.batch();
 
     try {
         const negocioDoc = await negocioRef.get();
@@ -4131,9 +4176,11 @@ export const recomendarNegocio = functions.https.onCall(async (data, context) =>
             ...(comentarioOpcional && { mensaje: comentarioOpcional }),
         };
         
-        await recomendacionRef.set(nuevaRecomendacion);
+        batch.set(recomendacionRef, nuevaRecomendacion);
         // The recommendation count is now handled by the `onRecomendacionCreate` trigger.
         
+        await batch.commit();
+
         await logActivity(
             idUsuario,
             "usuario",
