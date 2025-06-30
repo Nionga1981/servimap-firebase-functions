@@ -1,3 +1,4 @@
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -151,6 +152,7 @@ export interface UserData {
   blockDate?: admin.firestore.Timestamp;
   bonosRecibidos?: { [key: number]: boolean };
   balanceBonos?: number;
+  referidoPor?: string;
 }
 
 interface ProviderLocation {
@@ -325,6 +327,7 @@ export type ActivityLogAction =
   | "CATEGORIA_RECHAZADA"
   | "EMBAJADOR_COMISION_PAGADA"
   | "EMBAJADOR_COMISION_SUSCRIPCION"
+  | "EMBAJADOR_COMISION_AFILIADO"
   | "EMBAJADOR_BONO_ASIGNADO"
   | "RELACION_USUARIO_PRESTADOR_ACTUALIZADA"
   | "RECOMENDACION_RECONTRATACION_CREADA"
@@ -700,6 +703,14 @@ export interface PreguntaComunidadData {
   fecha: admin.firestore.Timestamp;
   respuestas?: RespuestaPreguntaComunidadData[];
   tags?: string[];
+}
+
+export interface TransaccionData {
+  id?: string;
+  usuarioId: string;
+  monto: number;
+  fecha: admin.firestore.Timestamp;
+  detalle?: string;
 }
 
 
@@ -1138,17 +1149,6 @@ export const logSolicitudServicioChanges = functions.firestore
                 const comisionEmbajador = comisionAppMonto * PORCENTAJE_COMISION_EMBAJADOR;
 
                 if (comisionEmbajador > 0) {
-                    const comisionHistoryEntry: HistorialComision = {
-                        servicioId: solicitudId,
-                        prestadorId: afterData.prestadorId,
-                        montoComision: comisionEmbajador,
-                        fecha: now,
-                    };
-                    
-                    await embajadorRef.update({
-                        historialComisiones: admin.firestore.FieldValue.arrayUnion(comisionHistoryEntry),
-                    });
-
                     const comisionesRef = db.collection("comisiones");
                     const providerNameForCommission = providerData.nombre || `prestador ${afterData.prestadorId.substring(0, 5)}`;
                     const comisionDataForCollection = {
@@ -3910,19 +3910,7 @@ export const processSubscriptionPayment = functions.https.onCall(async (data, co
                     referenciaID: `sub_${providerId}_${now.toMillis()}`,
                 };
                 await comisionesRef.add(comisionDataForCollection);
-
-                const comisionHistoryEntry: HistorialComision = {
-                    servicioId: comisionDataForCollection.referenciaID,
-                    prestadorId: providerId,
-                    montoComision: commissionAmount,
-                    fecha: now,
-                };
-
-                const embajadorRef = db.collection("usuarios").doc(embajadorUID);
-                await embajadorRef.update({
-                    historialComisiones: admin.firestore.FieldValue.arrayUnion(comisionHistoryEntry),
-                });
-
+                
                 await logActivity(
                     "sistema",
                     "sistema",
@@ -4152,4 +4140,73 @@ export const recomendarNegocio = functions.https.onCall(async (data, context) =>
     }
 });
 
+export const onTransactionCreate = functions.firestore
+  .document("transacciones/{transactionId}")
+  .onCreate(async (snapshot, context) => {
+    const transactionData = snapshot.data();
+    const transactionId = context.params.transactionId;
+
+    if (!transactionData || !transactionData.usuarioId) {
+      functions.logger.info(`[onTransactionCreate] Transacción ${transactionId} no tiene usuarioId. Saliendo.`);
+      return null;
+    }
+
+    const { usuarioId, monto } = transactionData;
+    if (typeof monto !== "number" || monto <= 0) {
+      functions.logger.info(`[onTransactionCreate] Transacción ${transactionId} tiene un monto inválido o cero. Saliendo.`);
+      return null;
+    }
+
+    try {
+      const userRef = db.collection("usuarios").doc(usuarioId);
+      const userDoc = await userRef.get();
+
+      if (!userDoc.exists) {
+        functions.logger.warn(`[onTransactionCreate] Documento de usuario ${usuarioId} no encontrado para la transacción ${transactionId}.`);
+        return null;
+      }
+
+      const userData = userDoc.data() as UserData;
+      if (!userData.referidoPor) {
+        functions.logger.info(`[onTransactionCreate] Usuario ${usuarioId} no fue referido. No se genera comisión.`);
+        return null;
+      }
+
+      const referrerId = userData.referidoPor;
+      const commissionAmount = monto * 0.05; // 5% de comisión
+
+      if (commissionAmount <= 0) {
+        functions.logger.info(`[onTransactionCreate] El monto de la comisión para la transacción ${transactionId} es cero o menor. No se genera comisión.`);
+        return null;
+      }
+
+      const commissionData = {
+        idUsuarioGanador: referrerId,
+        tipo: "afiliado",
+        monto: commissionAmount,
+        detalle: "Comisión por transacción de usuario referido",
+        fecha: admin.firestore.Timestamp.now(),
+        referenciaID: transactionId,
+      };
+
+      const newCommissionRef = await db.collection("comisiones").add(commissionData);
+
+      functions.logger.info(`[onTransactionCreate] Comisión de $${commissionAmount.toFixed(2)} creada para el recomendador ${referrerId} por la transacción ${transactionId}. ID de comisión: ${newCommissionRef.id}`);
+
+      await logActivity(
+        "sistema",
+        "sistema",
+        "EMBAJADOR_COMISION_AFILIADO",
+        `Comisión de $${commissionAmount.toFixed(2)} generada para embajador ${referrerId} por transacción de afiliado ${usuarioId}.`,
+        { tipo: "comision", id: newCommissionRef.id },
+        { monto: commissionAmount, transactionId: transactionId, referidoId: usuarioId }
+      );
+
+      return null;
+
+    } catch (error) {
+      functions.logger.error(`[onTransactionCreate] Error procesando la transacción ${transactionId}:`, error);
+      return null;
+    }
+  });
     
