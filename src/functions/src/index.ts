@@ -1,5 +1,6 @@
 
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -340,7 +341,9 @@ export type ActivityLogAction =
   | "ADMIN_GET_ACTIVE_SERVICES"
   | "ADMIN_GET_PENDING_WARRANTIES"
   | "ADMIN_GET_BLOCKED_USERS"
-  | "USER_GET_BANNERS";
+  | "USER_GET_BANNERS"
+  | "GET_LATEST_APP_VERSION"
+  | "SUGERENCIA_ENVIADA";
 
 export interface BonificacionData {
     id?: string;
@@ -709,6 +712,26 @@ export interface TransaccionData {
   monto: number;
   fecha: admin.firestore.Timestamp;
   detalle?: string;
+}
+
+export interface AppVersionData {
+  id?: string;
+  numeroVersion: string;
+  descripcion: string;
+  fechaLanzamiento: admin.firestore.Timestamp;
+  visible: boolean;
+  obligatoria: boolean;
+  linkAndroid?: string;
+  linkIOS?: string;
+}
+
+export interface SugerenciaUsuarioData {
+  id?: string;
+  usuarioId: string;
+  fechaEnvio: admin.firestore.Timestamp;
+  tipo: "mejora" | "bug" | "otra";
+  mensaje: string;
+  atendida: boolean;
 }
 
 
@@ -1749,83 +1772,177 @@ export const crearSolicitudSoporte = functions.https.onCall(async (data, context
 });
 
 export const rateServiceByUser = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-  }
-  const userId = context.auth.uid;
-  const {
-    servicioId,
-    estrellas,
-    comentario,
-    indicadoresRendimiento,
-    aspectosPositivos,
-    areasDeMejora,
-  } = data;
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+    }
+    const userId = context.auth.uid;
+    const {
+        servicioId,
+        estrellas,
+        comentario,
+        indicadoresRendimiento,
+        aspectosPositivos,
+        areasDeMejora,
+    } = data;
 
-  if (!servicioId || typeof servicioId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'servicioId'.");
-  }
-  if (typeof estrellas !== "number" || estrellas < 1 || estrellas > 5) {
-    throw new functions.https.HttpsError("invalid-argument", "La 'calificacion' (estrellas) debe ser un número entre 1 y 5.");
-  }
+    if (!servicioId || typeof servicioId !== "string") {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere 'servicioId'.");
+    }
+    if (typeof estrellas !== "number" || estrellas < 1 || estrellas > 5) {
+        throw new functions.https.HttpsError("invalid-argument", "La 'calificacion' (estrellas) debe ser un número entre 1 y 5.");
+    }
 
-  const servicioRef = db.collection("solicitudes_servicio").doc(servicioId);
+    const servicioRef = db.collection("solicitudes_servicio").doc(servicioId);
 
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const servicioDoc = await transaction.get(servicioRef);
-      if (!servicioDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
-      }
-      const servicioData = servicioDoc.data() as ServiceRequest;
+    try {
+        const result = await db.runTransaction(async (transaction) => {
+            const servicioDoc = await transaction.get(servicioRef);
+            if (!servicioDoc.exists) {
+                throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
+            }
+            const servicioData = servicioDoc.data() as ServiceRequest;
 
-      const userDoc = await db.collection("usuarios").doc(userId).get();
-      if (userDoc.data()?.isBlocked) {
-          throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes calificar servicios.");
-      }
+            const userDoc = await db.collection("usuarios").doc(userId).get();
+            if (userDoc.data()?.isBlocked) {
+                throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes calificar servicios.");
+            }
 
-      if (servicioData.usuarioId !== userId) {
-        throw new functions.https.HttpsError("permission-denied", "No puedes calificar este servicio.");
-      }
-      if (servicioData.status !== "completado_por_usuario" && servicioData.status !== "cerrado_automaticamente") {
-        throw new functions.https.HttpsError("failed-precondition", `Solo se pueden calificar servicios en estado 'completado_por_usuario' o 'cerrado_automaticamente'. Estado actual: ${servicioData.status}`);
-      }
-      if (servicioData.calificacionUsuario) {
-        throw new functions.https.HttpsError("already-exists", "Ya has calificado este servicio.");
-      }
+            if (servicioData.usuarioId !== userId) {
+                throw new functions.https.HttpsError("permission-denied", "No puedes calificar este servicio.");
+            }
+            if (servicioData.status !== "completado_por_usuario" && servicioData.status !== "cerrado_automaticamente") {
+                throw new functions.https.HttpsError("failed-precondition", `Solo se pueden calificar servicios en estado 'completado_por_usuario' o 'cerrado_automaticamente'. Estado actual: ${servicioData.status}`);
+            }
+            if (servicioData.calificacionUsuario) {
+                throw new functions.https.HttpsError("already-exists", "Ya has calificado este servicio.");
+            }
 
-      const now = admin.firestore.Timestamp.now();
-      const nuevaCalificacion: CalificacionDetallada = {
-        estrellas: estrellas,
-        fecha: now,
-        ...(comentario && {comentario: comentario as string}),
-        ...(indicadoresRendimiento && {indicadoresRendimiento: indicadoresRendimiento as IndicadoresRendimiento}),
-        ...(aspectosPositivos && Array.isArray(aspectosPositivos) && {aspectosPositivos: aspectosPositivos as string[]}),
-        ...(areasDeMejora && Array.isArray(areasDeMejora) && {areasDeMejora: areasDeMejora as string[]}),
-      };
+            const now = admin.firestore.Timestamp.now();
+            const nuevaCalificacion: CalificacionDetallada = {
+                estrellas,
+                fecha: now,
+                ...(comentario && { comentario }),
+                ...(indicadoresRendimiento && { indicadoresRendimiento }),
+                ...(aspectosPositivos && Array.isArray(aspectosPositivos) && { aspectosPositivos }),
+                ...(areasDeMejora && Array.isArray(areasDeMejora) && { areasDeMejora }),
+            };
 
-      const updates: Partial<ServiceRequest> & {updatedAt: admin.firestore.Timestamp} = {
-        calificacionUsuario: nuevaCalificacion,
-        updatedAt: now,
-      };
+            const updates: Partial<ServiceRequest> & { updatedAt: admin.firestore.Timestamp } = {
+                calificacionUsuario: nuevaCalificacion,
+                updatedAt: now,
+            };
 
-      if (servicioData.calificacionPrestador) {
-        updates.mutualRatingCompleted = true;
-      }
+            const hasMutualRating = !!servicioData.calificacionPrestador;
+            if (hasMutualRating) {
+                updates.mutualRatingCompleted = true;
+                if (servicioData.status !== "en_disputa") {
+                    updates.status = "cerrado_con_calificacion";
+                }
+            }
+            
+            transaction.update(servicioRef, updates);
 
-      if (servicioData.status !== "en_disputa") {
-        updates.status = "cerrado_con_calificacion";
-      }
+            return {
+                mutualRatingCompleted: hasMutualRating,
+                usuarioId: servicioData.usuarioId,
+                prestadorId: servicioData.prestadorId,
+                titulo: servicioData.titulo || "un servicio",
+            };
+        });
 
+        if (result && result.mutualRatingCompleted) {
+            const notifTitle = "¡Tu servicio fue calificado exitosamente!";
+            const notifBody = `Tanto tú como el proveedor han calificado el servicio "${result.titulo}". El pago ha sido procesado.`;
+            await sendNotification(result.usuarioId, "usuario", notifTitle, notifBody);
+            await sendNotification(result.prestadorId, "prestador", notifTitle, notifBody);
+        }
+        return { success: true, message: "Calificación registrada exitosamente." };
 
-      transaction.update(servicioRef, updates);
-      return {success: true, message: "Calificación registrada exitosamente."};
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error al calificar servicio ${servicioId} por usuario ${userId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar la calificación.", error.message);
-  }
+    } catch (error: any) {
+        functions.logger.error(`Error al calificar servicio ${servicioId} por usuario ${userId}:`, error);
+        if (error instanceof functions.https.HttpsError) throw error;
+        throw new functions.https.HttpsError("internal", "Error al procesar la calificación.", error.message);
+    }
+});
+
+export const rateServiceByProvider = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+    }
+    const providerId = context.auth.uid;
+    const { servicioId, estrellas, comentario } = data;
+
+    if (!servicioId || typeof servicioId !== "string") {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere 'servicioId'.");
+    }
+    if (typeof estrellas !== "number" || estrellas < 1 || estrellas > 5) {
+        throw new functions.https.HttpsError("invalid-argument", "La 'calificacion' (estrellas) debe ser un número entre 1 y 5.");
+    }
+
+    const servicioRef = db.collection("solicitudes_servicio").doc(servicioId);
+
+    try {
+        const result = await db.runTransaction(async (transaction) => {
+            const servicioDoc = await transaction.get(servicioRef);
+            if (!servicioDoc.exists) {
+                throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
+            }
+            const servicioData = servicioDoc.data() as ServiceRequest;
+
+            if (servicioData.prestadorId !== providerId) {
+                throw new functions.https.HttpsError("permission-denied", "No puedes calificar este servicio.");
+            }
+            if (servicioData.status !== "completado_por_usuario" && servicioData.status !== "cerrado_automaticamente" && servicioData.status !== "cerrado_con_calificacion") {
+                throw new functions.https.HttpsError("failed-precondition", `Solo puedes calificar servicios que el usuario haya confirmado o estén cerrados. Estado actual: ${servicioData.status}`);
+            }
+            if (servicioData.calificacionPrestador) {
+                throw new functions.https.HttpsError("already-exists", "Ya has calificado a este usuario para este servicio.");
+            }
+
+            const now = admin.firestore.Timestamp.now();
+            const nuevaCalificacion: CalificacionDetallada = {
+                estrellas,
+                fecha: now,
+                ...(comentario && { comentario }),
+            };
+
+            const updates: Partial<ServiceRequest> & { updatedAt: admin.firestore.Timestamp } = {
+                calificacionPrestador: nuevaCalificacion,
+                updatedAt: now,
+            };
+
+            const hasMutualRating = !!servicioData.calificacionUsuario;
+            if (hasMutualRating) {
+                updates.mutualRatingCompleted = true;
+                if (servicioData.status !== "en_disputa") {
+                    updates.status = "cerrado_con_calificacion";
+                }
+            }
+            
+            transaction.update(servicioRef, updates);
+
+            return {
+                mutualRatingCompleted: hasMutualRating,
+                usuarioId: servicioData.usuarioId,
+                prestadorId: servicioData.prestadorId,
+                titulo: servicioData.titulo || "un servicio",
+            };
+        });
+
+        if (result && result.mutualRatingCompleted) {
+            const notifTitle = "¡Tu servicio fue calificado exitosamente!";
+            const notifBody = `Tanto tú como el usuario han calificado el servicio "${result.titulo}". El pago ha sido procesado.`;
+            await sendNotification(result.usuarioId, "usuario", notifTitle, notifBody);
+            await sendNotification(result.prestadorId, "prestador", notifTitle, notifBody);
+        }
+
+        return { success: true, message: "Calificación de usuario registrada exitosamente." };
+
+    } catch (error: any) {
+        functions.logger.error(`Error al calificar usuario para servicio ${servicioId} por proveedor ${providerId}:`, error);
+        if (error instanceof functions.https.HttpsError) throw error;
+        throw new functions.https.HttpsError("internal", "Error al procesar la calificación.", error.message);
+    }
 });
 
 export const buscarPrestadoresInteligente = functions.https.onCall(async (data, context) => {
@@ -2397,7 +2514,7 @@ export const confirmServiceAndHandlePayment = functions.https.onCall(async (data
 
 export const cancelService = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para cancelar un servicio.");
   }
   const callingUserId = context.auth.uid;
   const {serviceId} = data;
@@ -4018,9 +4135,9 @@ export const onCommissionCreated = functions.firestore
     const userRef = db.collection("usuarios").doc(idUsuarioGanador);
 
     try {
-      await userRef.update({
+      await userRef.set({
         gananciasTotales: admin.firestore.FieldValue.increment(monto),
-      });
+      }, { merge: true });
       functions.logger.info(`Updated gananciasTotales for user ${idUsuarioGanador} by ${monto}.`);
       
       await logActivity(
@@ -4151,24 +4268,42 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
   }
 });
 
-export const onNewCommunityResponse = functions.firestore
-  .document('respuestasComunidad/{respuestaId}')
-  .onCreate(async (snap, context) => {
-    const respuestaData = snap.data() as RespuestaPreguntaComunidadData;
-    const { preguntaId } = respuestaData;
+export const onRecomendacionCreate = functions.firestore
+  .document("recomendaciones/{recomendacionId}")
+  .onCreate(async (snapshot, context) => {
+    const recomendacionData = snapshot.data() as RecomendacionData | undefined;
+    const recomendacionId = context.params.recomendacionId;
 
-    if (!preguntaId) {
-      console.log('La respuesta no tiene preguntaId. Saliendo.');
+    if (!recomendacionData) {
+      functions.logger.error(`[onRecomendacionCreate] No data found in new recommendation doc: ${recomendacionId}`);
       return null;
     }
 
-    const preguntaRef = db.collection('preguntasComunidad').doc(preguntaId);
+    if (recomendacionData.type !== 'endorsement') {
+        functions.logger.info(`[onRecomendacionCreate] Recommendation ${recomendacionId} is of type '${recomendacionData.type}', not 'endorsement'. No count increment needed.`);
+        return null;
+    }
+
+    const { prestadorId } = recomendacionData;
+
+    if (!prestadorId) {
+      functions.logger.error(`[onRecomendacionCreate] New recommendation ${recomendacionId} is missing 'prestadorId'.`);
+      return null;
+    }
+
+    const prestadorRef = db.collection("prestadores").doc(prestadorId);
+
+    try {
+      await prestadorRef.set({ // Use set with merge to create the field if it doesn't exist
+        recommendationCount: admin.firestore.FieldValue.increment(1),
+      }, { merge: true });
+      functions.logger.info(`[onRecomendacionCreate] Incremented recommendationCount for provider ${prestadorId} due to new recommendation ${recomendacionId}.`);
+    } catch (error) {
+      functions.logger.error(`[onRecomendacionCreate] Failed to increment recommendationCount for provider ${prestadorId}.`, { error: error });
+    }
     
-    // Incrementar el contador de respuestas
-    return preguntaRef.update({
-      respuestasCount: admin.firestore.FieldValue.increment(1)
-    });
-});
+    return null;
+  });
 
 export const recomendarNegocio = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
@@ -4210,43 +4345,6 @@ export const recomendarNegocio = functions.https.onCall(async (data, context) =>
         throw new functions.https.HttpsError("internal", "Error al procesar la recomendación.", error.message);
     }
 });
-
-export const onRecomendacionCreate = functions.firestore
-  .document("recomendaciones/{recomendacionId}")
-  .onCreate(async (snapshot, context) => {
-    const recomendacionData = snapshot.data() as RecomendacionData | undefined;
-    const recomendacionId = context.params.recomendacionId;
-
-    if (!recomendacionData) {
-      functions.logger.error(`[onRecomendacionCreate] No data found in new recommendation doc: ${recomendacionId}`);
-      return null;
-    }
-
-    if (recomendacionData.type !== 'endorsement') {
-        functions.logger.info(`[onRecomendacionCreate] Recommendation ${recomendacionId} is of type '${recomendacionData.type}', not 'endorsement'. No count increment needed.`);
-        return null;
-    }
-
-    const { prestadorId } = recomendacionData;
-
-    if (!prestadorId) {
-      functions.logger.error(`[onRecomendacionCreate] New recommendation ${recomendacionId} is missing 'prestadorId'.`);
-      return null;
-    }
-
-    const prestadorRef = db.collection("prestadores").doc(prestadorId);
-
-    try {
-      await prestadorRef.set({ // Use set with merge to create the field if it doesn't exist
-        recommendationCount: admin.firestore.FieldValue.increment(1),
-      }, { merge: true });
-      functions.logger.info(`[onRecomendacionCreate] Incremented recommendationCount for provider ${prestadorId} due to new recommendation ${recomendacionId}.`);
-    } catch (error) {
-      functions.logger.error(`[onRecomendacionCreate] Failed to increment recommendationCount for provider ${prestadorId}.`, { error: error });
-    }
-    
-    return null;
-  });
 
 export const onTransactionCreate = functions.firestore
   .document("transacciones/{transactionId}")
@@ -4317,7 +4415,6 @@ export const onTransactionCreate = functions.firestore
       return null;
     }
   });
-    
 
 export const cerrarServiciosAntiguos = functions.pubsub.schedule("every 24 hours").onRun(async (context) => {
     const now = admin.firestore.Timestamp.now();
@@ -4371,8 +4468,87 @@ export const cerrarServiciosAntiguos = functions.pubsub.schedule("every 24 hours
     return null;
 });
 
+export const getLatestVisibleAppVersion = functions.https.onCall(async (data, context) => {
+    try {
+        const versionsQuery = db.collection("versionApp")
+            .where("visible", "==", true)
+            .orderBy("fechaLanzamiento", "desc")
+            .limit(1);
 
+        const snapshot = await versionsQuery.get();
 
-    
+        if (snapshot.empty) {
+            functions.logger.warn("[getLatestVisibleAppVersion] No visible app version found in the database.");
+            throw new functions.https.HttpsError("not-found", "No hay ninguna versión de la aplicación visible disponible en este momento.");
+        }
 
-    
+        const latestVersionDoc = snapshot.docs[0];
+        const versionData = latestVersionDoc.data() as AppVersionData;
+
+        await logActivity(
+            context.auth?.uid || "sistema_anonimo",
+            context.auth?.uid ? "usuario" : "sistema",
+            "GET_LATEST_APP_VERSION",
+            `Se consultó la última versión visible de la app. Versión devuelta: ${versionData.numeroVersion}.`,
+            { tipo: "versionApp", id: latestVersionDoc.id }
+        );
+
+        return {
+            numeroVersion: versionData.numeroVersion,
+            descripcion: versionData.descripcion,
+            obligatoria: versionData.obligatoria,
+            fechaLanzamiento: versionData.fechaLanzamiento.toMillis(), // Convert to millis for easier client-side handling
+        };
+
+    } catch (error: any) {
+        functions.logger.error("[getLatestVisibleAppVersion] Error fetching latest app version:", error);
+        if (error instanceof functions.https.HttpsError) {
+            throw error;
+        }
+        throw new functions.https.HttpsError("internal", "No se pudo obtener la información de la versión de la aplicación.", error.message);
+    }
+});
+
+export const enviarSugerenciaUsuario = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar una sugerencia.");
+    }
+    const usuarioId = context.auth.uid;
+    const { tipo, mensaje } = data;
+
+    if (!tipo || typeof tipo !== 'string' || !['mejora', 'bug', 'otra'].includes(tipo)) {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere un 'tipo' de sugerencia válido ('mejora', 'bug', 'otra').");
+    }
+    if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length < 10) {
+        throw new functions.https.HttpsError("invalid-argument", "El mensaje de la sugerencia debe tener al menos 10 caracteres.");
+    }
+
+    const now = admin.firestore.Timestamp.now();
+    const sugerenciaRef = db.collection("sugerenciasUsuarios").doc();
+
+    const nuevaSugerencia: Omit<SugerenciaUsuarioData, 'id'> = {
+        usuarioId: usuarioId,
+        fechaEnvio: now,
+        tipo: tipo as "mejora" | "bug" | "otra",
+        mensaje: mensaje,
+        atendida: false,
+    };
+
+    try {
+        await sugerenciaRef.set(nuevaSugerencia);
+
+        await logActivity(
+            usuarioId,
+            "usuario",
+            "SUGERENCIA_ENVIADA",
+            `Usuario ${usuarioId} envió una sugerencia de tipo '${tipo}'.`,
+            { tipo: "sugerenciaUsuario", id: sugerenciaRef.id },
+            { tipoSugerencia: tipo }
+        );
+
+        return { success: true, message: "¡Gracias por tu sugerencia! La hemos recibido correctamente." };
+    } catch (error: any) {
+        functions.logger.error(`Error al guardar sugerencia para usuario ${usuarioId}:`, error);
+        throw new functions.https.HttpsError("internal", "No se pudo guardar tu sugerencia en este momento.", error.message);
+    }
+});
