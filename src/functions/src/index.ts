@@ -2,6 +2,7 @@
 
 
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -345,7 +346,8 @@ export type ActivityLogAction =
   | "USER_GET_BANNERS"
   | "GET_LATEST_APP_VERSION"
   | "SUGERENCIA_ENVIADA"
-  | "ARCHIVO_SOPORTE_REGISTRADO";
+  | "ARCHIVO_SOPORTE_REGISTRADO"
+  | "SOPORTE_LOG_MANUAL";
 
 export interface BonificacionData {
     id?: string;
@@ -743,6 +745,18 @@ export interface ArchivoSoporteData {
   descripcion?: string;
   subidoPorRef: string;
   fechaSubida: admin.firestore.Timestamp;
+}
+
+export interface BitacoraSoporteData {
+    id?: string;
+    soporteRef: string; // UID del admin/soporte que realizó la acción
+    fechaRegistro: admin.firestore.Timestamp;
+    accion: string;
+    detalle: string;
+    entidadAfectada?: {
+        tipo: string;
+        id: string;
+    };
 }
 
 
@@ -4520,6 +4534,7 @@ export const getLatestVisibleAppVersion = functions.https.onCall(async (data, co
     }
 });
 
+
 export const enviarSugerenciaUsuario = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar una sugerencia.");
@@ -4564,6 +4579,7 @@ export const enviarSugerenciaUsuario = functions.https.onCall(async (data, conte
     }
 });
 
+
 export const registrarArchivoSoporte = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar un archivo.");
@@ -4605,5 +4621,58 @@ export const registrarArchivoSoporte = functions.https.onCall(async (data, conte
     } catch (error: any) {
         functions.logger.error(`Error al registrar archivo de soporte para usuario ${usuarioId}:`, error);
         throw new functions.https.HttpsError("internal", "No se pudo registrar tu archivo.", error.message);
+    }
+});
+
+export const logSoporteAction = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar una acción de soporte.");
+    }
+    
+    // Verificar si el usuario tiene rol de admin o soporte
+    const isAdmin = context.auth.token.admin === true;
+    const isSoporte = context.auth.token.soporte === true;
+
+    if (!isAdmin && !isSoporte) {
+        throw new functions.https.HttpsError("permission-denied", "No tienes los privilegios necesarios para realizar esta acción.");
+    }
+
+    const soporteId = context.auth.uid;
+    const { accion, detalle, entidadAfectada } = data;
+
+    if (!accion || typeof accion !== 'string' || accion.trim().length === 0) {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere el campo 'accion' y no puede estar vacío.");
+    }
+    if (!detalle || typeof detalle !== 'string' || detalle.trim().length === 0) {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere el campo 'detalle' y no puede estar vacío.");
+    }
+
+    const ahora = admin.firestore.Timestamp.now();
+    const bitacoraRef = db.collection("bitacoraSoporte").doc();
+
+    const nuevaBitacora: Omit<BitacoraSoporteData, 'id'> = {
+        soporteRef: soporteId,
+        fechaRegistro: ahora,
+        accion: accion,
+        detalle: detalle,
+        ...(entidadAfectada && { entidadAfectada }),
+    };
+
+    try {
+        await bitacoraRef.set(nuevaBitacora);
+
+        await logActivity(
+            soporteId,
+            isAdmin ? "admin" : "soporte" as any, // Asumiendo que el rol en logActivity acepta 'soporte'
+            "SOPORTE_LOG_MANUAL",
+            `[Soporte] ${accion}: ${detalle}`,
+            entidadAfectada,
+            { accionOriginal: accion }
+        );
+
+        return { success: true, message: "Acción de soporte registrada en la bitácora.", logId: bitacoraRef.id };
+    } catch (error: any) {
+        functions.logger.error(`Error al registrar acción de soporte por ${soporteId}:`, error);
+        throw new functions.https.HttpsError("internal", "No se pudo registrar la acción en la bitácora.", error.message);
     }
 });
