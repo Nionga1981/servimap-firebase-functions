@@ -1,6 +1,7 @@
 
 
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -343,7 +344,8 @@ export type ActivityLogAction =
   | "ADMIN_GET_BLOCKED_USERS"
   | "USER_GET_BANNERS"
   | "GET_LATEST_APP_VERSION"
-  | "SUGERENCIA_ENVIADA";
+  | "SUGERENCIA_ENVIADA"
+  | "ARCHIVO_SOPORTE_REGISTRADO";
 
 export interface BonificacionData {
     id?: string;
@@ -732,6 +734,15 @@ export interface SugerenciaUsuarioData {
   tipo: "mejora" | "bug" | "otra";
   mensaje: string;
   atendida: boolean;
+}
+
+export interface ArchivoSoporteData {
+  id?: string;
+  archivoURL: string;
+  tipoArchivo: string;
+  descripcion?: string;
+  subidoPorRef: string;
+  fechaSubida: admin.firestore.Timestamp;
 }
 
 
@@ -2514,7 +2525,7 @@ export const confirmServiceAndHandlePayment = functions.https.onCall(async (data
 
 export const cancelService = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para cancelar un servicio.");
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
   }
   const callingUserId = context.auth.uid;
   const {serviceId} = data;
@@ -4550,5 +4561,49 @@ export const enviarSugerenciaUsuario = functions.https.onCall(async (data, conte
     } catch (error: any) {
         functions.logger.error(`Error al guardar sugerencia para usuario ${usuarioId}:`, error);
         throw new functions.https.HttpsError("internal", "No se pudo guardar tu sugerencia en este momento.", error.message);
+    }
+});
+
+export const registrarArchivoSoporte = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar un archivo.");
+    }
+    const usuarioId = context.auth.uid;
+    const { archivoURL, tipoArchivo, descripcion } = data;
+
+    if (!archivoURL || typeof archivoURL !== 'string') {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere la URL del archivo ('archivoURL').");
+    }
+    if (!tipoArchivo || typeof tipoArchivo !== 'string') {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere el tipo de archivo ('tipoArchivo').");
+    }
+
+    const ahora = admin.firestore.Timestamp.now();
+    const archivoRef = db.collection("archivosSoporte").doc();
+
+    const nuevoArchivoData: Omit<ArchivoSoporteData, 'id'> = {
+        archivoURL,
+        tipoArchivo,
+        subidoPorRef: usuarioId,
+        fechaSubida: ahora,
+        ...(descripcion && { descripcion }),
+    };
+
+    try {
+        await archivoRef.set(nuevoArchivoData);
+
+        await logActivity(
+            usuarioId,
+            "usuario",
+            "ARCHIVO_SOPORTE_REGISTRADO",
+            `Usuario ${usuarioId} registró un nuevo archivo de soporte: ${tipoArchivo}.`,
+            { tipo: "archivoSoporte", id: archivoRef.id },
+            { url: archivoURL }
+        );
+
+        return { success: true, message: "Archivo registrado exitosamente.", archivoId: archivoRef.id };
+    } catch (error: any) {
+        functions.logger.error(`Error al registrar archivo de soporte para usuario ${usuarioId}:`, error);
+        throw new functions.https.HttpsError("internal", "No se pudo registrar tu archivo.", error.message);
     }
 });
