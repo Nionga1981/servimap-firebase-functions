@@ -1,9 +1,3 @@
-
-
-
-
-
-
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -349,7 +343,9 @@ export type ActivityLogAction =
   | "SUGERENCIA_ENVIADA"
   | "ARCHIVO_SOPORTE_REGISTRADO"
   | "SOPORTE_LOG_MANUAL"
-  | "METRICA_REGISTRADA";
+  | "METRICA_REGISTRADA"
+  | "ADMIN_SETTING_UPDATED"
+  | "ADMIN_SETTING_READ";
 
 export interface BonificacionData {
     id?: string;
@@ -767,6 +763,13 @@ export interface MetricaData {
   usuarioRef: string;
   fecha: admin.firestore.Timestamp;
   detalle: string;
+}
+
+export interface AdminPanelSettingData {
+    // id (nombreOpcion) is the document ID
+    valor: boolean;
+    descripcion: string;
+    fechaUltimoCambio: admin.firestore.Timestamp;
 }
 
 
@@ -4718,3 +4721,77 @@ export const logMetric = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError("internal", "No se pudo registrar la métrica.", error.message);
     }
 });
+
+export const manageAdminSettings = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para gestionar la configuración.");
+    }
+    const { nombreOpcion, valor } = data; // valor can be boolean or undefined
+
+    if (!nombreOpcion || typeof nombreOpcion !== 'string') {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere 'nombreOpcion'.");
+    }
+
+    const settingRef = db.collection("adminPanelSettings").doc(nombreOpcion);
+    const actorId = context.auth.uid;
+    const isAdmin = context.auth.token.admin === true;
+
+    // WRITE operation
+    if (typeof valor === 'boolean') {
+        if (!isAdmin) {
+            throw new functions.https.HttpsError("permission-denied", "No tienes permisos para modificar esta configuración.");
+        }
+
+        try {
+            await settingRef.update({
+                valor: valor,
+                fechaUltimoCambio: admin.firestore.Timestamp.now(),
+            });
+
+            await logActivity(
+                actorId,
+                "admin",
+                "ADMIN_SETTING_UPDATED",
+                `Admin ${actorId} actualizó la configuración '${nombreOpcion}' a '${valor}'.`,
+                { tipo: "adminPanelSetting", id: nombreOpcion },
+                { nuevoValor: valor }
+            );
+
+            return { success: true, message: `Configuración '${nombreOpcion}' actualizada.` };
+        } catch (error: any) {
+            functions.logger.error(`Error al actualizar configuración '${nombreOpcion}':`, error);
+            if (error.code === 5) { // NOT_FOUND error code
+                 throw new functions.https.HttpsError("not-found", `La configuración '${nombreOpcion}' no existe.`);
+            }
+            throw new functions.https.HttpsError("internal", "Error al actualizar la configuración.", error.message);
+        }
+    } 
+    // READ operation
+    else {
+        try {
+            const doc = await settingRef.get();
+            if (!doc.exists) {
+                throw new functions.https.HttpsError("not-found", `La configuración '${nombreOpcion}' no existe.`);
+            }
+            const settingData = doc.data() as AdminPanelSettingData;
+            
+            // Log read access for admins for auditing purposes
+            if (isAdmin) {
+                 await logActivity(
+                    actorId,
+                    "admin",
+                    "ADMIN_SETTING_READ",
+                    `Admin ${actorId} consultó la configuración '${nombreOpcion}'.`,
+                    { tipo: "adminPanelSetting", id: nombreOpcion }
+                );
+            }
+            
+            return { success: true, valor: settingData.valor };
+        } catch (error: any) {
+             functions.logger.error(`Error al leer configuración '${nombreOpcion}':`, error);
+             if (error instanceof functions.https.HttpsError) throw error;
+             throw new functions.https.HttpsError("internal", "Error al consultar la configuración.", error.message);
+        }
+    }
+});
+    
