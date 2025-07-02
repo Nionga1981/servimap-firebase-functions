@@ -3,6 +3,7 @@
 
 
 
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
@@ -347,7 +348,8 @@ export type ActivityLogAction =
   | "GET_LATEST_APP_VERSION"
   | "SUGERENCIA_ENVIADA"
   | "ARCHIVO_SOPORTE_REGISTRADO"
-  | "SOPORTE_LOG_MANUAL";
+  | "SOPORTE_LOG_MANUAL"
+  | "METRICA_REGISTRADA";
 
 export interface BonificacionData {
     id?: string;
@@ -757,6 +759,14 @@ export interface BitacoraSoporteData {
         tipo: string;
         id: string;
     };
+}
+
+export interface MetricaData {
+  id?: string;
+  evento: string;
+  usuarioRef: string;
+  fecha: admin.firestore.Timestamp;
+  detalle: string;
 }
 
 
@@ -4534,7 +4544,6 @@ export const getLatestVisibleAppVersion = functions.https.onCall(async (data, co
     }
 });
 
-
 export const enviarSugerenciaUsuario = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar una sugerencia.");
@@ -4674,5 +4683,38 @@ export const logSoporteAction = functions.https.onCall(async (data, context) => 
     } catch (error: any) {
         functions.logger.error(`Error al registrar acción de soporte por ${soporteId}:`, error);
         throw new functions.https.HttpsError("internal", "No se pudo registrar la acción en la bitácora.", error.message);
+    }
+});
+
+export const logMetric = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar una métrica.");
+    }
+
+    const usuarioId = context.auth.uid;
+    const { evento, detalle } = data;
+
+    if (!evento || typeof evento !== 'string' || evento.trim().length === 0) {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre de 'evento' válido y no puede estar vacío.");
+    }
+
+    const detalleFinal = (typeof detalle === 'string') ? detalle : '';
+
+    const metricaRef = db.collection("metricas").doc();
+
+    const nuevaMetrica: Omit<MetricaData, 'id'> = {
+        evento,
+        usuarioRef: usuarioId,
+        fecha: admin.firestore.Timestamp.now(),
+        detalle: detalleFinal,
+    };
+
+    try {
+        await metricaRef.set(nuevaMetrica);
+        functions.logger.info(`[Metrica] Evento '${evento}' registrado para usuario ${usuarioId}. ID: ${metricaRef.id}`);
+        return { success: true, message: "Métrica registrada exitosamente.", metricId: metricaRef.id };
+    } catch (error: any) {
+        functions.logger.error(`Error al registrar métrica para usuario ${usuarioId}:`, error);
+        throw new functions.https.HttpsError("internal", "No se pudo registrar la métrica.", error.message);
     }
 });
