@@ -340,7 +340,8 @@ export type ActivityLogAction =
   | "ADMIN_GET_ACTIVE_SERVICES"
   | "ADMIN_GET_PENDING_WARRANTIES"
   | "ADMIN_GET_BLOCKED_USERS"
-  | "USER_GET_BANNERS";
+  | "USER_GET_BANNERS"
+  | "GET_LATEST_APP_VERSION";
 
 export interface BonificacionData {
     id?: string;
@@ -709,6 +710,17 @@ export interface TransaccionData {
   monto: number;
   fecha: admin.firestore.Timestamp;
   detalle?: string;
+}
+
+export interface AppVersionData {
+  id?: string;
+  numeroVersion: string;
+  descripcion: string;
+  fechaLanzamiento: admin.firestore.Timestamp;
+  visible: boolean;
+  obligatoria: boolean;
+  linkAndroid?: string;
+  linkIOS?: string;
 }
 
 
@@ -4445,6 +4457,43 @@ export const cerrarServiciosAntiguos = functions.pubsub.schedule("every 24 hours
     return null;
 });
 
-    
+export const getLatestVisibleAppVersion = functions.https.onCall(async (data, context) => {
+    try {
+        const versionsQuery = db.collection("versionApp")
+            .where("visible", "==", true)
+            .orderBy("fechaLanzamiento", "desc")
+            .limit(1);
 
-    
+        const snapshot = await versionsQuery.get();
+
+        if (snapshot.empty) {
+            functions.logger.warn("[getLatestVisibleAppVersion] No visible app version found in the database.");
+            throw new functions.https.HttpsError("not-found", "No hay ninguna versión de la aplicación visible disponible en este momento.");
+        }
+
+        const latestVersionDoc = snapshot.docs[0];
+        const versionData = latestVersionDoc.data() as AppVersionData;
+
+        await logActivity(
+            context.auth?.uid || "sistema_anonimo",
+            context.auth?.uid ? "usuario" : "sistema",
+            "GET_LATEST_APP_VERSION",
+            `Se consultó la última versión visible de la app. Versión devuelta: ${versionData.numeroVersion}.`,
+            { tipo: "versionApp", id: latestVersionDoc.id }
+        );
+
+        return {
+            numeroVersion: versionData.numeroVersion,
+            descripcion: versionData.descripcion,
+            obligatoria: versionData.obligatoria,
+            fechaLanzamiento: versionData.fechaLanzamiento.toMillis(), // Convert to millis for easier client-side handling
+        };
+
+    } catch (error: any) {
+        functions.logger.error("[getLatestVisibleAppVersion] Error fetching latest app version:", error);
+        if (error instanceof functions.https.HttpsError) {
+            throw error;
+        }
+        throw new functions.https.HttpsError("internal", "No se pudo obtener la información de la versión de la aplicación.", error.message);
+    }
+});
