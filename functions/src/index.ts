@@ -51,8 +51,10 @@ export type EstadoFinalServicio =
   | "cerrado_forzado_admin";
 
 const ESTADOS_FINALES_SERVICIO: EstadoFinalServicio[] = [
-  "cerrado_automaticamente", "cerrado_con_calificacion", "cerrado_con_disputa_resuelta",
-  "cancelada_usuario", "cancelada_prestador", "rechazada_prestador", "cancelada_admin", "cerrado_forzado_admin",
+  "cerrado_automaticamente", "cerrado_con_calificacion",
+  "cerrado_con_disputa_resuelta",
+  "cancelada_usuario", "cancelada_prestador", "rechazada_prestador",
+  "cancelada_admin", "cerrado_forzado_admin",
 ];
 
 export type PaymentStatus =
@@ -143,7 +145,8 @@ export interface ProviderData {
   aceptaViajes?: boolean;
   aceptaTrabajosVirtuales?: boolean;
   empresa?: string;
-  services?: {category: string; title: string; description: string; price: number}[];
+  services?: {category: string; title: string;
+    description: string; price: number}[];
   specialties?: string[];
   isAvailable?: boolean;
   currentLocation?: ProviderLocation | null;
@@ -208,7 +211,8 @@ export interface ServiceRequest {
   solicitadoPorEmpresaId?: string;
   miembroEmpresaUid?: string;
   paymentIntentId?: string;
-  disputeDetails?: {reportedAt: number; reason: string; resolution?: string; resolvedAt?: number;};
+  disputeDetails?: {reportedAt: number; reason: string;
+    resolution?: string; resolvedAt?: number;};
   actualStartTime?: admin.firestore.Timestamp | number;
   actualEndTime?: admin.firestore.Timestamp | number;
   actualDurationHours?: number;
@@ -250,19 +254,22 @@ export interface ChatData {
     remitenteId: string;
     timestamp: admin.firestore.Timestamp;
   };
-  estadoChat?: "activo" | "archivado_usuario" | "archivado_prestador" | "finalizado_servicio";
+  estadoChat?: "activo" | "archivado_usuario" | "archivado_prestador" |
+    "finalizado_servicio";
   conteoNoLeido?: {[uid: string]: number};
 }
 
 export type ActivityLogAction =
-  | "CAMBIO_ESTADO_SOLICITUD" | "SERVICIO_FINALIZADO" | "SERVICIO_CANCELADO" | "SERVICIO_EN_DISPUTA"
+  | "CAMBIO_ESTADO_SOLICITUD" | "SERVICIO_FINALIZADO" | "SERVICIO_CANCELADO"
+  | "SERVICIO_EN_DISPUTA"
   | "CALIFICACION_USUARIO" | "CALIFICACION_PRESTADOR"
   | "SOLICITUD_CREADA" | "PAGO_RETENIDO" | "PAGO_LIBERADO"
   | "GARANTIA_ACTIVADA" | "GARANTIA_APROBADA" | "GARANTIA_RECHAZADA"
   | "INICIO_SESION" | "CIERRE_SESION"
   | "CONFIG_CAMBIADA" | "COTIZACION_CREADA" | "COTIZACION_PRECIO_PROPUESTO"
   | "COTIZACION_ACEPTADA_USUARIO" | "COTIZACION_RECHAZADA" | "CHAT_CREADO"
-  | "PUNTOS_FIDELIDAD_GANADOS" | "PUNTOS_FIDELIDAD_CANJEADOS" | "FONDO_FIDELIDAD_APORTE"
+  | "PUNTOS_FIDELIDAD_GANADOS" | "PUNTOS_FIDELIDAD_CANJEADOS"
+  | "FONDO_FIDELIDAD_APORTE"
   | "PAGO_PROCESADO_DETALLES" | "PROMO_APLICADA"
   | "TRADUCCION_SOLICITADA"
   | "NOTIFICACION_RECORDATORIO_PROGRAMADA" | "NOTIFICACION_RECORDATORIO_ENVIADA"
@@ -340,7 +347,6 @@ export interface BonificacionData {
     origenTexto?: string;
   };
 }
-
 
 export interface PromocionFidelidad {
   id?: string;
@@ -611,7 +617,7 @@ export interface AdminPanelSettingData {
  * @param {"usuario" | "prestador"} userType - El tipo de destinatario.
  * @param {string} title - El título de la notificación.
  * @param {string} body - El cuerpo del mensaje de la notificación.
- * @param {Record<string, string>} [data] - Datos adicionales para el payload.
+ * @param {Object<string, string>} [data] - Datos adicionales para el payload.
  * @return {Promise<void>} Una promesa que se resuelve cuando se completa.
  */
 async function sendNotification(
@@ -648,11 +654,11 @@ async function sendNotification(
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
  * @param {string} actorId - UID del actor que realiza la acción.
- * @param {"usuario" | "prestador" | "sistema" | "admin"} actorRol - Rol del actor.
+ * @param {("usuario" | "prestador" | "sistema" | "admin")} actorRol - Rol del actor.
  * @param {ActivityLogAction} accion - El tipo de acción realizada.
  * @param {string} descripcion - Descripción legible de la acción.
- * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad afectada.
- * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra.
+ * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad afectada (opcional).
+ * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra (opcional).
  * @return {Promise<void>} Una promesa que se resuelve cuando se completa el registro.
  */
 async function logActivity(
@@ -673,7 +679,8 @@ async function logActivity(
       entidadAfectada: entidadAfectada || null,
       detallesAdicionales: detallesAdicionales || null,
     });
-    functions.logger.info(`[LogActivityHelper] Log creado: ${descripcion}`);
+    const logMessage = `[LogActivityHelper] Log creado: ${descripcion}`;
+    functions.logger.info(logMessage);
   } catch (error) {
     functions.logger.error("[LogActivityHelper] Error al crear log:", {
       descripcion,
@@ -853,7 +860,8 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
   const logDesc = `Usuario ${usuarioId} creó y pagó una solicitud #${nuevaSolicitudRef.id} ` +
                   `para ${providerId}. Total: $${montoFinal.toFixed(2)}.`;
   await logActivity(
-    usuarioId, "usuario", "SOLICITUD_CREADA", logDesc, {tipo: "solicitud_servicio", id: nuevaSolicitudRef.id}, {totalAmount: montoFinal, metodoPago, promoAplicada}
+    usuarioId, "usuario", "SOLICITUD_CREADA", logDesc, {tipo: "solicitud_servicio", id: nuevaSolicitudRef.id},
+    {totalAmount: montoFinal, metodoPago, promoAplicada}
   );
 
   await sendNotification(
