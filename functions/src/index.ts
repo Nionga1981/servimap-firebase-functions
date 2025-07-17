@@ -652,7 +652,7 @@ async function sendNotification(
  * @param {ActivityLogAction} accion - El tipo de acción realizada.
  * @param {string} descripcion - Descripción legible de la acción.
  * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad afectada.
- * @param {Record<string, any>} [detallesAdicionales] - Datos extra en formato de objeto.
+ * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra.
  * @return {Promise<void>} Una promesa que se resuelve cuando se completa.
  */
 async function logActivity(
@@ -661,7 +661,7 @@ async function logActivity(
   accion: ActivityLogAction,
   descripcion: string,
   entidadAfectada?: {tipo: string; id: string},
-  detallesAdicionales?: Record<string, any>
+  detallesAdicionales?: Record<string, unknown>
 ): Promise<void> {
   try {
     await db.collection("logEventos").add({
@@ -1319,4 +1319,3 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
   }
 });
 
-    
