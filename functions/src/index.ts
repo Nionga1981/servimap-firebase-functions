@@ -614,7 +614,7 @@ export interface AdminPanelSettingData {
  * @param {string} title - El título de la notificación.
  * @param {string} body - El cuerpo del mensaje de la notificación.
  * @param {Record<string, string>} [data] - Datos adicionales para el payload.
- * @return {Promise<void>}
+ * @return {Promise<void>} Una promesa que se resuelve cuando se completa.
  */
 async function sendNotification(
   userId: string,
@@ -651,9 +651,11 @@ async function sendNotification(
  * @param {"usuario"|"prestador"|"sistema"|"admin"} actorRol - Rol del actor.
  * @param {ActivityLogAction} accion - El tipo de acción realizada.
  * @param {string} descripcion - Descripción legible de la acción.
- * @param {{tipo: string; id: string}} [entidadAfectada] - La entidad principal.
- * @param {Record<string, any>} [detallesAdicionales] - Datos extra.
- * @return {Promise<void>}
+ * @param {Object} [entidadAfectada] - La entidad principal.
+ * @param {string} entidadAfectada.tipo - El tipo de entidad.
+ * @param {string} entidadAfectada.id - El ID de la entidad.
+ * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra.
+ * @return {Promise<void>} Una promesa que se resuelve cuando se completa.
  */
 async function logActivity(
   actorId: string,
