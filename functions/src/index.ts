@@ -653,7 +653,7 @@ async function sendNotification(
  * @param {string} descripcion - Descripción legible de la acción.
  * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad afectada.
  * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra.
- * @return {Promise<void>} Una promesa que se resuelve cuando se completa.
+ * @return {Promise<void>} Una promesa que se resuelve cuando se completa el registro.
  */
 async function logActivity(
   actorId: string,
@@ -675,7 +675,10 @@ async function logActivity(
     });
     functions.logger.info(`[LogActivityHelper] Log creado: ${descripcion}`);
   } catch (error) {
-    functions.logger.error(`[LogActivityHelper] Error al crear log: ${descripcion}`, error);
+    functions.logger.error("[LogActivityHelper] Error al crear log:", {
+      descripcion,
+      error,
+    });
   }
 }
 
@@ -1318,4 +1321,3 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
     throw new functions.https.HttpsError("internal", "Error al procesar.", httpsError.message);
   }
 });
-
