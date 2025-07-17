@@ -1,3 +1,4 @@
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import axios from "axios";
@@ -823,60 +824,48 @@ async function logActivity(
     functions.logger.error(`[LogActivityHelper] Error al crear log: ${descripcion}`, error);
   }
 }
+export const interpretarBusqueda = onRequest({ cors: true }, async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
 
-export const interpretarBusqueda = onRequest({cors: true}, async (req, res) => {
-    if (req.method !== "POST") {
-        res.status(405).send("Method Not Allowed");
-        return;
-    }
+  const { searchQuery } = req.body;
+  if (!searchQuery) {
+    res.status(400).send("Falta el parámetro 'searchQuery'");
+    return;
+  }
+  const OPENAI_API_KEY = "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";
+  const prompt = `
+  Analiza la siguiente búsqueda de un usuario y devuelve un objeto JSON con la estructura:
+  - "tipo" debe ser "prestador" si parece ser un servicio móvil o una persona (ej: plomero, jardinero).
+  - "categoría" debe ser un nombre de categoría simple en español y minúsculas (ej: plomería, jardinería).
+  - "idiomaDetectado" debe ser el código ISO 639-1 del idioma (ej: "es", "en").
+  Texto de búsqueda: "${searchQuery}"
+  `;
+  
+  try {
+    const response = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-3.5-turbo",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0,
+      },
+      {
+        headers: {
+          "Authorization": `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
-    const {searchQuery} = req.body;
-    if (!searchQuery) {
-        res.status(400).json({error: "El campo 'searchQuery' es requerido."});
-        return;
-    }
-
-    const OPENAI_API_KEY = "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";
-    const prompt = `
-Analiza la siguiente búsqueda de un usuario y devuelve un objeto JSON con la estructura exacta: 
-{ "tipo": "...", "categoria": "...", "idiomaDetectado": "..." }
-
-- "tipo" debe ser "prestador" si parece ser un servicio móvil o una persona (por ejemplo: plomero, niñera, electricista a domicilio), o "negocio_fijo" si parece un lugar físico (por ejemplo: taller mecánico, consultorio dental, restaurante).
-- "categoria" debe ser un nombre de categoría simple en español y en minúsculas (por ejemplo: "plomería", "electricidad", "cuidado infantil", "reparación de autos").
-- "idiomaDetectado" debe ser el código ISO 639-1 del idioma detectado (por ejemplo: "es", "en").
-
-Texto de búsqueda: "${searchQuery}"
-`;
-
-
-    try {
-        const response = await axios.post(
-            "https://api.openai.com/v1/chat/completions",
-            {
-                model: "gpt-3.5-turbo",
-                messages: [{role: "user", content: prompt}],
-                temperature: 0,
-            },
-            {
-                headers: {
-                    "Authorization": `Bearer ${OPENAI_API_KEY}`,
-                    "Content-Type": "application/json",
-                },
-            }
-        );
-
-        const resultText = response.data.choices[0].message.content;
-        try {
-            const jsonResult = JSON.parse(resultText);
-            res.status(200).json(jsonResult);
-        } catch (parseError) {
-            functions.logger.error("Error al parsear la respuesta de OpenAI:", parseError, "Respuesta recibida:", resultText);
-            res.status(500).json({error: "La respuesta de la IA no pudo ser procesada."});
-        }
-    } catch (error: any) {
-        functions.logger.error("Error llamando a la API de OpenAI:", error.response ? error.response.data : error.message);
-        res.status(502).json({error: "Hubo un problema al contactar el servicio de IA."});
-    }
+    const respuesta = response.data.choices[0].message.content;
+    res.status(200).json(JSON.parse(respuesta));
+  } catch (error) {
+    console.error("Error al llamar a la API de OpenAI:", error);
+    res.status(500).send("Error al procesar la solicitud.");
+  }
 });
 
 export const createImmediateServiceRequest = functions.https.onCall(async (data, context) => {
@@ -2996,7 +2985,7 @@ export const onNewCommunityNoticeSendNotifications = functions.firestore
       const miembros = comunidadData.miembros;
 
       if (!miembros || miembros.length === 0) {
-        functions.logger.log(`[NewAvisoTrigger ${comunidadId}/${avisoId}] La comunidad "${comunidadData.nombre}" no tiene miembros para notificar.`);
+        functions.logger.log(`[NewAvisoTrigger ${comunidadData.nombre}" no tiene miembros para notificar.`);
         return null;
       }
 
@@ -4883,4 +4872,5 @@ export const manageAdminSettings = functions.https.onCall(async (data, context) 
         }
     }
 });
+    
     
