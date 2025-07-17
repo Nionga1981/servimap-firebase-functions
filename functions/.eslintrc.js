@@ -32,7 +32,7 @@ module.exports = {
     "import/no-unresolved": 0,
     "indent": ["error", 2],
     "object-curly-spacing": "off",
-    "max-len": "off",
+    "max-len": ["error", { "code": 150 }],
     "require-jsdoc": "off",
     "valid-jsdoc": "off",
     "comma-dangle": ["error", "always-multiline"],
