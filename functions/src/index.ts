@@ -1,5 +1,5 @@
 
-'use server';
+"use server";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {onRequest} from "firebase-functions/v2/https";
@@ -847,7 +847,8 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
 
   await nuevaSolicitudRef.set(nuevaSolicitudData);
 
-  const logDesc = `Usuario ${usuarioId} creó y pagó una solicitud #${nuevaSolicitudRef.id} para ${providerId}. Total: $${montoFinal.toFixed(2)}.`;
+  const logDesc = `Usuario ${usuarioId} creó y pagó una solicitud #${nuevaSolicitudRef.id} ` +
+                  `para ${providerId}. Total: $${montoFinal.toFixed(2)}.`;
   await logActivity(
     usuarioId, "usuario", "SOLICITUD_CREADA", logDesc, {tipo: "solicitud_servicio", id: nuevaSolicitudRef.id}, {totalAmount: montoFinal, metodoPago, promoAplicada}
   );
@@ -1309,10 +1310,11 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
       await sendNotification(prestadorId, "prestador", "¡Cotización Aceptada!", notifBody, {solicitudId: nuevaSolicitudRef.id, cotizacionId});
       return {success: true, message: "Cotización aceptada y servicio creado.", servicioId: nuevaSolicitudRef.id};
     });
-  } catch (error: any) {
-    functions.logger.error(`Error al aceptar cotización ${cotizacionId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar.", error.message);
+  } catch (error) {
+    const httpsError = error as functions.https.HttpsError;
+    functions.logger.error(`Error al aceptar cotización ${cotizacionId}:`, httpsError);
+    if (httpsError.code) throw httpsError;
+    throw new functions.https.HttpsError("internal", "Error al procesar.", httpsError.message);
   }
 });
 
