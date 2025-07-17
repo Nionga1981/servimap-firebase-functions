@@ -652,7 +652,7 @@ async function sendNotification(
  * @param {ActivityLogAction} accion - El tipo de acción realizada.
  * @param {string} descripcion - Descripción legible de la acción.
  * @param {{tipo: string; id: string}} [entidadAfectada] - La entidad principal.
- * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra.
+ * @param {Record<string, any>} [detallesAdicionales] - Datos extra.
  * @return {Promise<void>}
  */
 async function logActivity(
