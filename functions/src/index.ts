@@ -657,10 +657,10 @@ async function sendNotification(
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
  * @param {string} actorId UID del actor que realiza la acción.
- * @param {("usuario" | "prestador" | "sistema" | "admin")} actorRol Rol.
+ * @param {("usuario"|"prestador"|"sistema"|"admin")} actorRol Rol del actor.
  * @param {ActivityLogAction} accion El tipo de acción realizada.
  * @param {string} descripcion Descripción legible de la acción.
- * @param {({tipo: string; id: string}) | undefined} entidadAfectada Entidad.
+ * @param {{tipo: string; id: string}} [entidadAfectada] Entidad afectada.
  * @param {Record<string, unknown>} [detallesAdicionales] Datos extra.
  * @return {Promise<void>} Una promesa que se resuelve al completar el registro.
  */
@@ -1545,4 +1545,3 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(
         "Error al procesar.", httpsError.message);
     }
   });
-
