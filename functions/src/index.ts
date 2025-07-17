@@ -1,4 +1,3 @@
-
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {onRequest} from "firebase-functions/v2/https";
@@ -653,11 +652,13 @@ async function sendNotification(
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
  * @param {string} actorId UID del actor que realiza la acción.
- * @param {("usuario" | "prestador" | "sistema" | "admin")} actorRol Rol del actor.
+ * @param {"usuario" | "prestador" | "sistema" | "admin"} actorRol Rol del actor.
  * @param {ActivityLogAction} accion El tipo de acción realizada.
  * @param {string} descripcion Descripción legible de la acción.
- * @param {{tipo: string; id: string}} [entidadAfectada] Entidad afectada.
- * @param {Record<string, unknown>} [detallesAdicionales] Datos extra.
+ * @param {Object} [entidadAfectada] Entidad afectada.
+ * @param {string} entidadAfectada.tipo - El tipo de entidad.
+ * @param {string} entidadAfectada.id - El ID de la entidad.
+ * @param {Object<string, unknown>} [detallesAdicionales] Datos extra.
  * @return {Promise<void>} Una promesa que se resuelve al completar el registro.
  */
 async function logActivity(
@@ -931,11 +932,12 @@ export const onServiceStatusChangeSendNotification = functions.firestore
             if (reminderTime.getTime() > Date.now()) {
               const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
               const nombrePrestador = prestadorDoc.exists ? (prestadorDoc.data() as ProviderData)?.nombre || "El prestador" : "El prestador";
+              const reminderMsg = `Recordatorio: Tu servicio "${serviceTitle}" con ${nombrePrestador} es mañana a las ${newValue.serviceTime}.`;
               const reminderData: Omit<Recordatorio, "id"> = {
                 usuarioId,
                 servicioId: solicitudId,
                 tipo: "recordatorio_servicio",
-                mensaje: `Recordatorio: Tu servicio "${serviceTitle}" con ${nombrePrestador} es mañana a las ${newValue.serviceTime}.`,
+                mensaje: reminderMsg,
                 fechaProgramada: admin.firestore.Timestamp.fromDate(reminderTime),
                 enviado: false,
                 datosAdicionales: {tituloServicio: serviceTitle, nombrePrestador, fechaHoraServicioIso: serviceDateTime.toISOString()},
@@ -985,8 +987,10 @@ export const onServiceStatusChangeSendNotification = functions.firestore
     if (newValue.paymentStatus !== previousValue.paymentStatus && newValue.paymentStatus === "liberado_al_proveedor") {
       targetUserId = prestadorId; targetUserType = "prestador";
       tituloNotif = "¡Pago Liberado!";
-      const montoFinalLiberado = (newValue.detallesFinancieros as DetallesFinancieros)?.montoFinalLiberadoAlPrestador;
-      const montoParaMensaje = montoFinalLiberado?.toFixed(2) || (newValue.montoCobrado || newValue.precio || 0).toFixed(2);
+      const detallesFinancieros = (newValue.detallesFinancieros as DetallesFinancieros);
+      const montoLiberado = detallesFinancieros?.montoFinalLiberadoAlPrestador;
+      const montoMontoCobrado = (newValue.montoCobrado || newValue.precio || 0);
+      const montoParaMensaje = montoLiberado?.toFixed(2) || montoMontoCobrado.toFixed(2);
       cuerpoNotif = `El pago para el servicio "${serviceTitle}" ha sido liberado. Monto: $${montoParaMensaje}.`;
       sendStdNotification = true;
     }
@@ -1331,5 +1335,3 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
     throw new functions.https.HttpsError("internal", "Error al procesar.", httpsError.message);
   }
 });
-
-    
