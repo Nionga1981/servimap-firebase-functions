@@ -378,7 +378,7 @@ export interface Recordatorio {
     tituloServicio?: string;
     nombrePrestador?: string;
     fechaHoraServicioIso?: string;
-    [key: string]: any;
+    [key: string]: string | number | boolean;
   };
 }
 
@@ -748,7 +748,8 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
   const usuarioId = context.auth.uid;
   const {providerId, selectedServices, totalAmount, location, metodoPago, codigoPromocion} = data;
 
-  if (!providerId || !Array.isArray(selectedServices) || selectedServices.length === 0 || typeof totalAmount !== "number" || !location || !metodoPago) {
+  if (!providerId || !Array.isArray(selectedServices) || selectedServices.length === 0 ||
+      typeof totalAmount !== "number" || !location || !metodoPago) {
     throw new functions.https.HttpsError("invalid-argument", "Faltan parámetros requeridos o son inválidos.");
   }
 
@@ -1106,8 +1107,10 @@ export const logSolicitudServicioChanges = functions.firestore
         detallesFinancierosNuevos.montoNetoProcesador = montoTotalPagadoPorUsuario - (detallesFinancierosNuevos.comisionSistemaPagoMonto || 0);
         detallesFinancierosNuevos.comisionAppPct = COMISION_APP_SERVICIOMAP_PORCENTAJE;
         detallesFinancierosNuevos.comisionAppMonto = montoTotalPagadoPorUsuario * COMISION_APP_SERVICIOMAP_PORCENTAJE;
-        detallesFinancierosNuevos.aporteFondoFidelidadMonto = (detallesFinancierosNuevos.comisionAppMonto || 0) * PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD;
-        detallesFinancierosNuevos.montoBrutoParaPrestador = (detallesFinancierosNuevos.montoNetoProcesador || 0) - (detallesFinancierosNuevos.comisionAppMonto || 0);
+        const comisionApp = detallesFinancierosNuevos.comisionAppMonto || 0;
+        detallesFinancierosNuevos.aporteFondoFidelidadMonto = comisionApp * PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD;
+        const montoNeto = detallesFinancierosNuevos.montoNetoProcesador || 0;
+        detallesFinancierosNuevos.montoBrutoParaPrestador = montoNeto - comisionApp;
         detallesFinancierosNuevos.montoFinalLiberadoAlPrestador = detallesFinancierosNuevos.montoBrutoParaPrestador;
         detallesFinancierosNuevos.fechaLiberacion = now;
 
@@ -1262,11 +1265,13 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
         throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada.");
       }
 
-      const userBlocksProviderSnap = await transaction.get(db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", prestadorId).limit(1));
+      const userBlocksProviderQuery = db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", prestadorId).limit(1);
+      const userBlocksProviderSnap = await transaction.get(userBlocksProviderQuery);
       if (!userBlocksProviderSnap.empty) {
         throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor porque lo has bloqueado.");
       }
-      const providerBlocksUserSnap = await transaction.get(db.collection("bloqueos").where("bloqueadorRef", "==", prestadorId).where("bloqueadoRef", "==", usuarioId).limit(1));
+      const providerBlocksUserQuery = db.collection("bloqueos").where("bloqueadorRef", "==", prestadorId).where("bloqueadoRef", "==", usuarioId).limit(1);
+      const providerBlocksUserSnap = await transaction.get(providerBlocksUserQuery);
       if (!providerBlocksUserSnap.empty) {
         throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor.");
       }
@@ -1299,7 +1304,8 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
 
       const logDesc = `Usuario aceptó cotización ${cotizacionId}. Nueva solicitud ID: ${nuevaSolicitudRef.id}.`;
       await logActivity(usuarioId, "usuario", "COTIZACION_ACEPTADA_USUARIO", logDesc, {tipo: "solicitud_cotizacion", id: cotizacionId});
-      await sendNotification(prestadorId, "prestador", "¡Cotización Aceptada!", "Usuario aceptó tu cotización.", {solicitudId: nuevaSolicitudRef.id, cotizacionId});
+      const notifBody = "El usuario ha aceptado tu cotización y se ha generado una nueva solicitud de servicio.";
+      await sendNotification(prestadorId, "prestador", "¡Cotización Aceptada!", notifBody, {solicitudId: nuevaSolicitudRef.id, cotizacionId});
       return {success: true, message: "Cotización aceptada y servicio creado.", servicioId: nuevaSolicitudRef.id};
     });
   } catch (error: any) {
@@ -1308,5 +1314,3 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
     throw new functions.https.HttpsError("internal", "Error al procesar.", error.message);
   }
 });
-
-    
