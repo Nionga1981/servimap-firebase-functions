@@ -19,7 +19,6 @@ const PORCENTAJE_COMISION_EMBAJADOR = 0.05;
 const FACTOR_CONVERSION_PUNTOS = 10;
 const HORAS_ANTES_RECORDATORIO_SERVICIO = 24;
 
-
 // --- INTERFACES (Locally defined for Cloud Functions context) ---
 export type ServiceRequestStatus =
   | "agendado"
@@ -321,7 +320,6 @@ export type ActivityLogAction =
   | "ADMIN_GET_PENDING_WARRANTIES"
   | "ADMIN_GET_BLOCKED_USERS"
   | "USER_GET_BANNERS"
-  | "GET_LATEST_APP_VERSION"
   | "SUGERENCIA_ENVIADA"
   | "ARCHIVO_SOPORTE_REGISTRADO"
   | "SOPORTE_LOG_MANUAL"
@@ -636,9 +634,11 @@ async function sendNotification(
     const payload = {notification: {title, body}, data};
     try {
       await admin.messaging().sendToDevice(tokens, payload);
-      functions.logger.info(`[NotificationHelper] Notificación enviada a ${userType} ${userId}.`);
+      const logMessage = `[NotificationHelper] Notificación enviada a ${userType} ${userId}.`;
+      functions.logger.info(logMessage);
     } catch (error) {
-      functions.logger.error(`[NotificationHelper] Error enviando notificación a ${userType} ${userId}:`, error);
+      const errorMessage = `[NotificationHelper] Error enviando notificación a ${userType} ${userId}:`;
+      functions.logger.error(errorMessage, error);
     }
   } else {
     functions.logger.log(`[NotificationHelper] ${userType} ${userId} no tiene tokens FCM.`);
@@ -648,10 +648,10 @@ async function sendNotification(
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
  * @param {string} actorId - UID del actor que realiza la acción.
- * @param {"usuario" | "prestador" | "sistema" | "admin"} actorRol - Rol del actor.
+ * @param {"usuario" | "prestador" | "sistema" | "admin"} actorRol - Rol.
  * @param {ActivityLogAction} accion - El tipo de acción realizada.
  * @param {string} descripcion - Descripción legible de la acción.
- * @param {{tipo: string; id: string}} [entidadAfectada] - La entidad principal.
+ * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad principal.
  * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra.
  */
 async function logActivity(
@@ -899,7 +899,8 @@ export const onServiceStatusChangeSendNotification = functions.firestore
         if (newValue.isRecurringAttempt && newValue.reactivationOfferedBy === "prestador") {
           targetUserId = usuarioId; targetUserType = "usuario";
           tituloNotif = "Oferta de Reactivación de Servicio";
-          cuerpoNotif = `El prestador ${prestadorId} te ofrece reactivar el servicio "${serviceTitle}".`;
+          const message = `El prestador ${prestadorId} te ofrece reactivar el servicio "${serviceTitle}".`;
+          cuerpoNotif = message;
         } else {
           sendStdNotification = false;
         }

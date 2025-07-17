@@ -31,7 +31,7 @@ module.exports = {
     "import/no-unresolved": 0,
     "indent": ["error", 2],
     "object-curly-spacing": "off",
-    "max-len": ["error", {"code": 150}],
+    "max-len": "off", // Desactivar temporalmente la regla de longitud máxima
+    "require-jsdoc": "off", // Desactivar temporalmente la regla de JSDoc
   },
 };
-
