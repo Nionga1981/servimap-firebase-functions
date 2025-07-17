@@ -2,7 +2,6 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {onRequest} from "firebase-functions/v2/https";
-import {SERVICE_CATEGORIES} from "./constants";
 import {z} from "zod";
 import {ai} from "../../ai/genkit";
 
@@ -17,29 +16,7 @@ const COMISION_APP_SERVICIOMAP_PORCENTAJE = 0.06;
 const PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD = 0.10;
 const PORCENTAJE_COMISION_EMBAJADOR = 0.05;
 const FACTOR_CONVERSION_PUNTOS = 10;
-const DEFAULT_LANGUAGE_CODE = "es";
 const HORAS_ANTES_RECORDATORIO_SERVICIO = 24;
-const PLAZO_REPORTE_DIAS = 7;
-const MINUTOS_VENTANA_CANCELACION = 10;
-const COMISION_CANCELACION_TARDIA_PORCENTAJE = 0.10;
-const MAX_ACTIVE_COMMUNITY_NOTICES = 3;
-const DOS_HORAS_EN_MS = 2 * 60 * 60 * 1000;
-const TREINTA_MINUTOS_EN_MS = 30 * 60 * 1000;
-const BONO_POR_AFILIACION = 50;
-
-// --- CONSTANTS FOR CANCELLATION PENALTIES (CITAS) ---
-const PENALIZACION_CLIENTE_CITA_MAS_2H_PCT = 0.10;
-const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_TOTAL = 0.25;
-const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PLATAFORMA = 0.10;
-const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PRESTADOR = 0.15;
-
-const SUBSCRIPTION_PLANS = {
-  "premium_monthly": {
-    price: 5.00,
-    commissionRate: 0.10,
-    durationDays: 30,
-  },
-};
 
 
 // --- INTERFACES (Locally defined for Cloud Functions context) ---
@@ -379,15 +356,6 @@ export interface PromocionFidelidad {
   serviciosAplicables?: string[];
 }
 
-interface IdiomaRecursosFirestore {
-  [key: string]: string;
-}
-interface IdiomaDocumentoFirestore {
-  codigo: string;
-  nombre: string;
-  recursos: IdiomaRecursosFirestore;
-}
-
 export type RecordatorioTipo =
   | "recordatorio_servicio"
   | "alerta_cancelacion"
@@ -412,32 +380,6 @@ export interface Recordatorio {
     fechaHoraServicioIso?: string;
     [key: string]: any;
   };
-}
-
-interface CoordenadaFirestore {
-  lat: number;
-  lng: number;
-}
-
-interface ReglasZonaFirestore {
-  tarifaFactor?: number;
-  descuentoAbsoluto?: number;
-  descuentoPorcentual?: number;
-  serviciosRestringidos?: string[];
-  serviciosConPrioridad?: string[];
-  promocionesActivasIds?: string[];
-  mensajeEspecial?: string;
-  disponibilidadAfectada?: "restringida_total" | "restringida_parcial" | "mejorada" | "sin_cambio";
-}
-
-interface ZonaPreferenteFirestore {
-  id?: string;
-  nombre: string;
-  poligono: CoordenadaFirestore[];
-  reglas: ReglasZonaFirestore;
-  activa: boolean;
-  prioridad?: number;
-  descripcion?: string;
 }
 
 export type EstadoSolicitudSoporte =
@@ -468,117 +410,6 @@ export interface SoporteTicketData {
   adjuntosUrls?: string[];
 }
 
-interface PrestadorBuscado {
-  id: string;
-  nombre: string;
-  empresa?: string;
-  distanciaKm?: number;
-  calificacion: number;
-  avatarUrl?: string;
-  categoriaPrincipal?: string;
-}
-
-interface ReporteServicioData {
-  id?: string;
-  idServicio: string;
-  idUsuarioReportante: string;
-  rolReportante: "usuario" | "prestador";
-  idReportado: string;
-  rolReportado: "usuario" | "prestador";
-  categoria: string;
-  descripcionProblema: string;
-  archivoAdjuntoURL?: string;
-  fechaReporte: admin.firestore.Timestamp;
-  estadoReporte: "pendiente_revision_admin" | "en_investigacion" | "resuelto_compensacion" | "resuelto_sin_compensacion" | "rechazado_reporte";
-  idServicioOriginalData?: Partial<ServiceRequest>;
-  garantiaActivada?: boolean;
-  idGarantiaPendiente?: string;
-  resolucionAdmin?: string; // Comentario del admin al resolver
-  fechaResolucion?: admin.firestore.Timestamp;
-  resueltaPorAdminId?: string;
-}
-
-interface GarantiaPendienteData {
-  id?: string;
-  idServicio: string;
-  idUsuario: string;
-  idPrestador: string;
-  idReporte: string;
-  fechaSolicitudGarantia: admin.firestore.Timestamp;
-  estadoGarantia: "pendiente_revision" | "aprobada_compensacion" | "aprobada_re_servicio" | "rechazada_garantia";
-  detallesServicioOriginal?: Partial<ServiceRequest>;
-  descripcionProblemaOriginal: string;
-  fechaResolucion?: admin.firestore.Timestamp;
-  notasResolucion?: string;
-  resueltaPorAdminId?: string;
-}
-
-interface ServicioConfirmadoData {
-  userId: string;
-  providerId: string;
-  serviceDetails?: string;
-  paymentAmount: number;
-  status: "confirmado";
-  confirmadoEn: admin.firestore.Timestamp;
-  puedeCancelarHasta: admin.firestore.Timestamp;
-  iniciado: boolean;
-}
-
-interface PagoPendienteData {
-  userId: string;
-  providerId: string;
-  paymentAmount: number;
-  retenido: boolean;
-  status: "esperando_calificacion";
-  creadoEn: admin.firestore.Timestamp;
-}
-
-interface CancelacionData {
-  serviceId: string;
-  actor: "usuario" | "prestador";
-  penalizacionMonto?: number;
-  penalizacionPorcentaje?: number;
-  fechaCancelacion: admin.firestore.Timestamp;
-  motivo?: string;
-}
-
-interface BannerComunitarioDetailsFirestore {
-  titulo: string;
-  imagenUrl: string;
-  link?: string;
-  activo: boolean;
-  dataAiHint?: string;
-}
-
-interface ComunidadData {
-  id?: string;
-  nombre: string;
-  descripcion: string;
-  tipo: "publica" | "privada";
-  ubicacion: ProviderLocation;
-  bannerComunitario: BannerComunitarioDetailsFirestore;
-  embajador_uid: string;
-  miembros: string[];
-  solicitudesPendientes: string[];
-  fechaCreacion: admin.firestore.Timestamp;
-  updatedAt?: admin.firestore.Timestamp;
-  tags?: string[];
-  reglasComunidad?: string;
-  lastActivity?: admin.firestore.Timestamp;
-}
-
-interface AvisoComunidadDataFirestore {
-  id?: string;
-  titulo: string;
-  descripcion: string;
-  fechaPublicacion: admin.firestore.Timestamp;
-  activo: boolean;
-  anclado: boolean;
-  fechaExpiracion?: admin.firestore.Timestamp;
-  autor_uid: string; // Should match embajador_uid from parent ComunidadData
-}
-
-// Specific type for Cita documents in Firestore
 export type CitaEstadoFirestore =
   | "pendiente_confirmacion"
   | "confirmada_prestador"
@@ -592,7 +423,6 @@ export type CitaEstadoFirestore =
   | "completado_por_prestador"
   | "completado_por_usuario";
 
-// Interface for Cita documents in Firestore
 export interface CitaDataFirestore {
   id?: string;
   usuarioId: string;
@@ -782,7 +612,7 @@ export interface AdminPanelSettingData {
  * @param {"usuario" | "prestador"} userType - El tipo de destinatario.
  * @param {string} title - El título de la notificación.
  * @param {string} body - El cuerpo del mensaje de la notificación.
- * @param {{[key: string]: string}} [data] - Datos adicionales para enviar en el payload.
+ * @param {Record<string, string>} [data] - Datos adicionales para enviar en el payload.
  * @return {Promise<void>}
  */
 async function sendNotification(
@@ -791,7 +621,7 @@ async function sendNotification(
   title: string,
   body: string,
   data?: {[key: string]: string}
-) {
+): Promise<void> {
   const userCol = userType === "usuario" ? "usuarios" : "prestadores";
   const userDoc = await db.collection(userCol).doc(userId).get();
   if (!userDoc.exists) {
@@ -821,7 +651,7 @@ async function sendNotification(
  * @param {ActivityLogAction} accion - El tipo de acción realizada.
  * @param {string} descripcion - Descripción legible de la acción.
  * @param {{tipo: string; id: string}} [entidadAfectada] - La entidad principal afectada.
- * @param {Record<string, any>} [detallesAdicionales] - Datos extra en formato JSON.
+ * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra en formato JSON.
  * @return {Promise<void>}
  */
 async function logActivity(
@@ -831,7 +661,7 @@ async function logActivity(
   descripcion: string,
   entidadAfectada?: {tipo: string; id: string},
   detallesAdicionales?: Record<string, unknown>
-) {
+): Promise<void> {
   try {
     await db.collection("logEventos").add({
       actorId,
@@ -1263,7 +1093,7 @@ export const logSolicitudServicioChanges = functions.firestore
     }
 
     const shouldReleasePayment = (isFinalizedState && wasNotFinalizedBefore && afterData.paymentStatus === "retenido_para_liberacion") ||
-        (beforeData.paymentStatus === "retenido_para_liberacion" && afterData.paymentStatus === "liberado_al_proveedor" && isFinalizedState && afterData.status !== "en_disputa");
+        (beforeData.paymentStatus === "retenido_para_liberacion" && afterData.paymentStatus === "liberado_al_proveedor" && isFinalState && afterData.status !== "en_disputa");
 
     if (shouldReleasePayment) {
       const montoTotalPagadoPorUsuario = afterData.montoCobrado || afterData.precio || 0;
@@ -1415,7 +1245,7 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
       const cotizacionData = cotizacionDoc.data() as SolicitudCotizacionData;
 
       if (cotizacionData.usuarioId !== usuarioId) throw new functions.https.HttpsError("permission-denied", "No eres el propietario.");
-      if (cotizacionData.estado !== "precio_propuesto_al_usuario") throw new functions.https.HttpsError("failed-precondition", `Estado inválido.`);
+      if (cotizacionData.estado !== "precio_propuesto_al_usuario") throw new functions.https.HttpsError("failed-precondition", "Estado inválido.");
       if (typeof cotizacionData.precioSugerido !== "number" || cotizacionData.precioSugerido <= 0) {
         throw new functions.https.HttpsError("failed-precondition", "Precio sugerido inválido.");
       }
@@ -1453,7 +1283,7 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
         status: "confirmada_prestador",
         createdAt: ahora,
         updatedAt: ahora,
-        titulo: cotizacionData.tituloServicio || `Servicio de cotización`,
+        titulo: cotizacionData.tituloServicio || "Servicio de cotización",
         precio: cotizacionData.precioSugerido,
         montoCobrado: cotizacionData.precioSugerido,
         paymentStatus: "retenido_para_liberacion",
@@ -1469,7 +1299,7 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
 
       const logDesc = `Usuario aceptó cotización ${cotizacionId}. Nueva solicitud ID: ${nuevaSolicitudRef.id}.`;
       await logActivity(usuarioId, "usuario", "COTIZACION_ACEPTADA_USUARIO", logDesc, {tipo: "solicitud_cotizacion", id: cotizacionId});
-      await sendNotification(prestadorId, "prestador", "¡Cotización Aceptada!", `Usuario aceptó tu cotización.`, {solicitudId: nuevaSolicitudRef.id, cotizacionId});
+      await sendNotification(prestadorId, "prestador", "¡Cotización Aceptada!", "Usuario aceptó tu cotización.", {solicitudId: nuevaSolicitudRef.id, cotizacionId});
       return {success: true, message: "Cotización aceptada y servicio creado.", servicioId: nuevaSolicitudRef.id};
     });
   } catch (error: any) {
@@ -1479,3 +1309,4 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
   }
 });
 
+    
