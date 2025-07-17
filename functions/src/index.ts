@@ -1,8 +1,10 @@
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import axios from "axios";
 import {onRequest} from "firebase-functions/v2/https";
-import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants";
+import {SERVICE_CATEGORIES} from "./constants";
+import {z} from "zod";
+import {ai} from "../../ai/genkit";
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -10,31 +12,31 @@ if (admin.apps.length === 0) {
 const db = admin.firestore();
 
 // --- CONSTANTS FOR FINANCIALS & LOYALTY ---
-const COMISION_SISTEMA_PAGO_PORCENTAJE = 0.04; // 4% payment processor fee
-const COMISION_APP_SERVICIOMAP_PORCENTAJE = 0.06; // 6% ServiMap app commission on original total
-const PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD = 0.10; // 10% of ServiMap's commission goes to loyalty
-const PORCENTAJE_COMISION_EMBAJADOR = 0.05; // 5% of the app's revenue from a service, paid to the referring ambassador
-const FACTOR_CONVERSION_PUNTOS = 10; // $10 MXN (or monetary unit) per 1 loyalty point
+const COMISION_SISTEMA_PAGO_PORCENTAJE = 0.04;
+const COMISION_APP_SERVICIOMAP_PORCENTAJE = 0.06;
+const PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD = 0.10;
+const PORCENTAJE_COMISION_EMBAJADOR = 0.05;
+const FACTOR_CONVERSION_PUNTOS = 10;
 const DEFAULT_LANGUAGE_CODE = "es";
 const HORAS_ANTES_RECORDATORIO_SERVICIO = 24;
 const PLAZO_REPORTE_DIAS = 7;
 const MINUTOS_VENTANA_CANCELACION = 10;
-const COMISION_CANCELACION_TARDIA_PORCENTAJE = 0.10; // 10%
+const COMISION_CANCELACION_TARDIA_PORCENTAJE = 0.10;
 const MAX_ACTIVE_COMMUNITY_NOTICES = 3;
 const DOS_HORAS_EN_MS = 2 * 60 * 60 * 1000;
 const TREINTA_MINUTOS_EN_MS = 30 * 60 * 1000;
 const BONO_POR_AFILIACION = 50;
 
 // --- CONSTANTS FOR CANCELLATION PENALTIES (CITAS) ---
-const PENALIZACION_CLIENTE_CITA_MAS_2H_PCT = 0.10; // 10% of service total, all to platform
-const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_TOTAL = 0.25; // 25% of service total
-const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PLATAFORMA = 0.10; // 10% of service total to platform
-const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PRESTADOR = 0.15; // 15% of service total to provider
+const PENALIZACION_CLIENTE_CITA_MAS_2H_PCT = 0.10;
+const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_TOTAL = 0.25;
+const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PLATAFORMA = 0.10;
+const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PRESTADOR = 0.15;
 
 const SUBSCRIPTION_PLANS = {
   "premium_monthly": {
     price: 5.00,
-    commissionRate: 0.10, // 10%
+    commissionRate: 0.10,
     durationDays: 30,
   },
 };
@@ -774,8 +776,22 @@ export interface AdminPanelSettingData {
 }
 
 
-// --- Helper para enviar notificaciones ---
-async function sendNotification(userId: string, userType: "usuario" | "prestador", title: string, body: string, data?: {[key: string]: string}) {
+/**
+ * Helper para enviar notificaciones push a un usuario o prestador.
+ * @param {string} userId - El UID del destinatario.
+ * @param {"usuario" | "prestador"} userType - El tipo de destinatario.
+ * @param {string} title - El título de la notificación.
+ * @param {string} body - El cuerpo del mensaje de la notificación.
+ * @param {{[key: string]: string}} [data] - Datos adicionales para enviar en el payload.
+ * @return {Promise<void>}
+ */
+async function sendNotification(
+  userId: string,
+  userType: "usuario" | "prestador",
+  title: string,
+  body: string,
+  data?: {[key: string]: string}
+) {
   const userCol = userType === "usuario" ? "usuarios" : "prestadores";
   const userDoc = await db.collection(userCol).doc(userId).get();
   if (!userDoc.exists) {
@@ -798,14 +814,23 @@ async function sendNotification(userId: string, userType: "usuario" | "prestador
   }
 }
 
-// --- Helper para crear logs de actividad ---
+/**
+ * Registra una acción importante en la bitácora de eventos del sistema.
+ * @param {string} actorId - UID del actor que realiza la acción (o 'sistema').
+ * @param {"usuario" | "prestador" | "sistema" | "admin"} actorRol - Rol del actor.
+ * @param {ActivityLogAction} accion - El tipo de acción realizada.
+ * @param {string} descripcion - Descripción legible de la acción.
+ * @param {{tipo: string; id: string}} [entidadAfectada] - La entidad principal afectada.
+ * @param {Record<string, any>} [detallesAdicionales] - Datos extra en formato JSON.
+ * @return {Promise<void>}
+ */
 async function logActivity(
   actorId: string,
   actorRol: "usuario" | "prestador" | "sistema" | "admin",
   accion: ActivityLogAction,
   descripcion: string,
   entidadAfectada?: {tipo: string; id: string},
-  detallesAdicionales?: Record<string, any>
+  detallesAdicionales?: Record<string, unknown>
 ) {
   try {
     await db.collection("logEventos").add({
@@ -823,6 +848,46 @@ async function logActivity(
   }
 }
 
+// --- START: Genkit Implementation of interpretarBusqueda ---
+const interpretarBusquedaInputSchema = z.object({
+  searchQuery: z.string().describe("El texto de búsqueda del usuario a analizar."),
+});
+
+const interpretarBusquedaOutputSchema = z.object({
+  tipo: z.enum(["prestador", "negocio_fijo"]).describe(
+    "El tipo de servicio. 'prestador' para servicios móviles/personas, 'negocio_fijo' para locales físicos."
+  ),
+  categoria: z.string().describe("La categoría del servicio en español y minúsculas (ej: plomería, electricidad)."),
+  idiomaDetectado: z.string().describe("El código ISO 639-1 del idioma detectado (ej: es, en)."),
+});
+
+const interpretarBusquedaPrompt = ai.definePrompt({
+  name: "interpretarBusquedaPrompt",
+  input: {schema: interpretarBusquedaInputSchema},
+  output: {schema: interpretarBusquedaOutputSchema},
+  prompt: `Analiza la siguiente búsqueda de un usuario y clasifícala.
+- "tipo": "prestador" si es un servicio móvil o una persona (ej: plomero, jardinero). "negocio_fijo" si es un lugar (ej: taller, consultorio).
+- "categoría": Una categoría simple en español y minúsculas (ej: plomería, jardinería).
+- "idiomaDetectado": El código ISO 639-1 del idioma.
+
+Texto de búsqueda: {{{searchQuery}}}`,
+});
+
+const interpretarBusquedaFlow = ai.defineFlow(
+  {
+    name: "interpretarBusquedaFlow",
+    inputSchema: interpretarBusquedaInputSchema,
+    outputSchema: interpretarBusquedaOutputSchema,
+  },
+  async (input) => {
+    const {output} = await interpretarBusquedaPrompt(input);
+    if (!output) {
+      throw new Error("La respuesta del modelo de IA fue nula.");
+    }
+    return output;
+  }
+);
+
 export const interpretarBusqueda = onRequest({cors: true}, async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).send("Method Not Allowed");
@@ -835,42 +900,16 @@ export const interpretarBusqueda = onRequest({cors: true}, async (req, res) => {
     return;
   }
 
-  const openAiApiKey = process.env.OPENAI_API_KEY;
-  if (!openAiApiKey) {
-    console.error("La variable de entorno OPENAI_API_KEY no está configurada.");
-    res.status(500).send("Error de configuración del servidor.");
-    return;
-  }
-
-  const prompt = `Analiza la siguiente búsqueda de un usuario y devuelve un objeto JSON con la estructura:
-  - "tipo" debe ser "prestador" si parece ser un servicio móvil o una persona (ej: plomero, jardinero).
-  - "categoría" debe ser un nombre de categoría simple en español y minúsculas (ej: plomería, jardinería).
-  - "idiomaDetectado" debe ser el código ISO 639-1 del idioma (ej: "es", "en").
-  Texto de búsqueda: "${searchQuery}"`;
-
   try {
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-3.5-turbo",
-        messages: [{role: "user", content: prompt}],
-        temperature: 0,
-      },
-      {
-        headers: {
-          "Authorization": `Bearer ${openAiApiKey}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    const respuesta = response.data.choices[0].message.content;
-    res.status(200).json(JSON.parse(respuesta));
+    const result = await interpretarBusquedaFlow({searchQuery});
+    res.status(200).json(result);
   } catch (error) {
-    console.error("Error al llamar a la API de OpenAI:", error);
+    console.error("Error en el flujo de interpretarBusqueda:", error);
     res.status(500).send("Error al procesar la solicitud.");
   }
 });
+// --- END: Genkit Implementation of interpretarBusqueda ---
+
 
 export const createImmediateServiceRequest = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
@@ -900,7 +939,10 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
     const promoDoc = promoSnapshot.docs[0];
     const promoData = promoDoc.data() as PromocionFidelidad;
 
-    if (!promoData.activo || (promoData.fechaExpiracion && promoData.fechaExpiracion.toMillis() < now.toMillis()) || (typeof promoData.usosDisponibles === "number" && promoData.usosDisponibles <= 0)) {
+    const promoExpired = promoData.fechaExpiracion && promoData.fechaExpiracion.toMillis() < now.toMillis();
+    const noUsesLeft = typeof promoData.usosDisponibles === "number" && promoData.usosDisponibles <= 0;
+
+    if (!promoData.activo || promoExpired || noUsesLeft) {
       throw new functions.https.HttpsError("failed-precondition", "El código de promoción no está activo o ha expirado.");
     }
 
@@ -918,11 +960,11 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
       montoDescuento: montoDescuento,
     };
 
-    // Decrementar usos si aplica
     if (typeof promoData.usosDisponibles === "number") {
       await promoDoc.ref.update({usosDisponibles: admin.firestore.FieldValue.increment(-1)});
     }
-    await logActivity(usuarioId, "usuario", "PROMO_APLICADA", `Usuario aplicó promoción "${codigoPromocion}" al servicio ${nuevaSolicitudRef.id}. Descuento: $${montoDescuento.toFixed(2)}`, {tipo: "solicitud_servicio", id: nuevaSolicitudRef.id}, promoAplicada);
+    const desc = `Usuario aplicó promoción "${codigoPromocion}". Descuento: $${montoDescuento.toFixed(2)}`;
+    await logActivity(usuarioId, "usuario", "PROMO_APLICADA", desc, {tipo: "solicitud_servicio", id: nuevaSolicitudRef.id}, promoAplicada);
   }
 
   const providerDoc = await db.collection("prestadores").doc(providerId).get();
@@ -940,7 +982,6 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
     throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes contratar servicios.");
   }
 
-  // Check for user-to-user blocks
   const userBlocksProviderQuery = db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", providerId).limit(1);
   const userBlocksProviderSnap = await userBlocksProviderQuery.get();
   if (!userBlocksProviderSnap.empty) {
@@ -959,36 +1000,28 @@ export const createImmediateServiceRequest = functions.https.onCall(async (data,
     status: "pagada",
     createdAt: now,
     updatedAt: now,
-    titulo: `Servicio inmediato: ${selectedServices.map((s: any) => s.title).join(", ")}`,
+    titulo: `Servicio inmediato: ${selectedServices.map((s: {title: string}) => s.title).join(", ")}`,
     serviceType: "fixed",
     selectedFixedServices: selectedServices,
     totalAmount: totalAmount,
-    montoCobrado: montoFinal, // Usar el monto final con descuento
+    montoCobrado: montoFinal,
     location: location,
     metodoPago: metodoPago,
     paymentStatus: "retenido_para_liberacion",
     actorDelCambioId: usuarioId,
     actorDelCambioRol: "usuario",
-    ...(promoAplicada && {promoAplicada}), // Añadir detalles de la promo
+    ...(promoAplicada && {promoAplicada}),
   };
 
   await nuevaSolicitudRef.set(nuevaSolicitudData);
 
+  const logDesc = `Usuario ${usuarioId} creó y pagó una solicitud #${nuevaSolicitudRef.id} para ${providerId}. Total: $${montoFinal.toFixed(2)}.`;
   await logActivity(
-    usuarioId,
-    "usuario",
-    "SOLICITUD_CREADA",
-    `Usuario ${usuarioId} creó y pagó una solicitud #${nuevaSolicitudRef.id} para ${providerId}. Total: $${montoFinal.toFixed(2)}.`,
-    {tipo: "solicitud_servicio", id: nuevaSolicitudRef.id},
-    {totalAmount: montoFinal, metodoPago, promoAplicada}
+    usuarioId, "usuario", "SOLICITUD_CREADA", logDesc, {tipo: "solicitud_servicio", id: nuevaSolicitudRef.id}, {totalAmount: montoFinal, metodoPago, promoAplicada}
   );
 
   await sendNotification(
-    providerId,
-    "prestador",
-    "¡Nuevo Servicio Inmediato!",
-    `Has recibido un nuevo servicio inmediato de ${usuarioId}. ¡Prepárate!`,
-    {solicitudId: nuevaSolicitudRef.id}
+    providerId, "prestador", "¡Nuevo Servicio Inmediato!", `Has recibido un nuevo servicio inmediato de ${usuarioId}. ¡Prepárate!`, {solicitudId: nuevaSolicitudRef.id}
   );
 
   return {success: true, message: `Servicio solicitado exitosamente. Total: $${montoFinal.toFixed(2)}.`, solicitudId: nuevaSolicitudRef.id};
@@ -1002,16 +1035,12 @@ export const onServiceStatusChangeSendNotification = functions.firestore
     const previousValue = change.before.data() as ServiceRequest;
     const solicitudId = context.params.solicitudId;
 
-    if (!newValue || !previousValue) {
-      functions.logger.log(`[FCM Trigger Solicitud ${solicitudId}] No new or previous data, exiting.`);
-      return null;
-    }
+    if (!newValue || !previousValue) return null;
     if (newValue.status === previousValue.status && newValue.paymentStatus === previousValue.paymentStatus) return null;
 
-    functions.logger.log(`[FCM Trigger Solicitud ${solicitudId}] Estado/Pago cambiado. Antes: ${previousValue.status}, ${previousValue.paymentStatus}. Después: ${newValue.status}, ${newValue.paymentStatus}.`);
+    functions.logger.log(`[FCM] Solicitud ${solicitudId}. Antes: ${previousValue.status}. Después: ${newValue.status}.`);
 
-    const usuarioId = newValue.usuarioId;
-    const prestadorId = newValue.prestadorId;
+    const {usuarioId, prestadorId} = newValue;
     let tituloNotif = "";
     let cuerpoNotif = "";
     let targetUserId: string | null = null;
@@ -1025,7 +1054,7 @@ export const onServiceStatusChangeSendNotification = functions.firestore
         if (newValue.isRecurringAttempt && newValue.reactivationOfferedBy === "usuario") {
           targetUserId = prestadorId; targetUserType = "prestador";
           tituloNotif = "Solicitud de Reactivación de Servicio";
-          cuerpoNotif = `El usuario ${newValue.usuarioId} quiere reactivar el servicio "${serviceTitle}". Por favor, confirma la nueva fecha/hora.`;
+          cuerpoNotif = `El usuario ${usuarioId} quiere reactivar el servicio "${serviceTitle}".`;
         } else if (!newValue.isRecurringAttempt && previousValue.status !== "pendiente_confirmacion_usuario") {
           targetUserId = prestadorId; targetUserType = "prestador";
           tituloNotif = "Nueva Solicitud de Servicio";
@@ -1038,12 +1067,12 @@ export const onServiceStatusChangeSendNotification = functions.firestore
         if (newValue.isRecurringAttempt && newValue.reactivationOfferedBy === "prestador") {
           targetUserId = usuarioId; targetUserType = "usuario";
           tituloNotif = "Oferta de Reactivación de Servicio";
-          cuerpoNotif = `El prestador ${newValue.prestadorId} te ofrece reactivar el servicio "${serviceTitle}". Por favor, confirma si deseas continuar.`;
+          cuerpoNotif = `El prestador ${prestadorId} te ofrece reactivar el servicio "${serviceTitle}".`;
         } else {
           sendStdNotification = false;
         }
         break;
-      case "confirmada_prestador":
+      case "confirmada_prestador": {
         targetUserId = usuarioId; targetUserType = "usuario";
         tituloNotif = "¡Cita Confirmada!"; cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido confirmada.`;
 
@@ -1057,34 +1086,32 @@ export const onServiceStatusChangeSendNotification = functions.firestore
             if (reminderTime.getTime() > Date.now()) {
               const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
               const nombrePrestador = prestadorDoc.exists ? (prestadorDoc.data() as ProviderData)?.nombre || "El prestador" : "El prestador";
-
               const reminderData: Omit<Recordatorio, "id"> = {
-                usuarioId: usuarioId,
+                usuarioId,
                 servicioId: solicitudId,
                 tipo: "recordatorio_servicio",
                 mensaje: `Recordatorio: Tu servicio "${serviceTitle}" con ${nombrePrestador} es mañana a las ${newValue.serviceTime}.`,
                 fechaProgramada: admin.firestore.Timestamp.fromDate(reminderTime),
                 enviado: false,
-                datosAdicionales: {
-                  tituloServicio: serviceTitle,
-                  nombrePrestador: nombrePrestador,
-                  fechaHoraServicioIso: serviceDateTime.toISOString(),
-                },
+                datosAdicionales: {tituloServicio: serviceTitle, nombrePrestador, fechaHoraServicioIso: serviceDateTime.toISOString()},
               };
               const reminderRef = await db.collection("recordatorios").add(reminderData);
-              functions.logger.info(`[Reminder Scheduled] Recordatorio programado para servicio ${solicitudId} en ${reminderTime.toISOString()}. ID: ${reminderRef.id}`);
-              await logActivity("sistema", "sistema", "NOTIFICACION_RECORDATORIO_PROGRAMADA", `Recordatorio programado para servicio ${solicitudId}.`, {tipo: "recordatorio", id: reminderRef.id});
+              const logDesc = `Recordatorio programado para servicio ${solicitudId}.`;
+              await logActivity("sistema", "sistema", "NOTIFICACION_RECORDATORIO_PROGRAMADA", logDesc, {tipo: "recordatorio", id: reminderRef.id});
             }
           } catch (e) {
-            functions.logger.error(`[Reminder Scheduling Error] Error al parsear fecha/hora para servicio ${solicitudId}: ${newValue.serviceDate} ${newValue.serviceTime}`, e);
+            functions.logger.error(`Error al parsear fecha/hora para servicio ${solicitudId}`, e);
           }
         }
         break;
-      case "rechazada_prestador": case "cancelada_prestador":
+      }
+      case "rechazada_prestador": case "cancelada_prestador": {
+        const statusText = newValue.status === "rechazada_prestador" ? "rechazada" : "cancelada";
         targetUserId = usuarioId; targetUserType = "usuario";
-        tituloNotif = `Cita ${newValue.status === "rechazada_prestador" ? "Rechazada" : "Cancelada"}`;
-        cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido ${newValue.status === "rechazada_prestador" ? "rechazada" : "cancelada"} por el prestador.`;
+        tituloNotif = `Cita ${statusText.charAt(0).toUpperCase() + statusText.slice(1)}`;
+        cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido ${statusText} por el prestador.`;
         break;
+      }
       case "cancelada_usuario":
         targetUserId = prestadorId; targetUserType = "prestador";
         tituloNotif = "Cita Cancelada por Usuario"; cuerpoNotif = `La cita para "${serviceTitle}" ha sido cancelada por el usuario.`;
@@ -1099,11 +1126,13 @@ export const onServiceStatusChangeSendNotification = functions.firestore
         break;
       case "completado_por_prestador":
         targetUserId = usuarioId; targetUserType = "usuario";
-        tituloNotif = "Servicio Completado por Prestador"; cuerpoNotif = `El prestador ha marcado "${serviceTitle}" como completado. Por favor, confirma y califica.`;
+        tituloNotif = "Servicio Completado por Prestador";
+        cuerpoNotif = `El prestador ha marcado "${serviceTitle}" como completado. Por favor, confirma y califica.`;
         break;
       case "completado_por_usuario":
         targetUserId = prestadorId; targetUserType = "prestador";
-        tituloNotif = "¡Servicio Confirmado por Usuario!"; cuerpoNotif = `El usuario ha confirmado la finalización de "${serviceTitle}". ¡Ya puedes calificarlo!`;
+        tituloNotif = "¡Servicio Confirmado por Usuario!";
+        cuerpoNotif = `El usuario ha confirmado la finalización de "${serviceTitle}". ¡Ya puedes calificarlo!`;
         break;
       }
     }
@@ -1112,13 +1141,15 @@ export const onServiceStatusChangeSendNotification = functions.firestore
       targetUserId = prestadorId; targetUserType = "prestador";
       tituloNotif = "¡Pago Liberado!";
       const montoFinalLiberado = (newValue.detallesFinancieros as DetallesFinancieros)?.montoFinalLiberadoAlPrestador;
-      const montoParaMensaje = montoFinalLiberado !== undefined ? montoFinalLiberado.toFixed(2) : (newValue.montoCobrado || newValue.precio || 0).toFixed(2);
-      cuerpoNotif = `El pago para el servicio "${serviceTitle}" ha sido liberado a tu cuenta. Monto: $${montoParaMensaje}.`;
+      const montoParaMensaje = montoFinalLiberado?.toFixed(2) || (newValue.montoCobrado || newValue.precio || 0).toFixed(2);
+      cuerpoNotif = `El pago para el servicio "${serviceTitle}" ha sido liberado. Monto: $${montoParaMensaje}.`;
       sendStdNotification = true;
     }
 
     if (sendStdNotification && targetUserId && targetUserType && tituloNotif && cuerpoNotif) {
-      await sendNotification(targetUserId, targetUserType, tituloNotif, cuerpoNotif, {solicitudId, nuevoEstado: newValue.status, nuevoEstadoPago: newValue.paymentStatus || "N/A"});
+      await sendNotification(targetUserId, targetUserType, tituloNotif, cuerpoNotif, {
+        solicitudId, nuevoEstado: newValue.status, nuevoEstadoPago: newValue.paymentStatus || "N/A",
+      });
     }
     return null;
   });
@@ -1143,7 +1174,7 @@ export const logSolicitudServicioChanges = functions.firestore
 
     if (beforeData.status !== afterData.status) {
       let logAction: ActivityLogAction = "CAMBIO_ESTADO_SOLICITUD";
-      let logDescription = `Solicitud ${solicitudId} cambió de ${beforeData.status} a ${afterData.status} por ${actorRol} ${actorId}.`;
+      let logDescription = `Solicitud ${solicitudId} cambió de ${beforeData.status} a ${afterData.status}.`;
 
       const newStatus = afterData.status as ServiceRequestStatus;
       const isFinalState = ESTADOS_FINALES_SERVICIO.includes(newStatus as EstadoFinalServicio);
@@ -1162,11 +1193,7 @@ export const logSolicitudServicioChanges = functions.firestore
       }
 
       await logActivity(
-        actorId,
-        actorRol,
-        logAction,
-        logDescription,
-        {tipo: "solicitud_servicio", id: solicitudId},
+        actorId, actorRol, logAction, logDescription, {tipo: "solicitud_servicio", id: solicitudId},
         {estadoAnterior: beforeData.status, estadoNuevo: afterData.status}
       );
 
@@ -1180,39 +1207,33 @@ export const logSolicitudServicioChanges = functions.firestore
     }
 
     if (!beforeData.calificacionUsuario && afterData.calificacionUsuario) {
-      const descLog = `Usuario ${afterData.usuarioId} calificó servicio ${solicitudId} (Prestador: ${afterData.prestadorId}) con ${afterData.calificacionUsuario.estrellas} estrellas.`;
+      const descLog = `Usuario ${afterData.usuarioId} calificó servicio ${solicitudId} con ${afterData.calificacionUsuario.estrellas} estrellas.`;
       await logActivity(afterData.usuarioId, "usuario", "CALIFICACION_USUARIO", descLog, {tipo: "solicitud_servicio", id: solicitudId}, {
         estrellas: afterData.calificacionUsuario.estrellas,
         comentario: afterData.calificacionUsuario.comentario || "",
-        indicadores: afterData.calificacionUsuario.indicadoresRendimiento,
-        aspectosPositivos: afterData.calificacionUsuario.aspectosPositivos,
-        areasDeMejora: afterData.calificacionUsuario.areasDeMejora,
       });
     }
 
     if (!beforeData.calificacionPrestador && afterData.calificacionPrestador) {
-      const descLog = `Prestador ${afterData.prestadorId} calificó a usuario ${afterData.usuarioId} en servicio ${solicitudId} con ${afterData.calificacionPrestador.estrellas} estrellas.`;
-      await logActivity(afterData.prestadorId, "prestador", "CALIFICACION_PRESTADOR", descLog, {tipo: "solicitud_servicio", id: solicitudId}, {
-        estrellas: afterData.calificacionPrestador.estrellas,
-        comentario: afterData.calificacionPrestador.comentario || "",
-      });
+      const descLog = `Prestador ${afterData.prestadorId} calificó a usuario ${afterData.usuarioId} en servicio ${solicitudId}.`;
+      await logActivity(
+        afterData.prestadorId, "prestador", "CALIFICACION_PRESTADOR", descLog, {tipo: "solicitud_servicio", id: solicitudId},
+        {estrellas: afterData.calificacionPrestador.estrellas, comentario: afterData.calificacionPrestador.comentario || ""}
+      );
     }
 
     const isFinalizedState = ESTADOS_FINALES_SERVICIO.includes(afterData.status as EstadoFinalServicio);
     const wasNotFinalizedBefore = !ESTADOS_FINALES_SERVICIO.includes(beforeData.status as EstadoFinalServicio);
 
     if (isFinalizedState && wasNotFinalizedBefore) {
-      // --- START RELATIONSHIP TRACKING ---
       const relationshipId = `${afterData.usuarioId}_${afterData.prestadorId}`;
       const relationshipRef = db.collection("relacionesUsuarioPrestador").doc(relationshipId);
+      const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
       let serviceCategory = afterData.category;
-      if (!serviceCategory) {
-        const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
-        if (providerDoc.exists) {
-          const providerData = providerDoc.data() as ProviderData;
-          serviceCategory = providerData.categoryIds?.[0] || "general";
-        }
+      if (!serviceCategory && providerDoc.exists) {
+        serviceCategory = (providerDoc.data() as ProviderData).categoryIds?.[0] || "general";
       }
+
       if (serviceCategory) {
         try {
           await db.runTransaction(async (transaction) => {
@@ -1224,27 +1245,27 @@ export const logSolicitudServicioChanges = functions.firestore
                 categoriasServicios: admin.firestore.FieldValue.arrayUnion(serviceCategory),
               });
             } else {
-              const newRelationshipData: RelacionUsuarioPrestadorData = {
+              transaction.set(relationshipRef, {
                 usuarioId: afterData.usuarioId,
                 prestadorId: afterData.prestadorId,
                 serviciosContratados: 1,
                 ultimoServicioFecha: now,
                 categoriasServicios: [serviceCategory],
-              };
-              transaction.set(relationshipRef, newRelationshipData);
+              });
             }
           });
-          await logActivity("sistema", "sistema", "RELACION_USUARIO_PRESTADOR_ACTUALIZADA", `Relación entre usuario ${afterData.usuarioId} y prestador ${afterData.prestadorId} actualizada.`, {tipo: "relacionUsuarioPrestador", id: relationshipId});
+          const logDesc = `Relación entre ${afterData.usuarioId} y ${afterData.prestadorId} actualizada.`;
+          await logActivity("sistema", "sistema", "RELACION_USUARIO_PRESTADOR_ACTUALIZADA", logDesc, {tipo: "relacionUsuarioPrestador", id: relationshipId});
         } catch (e) {
           functions.logger.error(`Error actualizando relación para ${relationshipId}:`, e);
         }
       }
-      // --- END RELATIONSHIP TRACKING ---
     }
 
+    const shouldReleasePayment = (isFinalizedState && wasNotFinalizedBefore && afterData.paymentStatus === "retenido_para_liberacion") ||
+        (beforeData.paymentStatus === "retenido_para_liberacion" && afterData.paymentStatus === "liberado_al_proveedor" && isFinalizedState && afterData.status !== "en_disputa");
 
-    if ((isFinalizedState && wasNotFinalizedBefore && afterData.paymentStatus === "retenido_para_liberacion") ||
-        (beforeData.paymentStatus === "retenido_para_liberacion" && afterData.paymentStatus === "liberado_al_proveedor" && isFinalizedState && beforeData.status !== afterData.status && afterData.status !== "en_disputa")) {
+    if (shouldReleasePayment) {
       const montoTotalPagadoPorUsuario = afterData.montoCobrado || afterData.precio || 0;
       const detallesFinancierosNuevos: DetallesFinancieros = {...(afterData.detallesFinancieros as DetallesFinancieros || {})};
 
@@ -1264,8 +1285,8 @@ export const logSolicitudServicioChanges = functions.firestore
         updatesToServiceRequest.paymentReleasedToProviderAt = now;
         updatesToServiceRequest.detallesFinancieros = detallesFinancierosNuevos;
 
-        await logActivity("sistema", "sistema", "PAGO_LIBERADO", `Pago para servicio ${solicitudId} liberado. Prestador recibe $${detallesFinancierosNuevos.montoFinalLiberadoAlPrestador?.toFixed(2)}.`, {tipo: "solicitud_servicio", id: solicitudId}, detallesFinancierosNuevos);
-        await logActivity("sistema", "sistema", "PAGO_PROCESADO_DETALLES", `Detalles financieros procesados para ${solicitudId}.`, {tipo: "solicitud_servicio", id: solicitudId}, detallesFinancierosNuevos);
+        const logDesc = `Pago para servicio ${solicitudId} liberado.`;
+        await logActivity("sistema", "sistema", "PAGO_LIBERADO", logDesc, {tipo: "solicitud_servicio", id: solicitudId}, detallesFinancierosNuevos);
 
         const pointsEarned = Math.floor(montoTotalPagadoPorUsuario / FACTOR_CONVERSION_PUNTOS);
         if (pointsEarned > 0) {
@@ -1283,13 +1304,14 @@ export const logSolicitudServicioChanges = functions.firestore
           } else {
             await userRef.set({
               puntosAcumulados: pointsEarned, historialPuntos: [userHistoryEntry],
-              nombre: `Usuario ${afterData.usuarioId.substring(0, 5)}`, fcmTokens: [], isPremium: false,
             }, {merge: true});
           }
-          await logActivity(afterData.usuarioId, "usuario", "PUNTOS_FIDELIDAD_GANADOS", `Usuario ganó ${pointsEarned} puntos por servicio ${solicitudId}.`, {tipo: "usuario", id: afterData.usuarioId}, {puntos: pointsEarned, servicioId});
+          await logActivity(
+            afterData.usuarioId, "usuario", "PUNTOS_FIDELIDAD_GANADOS", `Usuario ganó ${pointsEarned} puntos.`,
+            {tipo: "usuario", id: afterData.usuarioId}, {puntos: pointsEarned, servicioId}
+          );
         }
 
-        // --- START AMBASSADOR COMMISSION LOGIC ---
         const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
         if (providerDoc.exists) {
           const providerData = providerDoc.data() as ProviderData;
@@ -1297,53 +1319,45 @@ export const logSolicitudServicioChanges = functions.firestore
             const embajadorUID = providerData.referidoPor;
             const comisionAppMonto = detallesFinancierosNuevos.comisionAppMonto || 0;
             const comisionEmbajador = comisionAppMonto * PORCENTAJE_COMISION_EMBAJADOR;
-
             if (comisionEmbajador > 0) {
-              const comisionesRef = db.collection("comisiones");
-              const providerNameForCommission = providerData.nombre || `prestador ${afterData.prestadorId.substring(0, 5)}`;
-              const comisionDataForCollection = {
+              await db.collection("comisiones").add({
                 idUsuarioGanador: embajadorUID,
                 tipo: "servicio_completado",
                 monto: comisionEmbajador,
-                detalle: `Comisión por servicio completado por @${providerNameForCommission}`,
+                detalle: `Comisión por servicio de ${providerData.nombre}`,
                 fecha: now,
                 referenciaID: solicitudId,
-              };
-              await comisionesRef.add(comisionDataForCollection);
+              });
             }
           }
         }
-        // --- END AMBASSADOR COMMISSION LOGIC ---
 
-
-        if (detallesFinancierosNuevos.aporteFondoFidelidadMonto && detallesFinancierosNuevos.aporteFondoFidelidadMonto > 0) {
+        const aportefondo = detallesFinancierosNuevos.aporteFondoFidelidadMonto || 0;
+        if (aportefondo > 0) {
           const fundRef = db.collection("fondoFidelidad").doc("global");
           const fundHistoryEntry = {
-            servicioId: solicitudId, montoServicio: montoTotalPagadoPorUsuario,
-            comisionPlataformaCalculada: detallesFinancierosNuevos.comisionAppMonto,
-            montoAportadoAlFondo: detallesFinancierosNuevos.aporteFondoFidelidadMonto, fecha: now,
+            servicioId: solicitudId,
+            montoAportadoAlFondo: aportefondo,
+            fecha: now,
           };
           const fundDoc = await fundRef.get();
           if (fundDoc.exists) {
             await fundRef.update({
-              totalAcumulado: admin.firestore.FieldValue.increment(detallesFinancierosNuevos.aporteFondoFidelidadMonto),
+              totalAcumulado: admin.firestore.FieldValue.increment(aportefondo),
               registros: admin.firestore.FieldValue.arrayUnion(fundHistoryEntry),
             });
           } else {
-            await fundRef.set({
-              totalAcumulado: detallesFinancierosNuevos.aporteFondoFidelidadMonto,
-              registros: [fundHistoryEntry],
-            });
+            await fundRef.set({totalAcumulado: aportefondo, registros: [fundHistoryEntry]});
           }
-          await logActivity("sistema", "sistema", "FONDO_FIDELIDAD_APORTE", `Aporte de ${detallesFinancierosNuevos.aporteFondoFidelidadMonto.toFixed(2)} al fondo de fidelidad por servicio ${solicitudId}.`, {tipo: "fondo_fidelidad", id: "global"}, {monto: detallesFinancierosNuevos.aporteFondoFidelidadMonto, servicioId});
+          const desc = `Aporte de ${aportefondo.toFixed(2)} al fondo de fidelidad por servicio ${solicitudId}.`;
+          await logActivity("sistema", "sistema", "FONDO_FIDELIDAD_APORTE", desc, {tipo: "fondo_fidelidad", id: "global"}, {monto: aportefondo, servicioId});
         }
       }
     }
 
-    if (Object.keys(updatesToServiceRequest).length > 1 || updatesToServiceRequest.fechaFinalizacionEfectiva || updatesToServiceRequest.detallesFinancieros || updatesToServiceRequest.userConfirmedCompletionAt) {
+    if (Object.keys(updatesToServiceRequest).length > 1) {
       await change.after.ref.update(updatesToServiceRequest);
     }
-
     return null;
   });
 
@@ -1355,30 +1369,35 @@ export const onQuotationResponseNotifyUser = functions.firestore
     const beforeData = change.before.data() as SolicitudCotizacionData | undefined;
     const afterData = change.after.data() as SolicitudCotizacionData | undefined;
 
-    if (!beforeData || !afterData) return null;
+    if (!beforeData || !afterData || afterData.estado === beforeData.estado) return null;
 
-    const usuarioId = afterData.usuarioId;
-    const prestadorId = afterData.prestadorId;
+    const {usuarioId, prestadorId} = afterData;
     const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
     const nombrePrestador = prestadorDoc.exists ? (prestadorDoc.data() as ProviderData).nombre || "El prestador" : "El prestador";
     const tituloServicio = afterData.tituloServicio || "tu cotización";
-    let notifTitle = ""; let notifBody = ""; let logDesc = ""; let logAction: ActivityLogAction | null = null;
+    let notifTitle = "";
+    let notifBody = "";
+    let logDesc = "";
+    let logAction: ActivityLogAction | null = null;
 
-    if (afterData.estado !== beforeData.estado) {
-      if (afterData.estado === "precio_propuesto_al_usuario" && beforeData.estado === "pendiente_revision_prestador") {
-        notifTitle = "¡Cotización Actualizada!";
-        notifBody = `${nombrePrestador} ha propuesto un precio de $${afterData.precioSugerido} para ${tituloServicio}. Revisa y acepta o rechaza.`;
-        logAction = "COTIZACION_PRECIO_PROPUESTO";
-        logDesc = `${nombrePrestador} (ID: ${prestadorId}) propuso precio $${afterData.precioSugerido} para cotización ${cotizacionId} de usuario ${usuarioId}.`;
-      } else if (afterData.estado === "rechazada_prestador" && beforeData.estado === "pendiente_revision_prestador") {
-        notifTitle = "Cotización Rechazada";
-        notifBody = `${nombrePrestador} ha tenido que rechazar tu solicitud de cotización para ${tituloServicio}. ${afterData.notasPrestador || ""}`;
-        logAction = "COTIZACION_RECHAZADA";
-        logDesc = `${nombrePrestador} (ID: ${prestadorId}) rechazó cotización ${cotizacionId}. Motivo: ${afterData.notasPrestador || "No especificado"}`;
-      }
+    if (afterData.estado === "precio_propuesto_al_usuario" && beforeData.estado === "pendiente_revision_prestador") {
+      notifTitle = "¡Cotización Actualizada!";
+      notifBody = `${nombrePrestador} ha propuesto un precio de $${afterData.precioSugerido} para ${tituloServicio}.`;
+      logAction = "COTIZACION_PRECIO_PROPUESTO";
+      logDesc = `${nombrePrestador} propuso precio para cotización ${cotizacionId}.`;
+    } else if (afterData.estado === "rechazada_prestador" && beforeData.estado === "pendiente_revision_prestador") {
+      notifTitle = "Cotización Rechazada";
+      notifBody = `${nombrePrestador} ha rechazado tu solicitud para ${tituloServicio}.`;
+      logAction = "COTIZACION_RECHAZADA";
+      logDesc = `${nombrePrestador} rechazó cotización ${cotizacionId}.`;
     }
-    if (notifTitle && notifBody) await sendNotification(usuarioId, "usuario", notifTitle, notifBody, {cotizacionId: cotizacionId, nuevoEstado: afterData.estado});
-    if (logAction && logDesc) await logActivity(prestadorId, "prestador", logAction, logDesc, {tipo: "solicitud_cotizacion", id: cotizacionId}, {precioSugerido: afterData.precioSugerido, notasPrestador: afterData.notasPrestador});
+
+    if (notifTitle && notifBody) {
+      await sendNotification(usuarioId, "usuario", notifTitle, notifBody, {cotizacionId: cotizacionId});
+    }
+    if (logAction && logDesc) {
+      await logActivity(prestadorId, "prestador", logAction, logDesc, {tipo: "solicitud_cotizacion", id: cotizacionId});
+    }
     return null;
   });
 
@@ -1396,43 +1415,45 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
       const cotizacionData = cotizacionDoc.data() as SolicitudCotizacionData;
 
       if (cotizacionData.usuarioId !== usuarioId) throw new functions.https.HttpsError("permission-denied", "No eres el propietario.");
-      if (cotizacionData.estado !== "precio_propuesto_al_usuario") throw new functions.https.HttpsError("failed-precondition", `Estado inválido: ${cotizacionData.estado}`);
-      if (typeof cotizacionData.precioSugerido !== "number" || cotizacionData.precioSugerido <= 0) throw new functions.https.HttpsError("failed-precondition", "Precio sugerido inválido.");
+      if (cotizacionData.estado !== "precio_propuesto_al_usuario") throw new functions.https.HttpsError("failed-precondition", `Estado inválido.`);
+      if (typeof cotizacionData.precioSugerido !== "number" || cotizacionData.precioSugerido <= 0) {
+        throw new functions.https.HttpsError("failed-precondition", "Precio sugerido inválido.");
+      }
 
-      const prestadorId = cotizacionData.prestadorId;
-
-      const prestadorDoc = await transaction.get(db.collection("prestadores").doc(prestadorId));
+      const {prestadorId} = cotizacionData;
+      const [prestadorDoc, usuarioDoc] = await Promise.all([
+        transaction.get(db.collection("prestadores").doc(prestadorId)),
+        transaction.get(db.collection("usuarios").doc(usuarioId)),
+      ]);
       if (!prestadorDoc.exists || prestadorDoc.data()?.isBlocked) {
-        throw new functions.https.HttpsError("failed-precondition", "Este proveedor no puede ser contratado en este momento.");
+        throw new functions.https.HttpsError("failed-precondition", "Este proveedor no puede ser contratado.");
       }
-      const usuarioDoc = await transaction.get(db.collection("usuarios").doc(usuarioId));
       if (usuarioDoc.data()?.isBlocked) {
-        throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes contratar servicios.");
+        throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada.");
       }
 
-      const userBlocksProviderQuery = db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", prestadorId).limit(1);
-      const userBlocksProviderSnap = await transaction.get(userBlocksProviderQuery);
+      const userBlocksProviderSnap = await transaction.get(db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", prestadorId).limit(1));
       if (!userBlocksProviderSnap.empty) {
         throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor porque lo has bloqueado.");
       }
-
-      const providerBlocksUserQuery = db.collection("bloqueos").where("bloqueadorRef", "==", prestadorId).where("bloqueadoRef", "==", usuarioId).limit(1);
-      const providerBlocksUserSnap = await transaction.get(providerBlocksUserQuery);
+      const providerBlocksUserSnap = await transaction.get(db.collection("bloqueos").where("bloqueadorRef", "==", prestadorId).where("bloqueadoRef", "==", usuarioId).limit(1));
       if (!providerBlocksUserSnap.empty) {
-        throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor en este momento.");
+        throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor.");
       }
 
       const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
       const ahora = admin.firestore.Timestamp.now();
-
       const tomorrow = new Date(ahora.toDate());
       tomorrow.setDate(tomorrow.getDate() + 1);
       const serviceDateStr = `${tomorrow.getFullYear()}-${(tomorrow.getMonth() + 1).toString().padStart(2, "0")}-${tomorrow.getDate().toString().padStart(2, "0")}`;
-      const serviceTimeStr = "10:00";
 
       const nuevaSolicitudData: Omit<ServiceRequest, "id"> = {
-        usuarioId: usuarioId, prestadorId: cotizacionData.prestadorId, status: "confirmada_prestador",
-        createdAt: ahora, updatedAt: ahora, titulo: cotizacionData.tituloServicio || `Servicio de cotización ${cotizacionId.substring(0, 5)}`,
+        usuarioId: usuarioId,
+        prestadorId: prestadorId,
+        status: "confirmada_prestador",
+        createdAt: ahora,
+        updatedAt: ahora,
+        titulo: cotizacionData.tituloServicio || `Servicio de cotización`,
         precio: cotizacionData.precioSugerido,
         montoCobrado: cotizacionData.precioSugerido,
         paymentStatus: "retenido_para_liberacion",
@@ -1440,14 +1461,15 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
         actorDelCambioId: usuarioId,
         actorDelCambioRol: "usuario",
         serviceDate: serviceDateStr,
-        serviceTime: serviceTimeStr,
+        serviceTime: "10:00",
         serviceType: "fixed",
       };
       transaction.set(nuevaSolicitudRef, nuevaSolicitudData);
       transaction.update(cotizacionRef, {estado: "convertida_a_servicio", fechaRespuestaUsuario: ahora});
 
-      await logActivity(usuarioId, "usuario", "COTIZACION_ACEPTADA_USUARIO", `Usuario aceptó cotización ${cotizacionId}. Nueva solicitud ID: ${nuevaSolicitudRef.id}.`, {tipo: "solicitud_cotizacion", id: cotizacionId}, {nuevaSolicitudServicioId: nuevaSolicitudRef.id, precioAceptado: cotizacionData.precioSugerido});
-      await sendNotification(cotizacionData.prestadorId, "prestador", "¡Cotización Aceptada!", `Usuario aceptó tu cotización de $${cotizacionData.precioSugerido} para "${cotizacionData.tituloServicio || "el servicio"}". Se ha creado una solicitud de servicio.`, {solicitudId: nuevaSolicitudRef.id, cotizacionId: cotizacionId});
+      const logDesc = `Usuario aceptó cotización ${cotizacionId}. Nueva solicitud ID: ${nuevaSolicitudRef.id}.`;
+      await logActivity(usuarioId, "usuario", "COTIZACION_ACEPTADA_USUARIO", logDesc, {tipo: "solicitud_cotizacion", id: cotizacionId});
+      await sendNotification(prestadorId, "prestador", "¡Cotización Aceptada!", `Usuario aceptó tu cotización.`, {solicitudId: nuevaSolicitudRef.id, cotizacionId});
       return {success: true, message: "Cotización aceptada y servicio creado.", servicioId: nuevaSolicitudRef.id};
     });
   } catch (error: any) {
@@ -1457,3409 +1479,3 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
   }
 });
 
-export const onServiceConfirmedCreateChatRoom = functions.firestore
-  .document("solicitudes_servicio/{solicitudId}")
-  .onUpdate(async (change, context) => {
-    const solicitudId = context.params.solicitudId;
-    const afterData = change.after.data() as ServiceRequest | undefined;
-    const beforeData = change.before.data() as ServiceRequest | undefined;
-    if (!afterData || !beforeData) return null;
-
-    const chatTriggerStatus: ServiceRequestStatus = "confirmada_prestador";
-    if (afterData.status === chatTriggerStatus && beforeData.status !== chatTriggerStatus) {
-      functions.logger.info(`[ChatCreate ${solicitudId}] Creando sala de chat.`);
-      const usuarioId = afterData.usuarioId; const prestadorId = afterData.prestadorId;
-      const chatDocRef = db.collection("chats").doc(solicitudId);
-      try {
-        const chatDoc = await chatDocRef.get();
-        if (chatDoc.exists) {
-          functions.logger.info(`Chat ${solicitudId} ya existe.`); return null;
-        }
-
-        const usuarioInfoDoc = await db.collection("usuarios").doc(usuarioId).get();
-        const prestadorInfoDoc = await db.collection("prestadores").doc(prestadorId).get();
-        const ahora = admin.firestore.Timestamp.now();
-        const nuevoChatData: ChatData = {
-          solicitudServicioId: solicitudId, participantesUids: [usuarioId, prestadorId].sort(),
-          participantesInfo: {
-            [usuarioId]: {nombre: (usuarioInfoDoc.data() as UserData)?.nombre || `Usuario ${usuarioId.substring(0, 5)}`, rol: "usuario"},
-            [prestadorId]: {nombre: (prestadorInfoDoc.data() as ProviderData)?.nombre || `Prestador ${prestadorId.substring(0, 5)}`, rol: "prestador"},
-          },
-          fechaCreacion: ahora, ultimaActualizacion: ahora, estadoChat: "activo", conteoNoLeido: {[usuarioId]: 0, [prestadorId]: 0},
-        };
-        await chatDocRef.set(nuevoChatData);
-        await logActivity("sistema", "sistema", "CHAT_CREADO", `Chat creado para solicitud ${solicitudId}.`, {tipo: "chat", id: solicitudId}, {solicitudServicioId: solicitudId});
-        const serviceTitle = afterData.titulo || "el servicio";
-        await sendNotification(usuarioId, "usuario", "Chat Habilitado", `Ya puedes chatear sobre "${serviceTitle}".`, {chatId: solicitudId, solicitudId: solicitudId});
-        await sendNotification(prestadorId, "prestador", "Chat Habilitado", `Ya puedes chatear sobre "${serviceTitle}".`, {chatId: solicitudId, solicitudId: solicitudId});
-      } catch (error) {
-        functions.logger.error(`[ChatCreate ${solicitudId}] Error:`, error);
-      }
-    }
-    return null;
-  });
-
-export const canjearPuntosPromocion = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para canjear puntos.");
-  }
-  const usuarioId = context.auth.uid;
-  const {promocionId} = data;
-
-  if (!promocionId || typeof promocionId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'promocionId'.");
-  }
-
-  const usuarioRef = db.collection("usuarios").doc(usuarioId);
-  const promocionRef = db.collection("promociones").doc(promocionId);
-  const now = admin.firestore.Timestamp.now();
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const usuarioDoc = await transaction.get(usuarioRef);
-      const promocionDoc = await transaction.get(promocionRef);
-
-      if (!usuarioDoc.exists) {
-        throw new functions.https.HttpsError("not-found", "Usuario no encontrado.");
-      }
-      if (!promocionDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Promoción ${promocionId} no encontrada.`);
-      }
-
-      const usuarioData = usuarioDoc.data() as UserData;
-      const promocionData = promocionDoc.data() as PromocionFidelidad;
-
-      if (!promocionData.activo) {
-        throw new functions.https.HttpsError("failed-precondition", "Esta promoción no está activa.");
-      }
-      if (promocionData.fechaExpiracion && promocionData.fechaExpiracion.toMillis() < now.toMillis()) {
-        transaction.update(promocionRef, {activo: false});
-        throw new functions.https.HttpsError("failed-precondition", "Esta promoción ha expirado.");
-      }
-      if (typeof promocionData.usosDisponibles === "number" && promocionData.usosDisponibles <= 0) {
-        transaction.update(promocionRef, {activo: false});
-        throw new functions.https.HttpsError("failed-precondition", "Esta promoción se ha agotado.");
-      }
-      if ((usuarioData.puntosAcumulados || 0) < (promocionData.puntosRequeridos || 0) ) {
-        throw new functions.https.HttpsError("failed-precondition", `No tienes suficientes puntos. Necesitas ${promocionData.puntosRequeridos}, tienes ${usuarioData.puntosAcumulados || 0}.`);
-      }
-
-      const historialCanje: HistorialPuntoUsuario = {
-        promocionId: promocionId,
-        tipo: "canjeados",
-        puntos: -(promocionData.puntosRequeridos || 0),
-        fecha: now,
-        descripcion: `Canje de promoción: ${promocionData.descripcion}`,
-      };
-      transaction.update(usuarioRef, {
-        puntosAcumulados: admin.firestore.FieldValue.increment(-(promocionData.puntosRequeridos || 0)),
-        historialPuntos: admin.firestore.FieldValue.arrayUnion(historialCanje),
-      });
-
-      if (typeof promocionData.usosDisponibles === "number") {
-        transaction.update(promocionRef, {
-          usosDisponibles: admin.firestore.FieldValue.increment(-1),
-        });
-      }
-
-      await logActivity(usuarioId, "usuario", "PUNTOS_FIDELIDAD_CANJEADOS", `Usuario canjeó ${promocionData.puntosRequeridos} puntos por promoción '${promocionData.descripcion}'.`, {tipo: "promocion_fidelidad", id: promocionId}, {puntosGastados: promocionData.puntosRequeridos, promocionId});
-
-      return {
-        success: true,
-        message: `¡Promoción "${promocionData.descripcion}" canjeada exitosamente!`,
-        descuentoAplicable: {
-          tipo: promocionData.tipoDescuento,
-          valor: promocionData.valorDescuento,
-          codigo: promocionData.codigoPromocional,
-        },
-      };
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error al canjear puntos para promoción ${promocionId} por usuario ${usuarioId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar el canje de puntos.", error.message);
-  }
-});
-
-export const obtenerTraduccion = functions.https.onCall(async (data, context) => {
-  const {claveUnica, idiomaSolicitado} = data;
-
-  if (!claveUnica || typeof claveUnica !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'claveUnica' (string).");
-  }
-  if (!idiomaSolicitado || typeof idiomaSolicitado !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idiomaSolicitado' (string, ej: 'es', 'en').");
-  }
-
-  const logActorId = context.auth?.uid || "sistema_anonimo";
-  const logActorRol = context.auth?.uid ? "usuario" : "sistema";
-
-  try {
-    const idiomaRef = db.collection("idiomas").doc(idiomaSolicitado);
-    const docSnap = await idiomaRef.get();
-    let textoTraducido: string | undefined = undefined;
-
-    if (docSnap.exists) {
-      const idiomaData = docSnap.data() as IdiomaDocumentoFirestore;
-      textoTraducido = idiomaData.recursos?.[claveUnica];
-    }
-
-    if (textoTraducido === undefined && idiomaSolicitado !== DEFAULT_LANGUAGE_CODE) {
-      functions.logger.warn(`[obtenerTraduccion] Clave '${claveUnica}' no encontrada en idioma '${idiomaSolicitado}'. Intentando con idioma por defecto '${DEFAULT_LANGUAGE_CODE}'.`);
-      const defaultIdiomaRef = db.collection("idiomas").doc(DEFAULT_LANGUAGE_CODE);
-      const defaultDocSnap = await defaultIdiomaRef.get();
-      if (defaultDocSnap.exists) {
-        const defaultIdiomaData = defaultDocSnap.data() as IdiomaDocumentoFirestore;
-        textoTraducido = defaultIdiomaData.recursos?.[claveUnica];
-      }
-    }
-
-    if (textoTraducido === undefined) {
-      functions.logger.error(`[obtenerTraduccion] Clave '${claveUnica}' no encontrada en idioma '${idiomaSolicitado}' ni en el idioma por defecto.`);
-      await logActivity(logActorId, logActorRol, "TRADUCCION_SOLICITADA", `Clave de traducción no encontrada: ${claveUnica} para idioma ${idiomaSolicitado}.`, {tipo: "idioma", id: idiomaSolicitado}, {clave: claveUnica, resultado: "no_encontrada"});
-      return {traduccion: `[${claveUnica}]`, idiomaDevuelto: null, error: "Clave de traducción no encontrada."};
-    }
-
-    await logActivity(logActorId, logActorRol, "TRADUCCION_SOLICITADA", `Traducción solicitada para clave: ${claveUnica}, idioma: ${idiomaSolicitado}.`, {tipo: "idioma", id: idiomaSolicitado}, {clave: claveUnica, resultado: "encontrada"});
-    return {traduccion: textoTraducido, idiomaDevuelto: idiomaSolicitado};
-  } catch (error: any) {
-    functions.logger.error(`[obtenerTraduccion] Error al obtener traducción para clave '${claveUnica}', idioma '${idiomaSolicitado}':`, error);
-    await logActivity(logActorId, logActorRol, "TRADUCCION_SOLICITADA", `Error al obtener traducción para clave: ${claveUnica}, idioma: ${idiomaSolicitado}.`, {tipo: "idioma", id: idiomaSolicitado}, {clave: claveUnica, error: error.message});
-    throw new functions.https.HttpsError("internal", "Error al procesar la solicitud de traducción.", error.message);
-  }
-});
-
-export const enviarRecordatoriosProgramados = functions.pubsub
-  .schedule("every 15 minutes")
-  .onRun(async (context) => {
-    const now = admin.firestore.Timestamp.now();
-    const remindersQuery = db.collection("recordatorios")
-      .where("enviado", "==", false)
-      .where("fechaProgramada", "<=", now);
-
-    const snapshot = await remindersQuery.get();
-    if (snapshot.empty) {
-      functions.logger.log("[EnviarRecordatorios] No hay recordatorios para enviar.");
-      return null;
-    }
-
-    const promises = snapshot.docs.map(async (doc) => {
-      const reminder = doc.data() as Recordatorio;
-      const reminderId = doc.id;
-
-      try {
-        const userDoc = await db.collection("usuarios").doc(reminder.usuarioId).get();
-        if (!userDoc.exists) {
-          functions.logger.error(`[EnviarRecordatorios] Usuario ${reminder.usuarioId} no encontrado para recordatorio ${reminderId}.`);
-          await doc.ref.update({enviado: true, errorEnvio: "Usuario no encontrado"});
-          return;
-        }
-        const userData = userDoc.data() as UserData;
-        const tokens = userData.fcmTokens;
-
-        if (tokens && tokens.length > 0) {
-          let finalMessage = reminder.mensaje;
-          if (reminder.datosAdicionales?.tituloServicio && reminder.datosAdicionales?.nombrePrestador && reminder.datosAdicionales?.fechaHoraServicioIso) {
-            const serviceDateTime = new Date(reminder.datosAdicionales.fechaHoraServicioIso);
-            const formattedTime = serviceDateTime.toLocaleTimeString("es-MX", {hour: "2-digit", minute: "2-digit"});
-            finalMessage = `Recordatorio: Tu servicio "${reminder.datosAdicionales.tituloServicio}" con ${reminder.datosAdicionales.nombrePrestador} es hoy a las ${formattedTime}.`;
-          }
-
-          const payload = {
-            notification: {
-              title: "Recordatorio de Servicio",
-              body: finalMessage,
-            },
-            data: {
-              servicioId: reminder.servicioId,
-              tipoRecordatorio: reminder.tipo,
-            },
-          };
-          await admin.messaging().sendToDevice(tokens, payload);
-          await doc.ref.update({enviado: true, fechaEnvio: admin.firestore.Timestamp.now(), errorEnvio: null, intentosEnvio: admin.firestore.FieldValue.increment(1)});
-          functions.logger.info(`[EnviarRecordatorios] Recordatorio ${reminderId} enviado a usuario ${reminder.usuarioId}.`);
-          await logActivity("sistema", "sistema", "NOTIFICACION_RECORDATORIO_ENVIADA", `Recordatorio ${reminder.tipo} enviado a usuario ${reminder.usuarioId} para servicio ${reminder.servicioId}.`, {tipo: "recordatorio", id: reminderId});
-        } else {
-          functions.logger.warn(`[EnviarRecordatorios] Usuario ${reminder.usuarioId} no tiene tokens FCM para recordatorio ${reminderId}.`);
-          await doc.ref.update({enviado: true, errorEnvio: "Sin tokens FCM", fechaEnvio: admin.firestore.Timestamp.now()});
-        }
-      } catch (error: any) {
-        functions.logger.error(`[EnviarRecordatorios] Error enviando recordatorio ${reminderId}:`, error);
-        const intentos = (reminder.intentosEnvio || 0) + 1;
-        if (intentos >= 3) {
-          await doc.ref.update({enviado: true, errorEnvio: `Error tras ${intentos} intentos: ${error.message}`, intentosEnvio: intentos});
-        } else {
-          await doc.ref.update({errorEnvio: error.message, intentosEnvio: intentos});
-        }
-      }
-    });
-
-    await Promise.all(promises);
-    return null;
-  });
-
-function isPointInPolygon(point: CoordenadaFirestore, polygon: CoordenadaFirestore[]): boolean {
-  let crossings = 0;
-  const n = polygon.length;
-  if (n < 3) return false;
-
-  for (let i = 0; i < n; i++) {
-    const p1 = polygon[i];
-    const p2 = polygon[(i + 1) % n];
-
-    if (((p1.lat <= point.lat && point.lat < p2.lat) || (p2.lat <= point.lat && point.lat < p1.lat)) &&
-        (point.lng < (p2.lng - p1.lng) * (point.lat - p1.lat) / (p2.lat - p1.lat) + p1.lng)) {
-      crossings++;
-    }
-  }
-  return crossings % 2 === 1;
-}
-
-export const verificarReglasDeZona = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para verificar reglas de zona.");
-  }
-  const actorId = context.auth.uid;
-  const {lat, lng} = data;
-
-  if (typeof lat !== "number" || typeof lng !== "number") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requieren coordenadas 'lat' y 'lng' numéricas.");
-  }
-  const puntoUsuario: CoordenadaFirestore = {lat, lng};
-
-  try {
-    const zonasSnapshot = await db.collection("zonas_preferentes").where("activa", "==", true).orderBy("prioridad", "desc").get();
-    let zonaAplicada: ZonaPreferenteFirestore | null = null;
-
-    if (!zonasSnapshot.empty) {
-      for (const doc of zonasSnapshot.docs) {
-        const zona = doc.data() as ZonaPreferenteFirestore;
-        if (zona.poligono && zona.poligono.length >= 3) {
-          if (isPointInPolygon(puntoUsuario, zona.poligono)) {
-            zonaAplicada = {id: doc.id, ...zona};
-            break;
-          }
-        }
-      }
-    }
-
-    if (zonaAplicada) {
-      await logActivity(actorId, "usuario", "REGLAS_ZONA_CONSULTADAS", `Usuario en zona preferente '${zonaAplicada.nombre}' (ID: ${zonaAplicada.id}).`, {tipo: "zona_preferente", id: zonaAplicada.id || "N/A"}, {lat, lng});
-      return {
-        enZona: true,
-        zonaId: zonaAplicada.id,
-        nombreZona: zonaAplicada.nombre,
-        reglas: zonaAplicada.reglas,
-        descripcion: zonaAplicada.descripcion,
-      };
-    } else {
-      await logActivity(actorId, "usuario", "REGLAS_ZONA_CONSULTADAS", "Usuario no se encuentra en ninguna zona preferente activa.", undefined, {lat, lng});
-      return {enZona: false, zonaId: null, nombreZona: null, reglas: null};
-    }
-  } catch (error: any) {
-    functions.logger.error("Error al verificar reglas de zona:", error);
-    await logActivity(actorId, "usuario", "REGLAS_ZONA_CONSULTADAS", `Error al verificar zona para ${lat},${lng}: ${error.message}`, undefined, {lat, lng, error: error.message});
-    throw new functions.https.HttpsError("internal", "Error al procesar la verificación de zona.", error.message);
-  }
-});
-
-export const onZoneChangeLog = functions.firestore
-  .document("zonas_preferentes/{zonaId}")
-  .onWrite(async (change, context) => {
-    const zonaId = context.params.zonaId;
-    const adminActorId = "admin_sistema";
-
-    if (!change.before.exists) {
-      const newData = change.after.data() as ZonaPreferenteFirestore;
-      await logActivity(adminActorId, "admin", "ADMIN_ZONA_MODIFICADA", `Nueva zona preferente creada: '${newData.nombre}' (ID: ${zonaId}).`, {tipo: "zona_preferente", id: zonaId}, {accionRealizada: "creacion", detalles: newData});
-    } else if (!change.after.exists) {
-      const oldData = change.before.data() as ZonaPreferenteFirestore;
-      await logActivity(adminActorId, "admin", "ADMIN_ZONA_MODIFICADA", `Zona preferente eliminada: '${oldData.nombre}' (ID: ${zonaId}).`, {tipo: "zona_preferente", id: zonaId}, {accionRealizada: "eliminacion"});
-    } else {
-      const newData = change.after.data() as ZonaPreferenteFirestore;
-      const oldData = change.before.data() as ZonaPreferenteFirestore;
-      await logActivity(adminActorId, "admin", "ADMIN_ZONA_MODIFICADA", `Zona preferente actualizada: '${newData.nombre}' (ID: ${zonaId}). Activa: ${newData.activa}.`, {tipo: "zona_preferente", id: zonaId}, {accionRealizada: "actualizacion", cambios: {old: oldData, new: newData}});
-    }
-    return null;
-  });
-
-export const crearSolicitudSoporte = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
-  }
-  const solicitanteId = context.auth.uid;
-  const {
-    categoria,
-    descripcion,
-    rolSolicitante,
-    prioridad,
-    referenciaId,
-    adjuntosUrls,
-  } = data;
-
-  if (!categoria || typeof categoria !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "El campo 'categoria' es requerido.");
-  }
-  if (!descripcion || typeof descripcion !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "El campo 'descripcion' es requerido.");
-  }
-  if (!rolSolicitante || (rolSolicitante !== "usuario" && rolSolicitante !== "prestador")) {
-    throw new functions.https.HttpsError("invalid-argument", "El campo 'rolSolicitante' debe ser 'usuario' o 'prestador'.");
-  }
-
-  const now = admin.firestore.Timestamp.now();
-
-  const nuevaSolicitudData: Omit<SoporteTicketData, "id" | "etiquetas"> = {
-    solicitanteId: solicitanteId,
-    rolSolicitante: rolSolicitante as "usuario" | "prestador",
-    categoria: categoria,
-    estado: "pendiente",
-    descripcion: descripcion,
-    historialMensajes: [
-      {
-        remitenteId: solicitanteId,
-        mensaje: descripcion,
-        timestamp: now,
-      },
-    ],
-    fechaCreacion: now,
-    fechaActualizacion: now,
-    ...(prioridad && {prioridad: prioridad as SoporteTicketData["prioridad"]}),
-    ...(referenciaId && {referenciaId: referenciaId as string}),
-    ...(adjuntosUrls && Array.isArray(adjuntosUrls) && {adjuntosUrls: adjuntosUrls as string[]}),
-  };
-
-  try {
-    const solicitudRef = await db.collection("tickets_soporte").add(nuevaSolicitudData);
-    await logActivity(
-      solicitanteId,
-      rolSolicitante as "usuario" | "prestador",
-      "TICKET_SOPORTE_CREADO",
-      `Nuevo ticket de soporte #${solicitudRef.id} creado por ${rolSolicitante} ${solicitanteId}. Categoría: ${categoria}.`,
-      {tipo: "ticket_soporte", id: solicitudRef.id},
-      {categoria, prioridad: prioridad || "normal"}
-    );
-
-    return {
-      success: true,
-      message: "Tu solicitud de soporte ha sido enviada. Nuestro equipo te contactará pronto.",
-      ticketId: solicitudRef.id,
-    };
-  } catch (error: any) {
-    functions.logger.error(`Error al crear ticket de soporte para ${solicitanteId}:`, error);
-    await logActivity(
-      solicitanteId,
-      rolSolicitante as "usuario" | "prestador",
-      "TICKET_SOPORTE_CREADO",
-      `Error al crear ticket de soporte. Categoría: ${categoria}. Error: ${error.message}`,
-      undefined,
-      {categoria, error: error.message}
-    );
-    throw new functions.https.HttpsError("internal", "No se pudo registrar tu solicitud de soporte.", error.message);
-  }
-});
-
-export const rateServiceByUser = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-  }
-  const userId = context.auth.uid;
-  const {
-    servicioId,
-    estrellas,
-    comentario,
-    indicadoresRendimiento,
-    aspectosPositivos,
-    areasDeMejora,
-  } = data;
-
-  if (!servicioId || typeof servicioId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'servicioId'.");
-  }
-  if (typeof estrellas !== "number" || estrellas < 1 || estrellas > 5) {
-    throw new functions.https.HttpsError("invalid-argument", "La 'calificacion' (estrellas) debe ser un número entre 1 y 5.");
-  }
-
-  const servicioRef = db.collection("solicitudes_servicio").doc(servicioId);
-
-  try {
-    const result = await db.runTransaction(async (transaction) => {
-      const servicioDoc = await transaction.get(servicioRef);
-      if (!servicioDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
-      }
-      const servicioData = servicioDoc.data() as ServiceRequest;
-
-      const userDoc = await db.collection("usuarios").doc(userId).get();
-      if (userDoc.data()?.isBlocked) {
-        throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes calificar servicios.");
-      }
-
-      if (servicioData.usuarioId !== userId) {
-        throw new functions.https.HttpsError("permission-denied", "No puedes calificar este servicio.");
-      }
-      if (servicioData.status !== "completado_por_usuario" && servicioData.status !== "cerrado_automaticamente") {
-        throw new functions.https.HttpsError("failed-precondition", `Solo se pueden calificar servicios en estado 'completado_por_usuario' o 'cerrado_automaticamente'. Estado actual: ${servicioData.status}`);
-      }
-      if (servicioData.calificacionUsuario) {
-        throw new functions.https.HttpsError("already-exists", "Ya has calificado este servicio.");
-      }
-
-      const now = admin.firestore.Timestamp.now();
-      const nuevaCalificacion: CalificacionDetallada = {
-        estrellas,
-        fecha: now,
-        ...(comentario && {comentario}),
-        ...(indicadoresRendimiento && {indicadoresRendimiento}),
-        ...(aspectosPositivos && Array.isArray(aspectosPositivos) && {aspectosPositivos}),
-        ...(areasDeMejora && Array.isArray(areasDeMejora) && {areasDeMejora}),
-      };
-
-      const updates: Partial<ServiceRequest> & { updatedAt: admin.firestore.Timestamp } = {
-        calificacionUsuario: nuevaCalificacion,
-        updatedAt: now,
-      };
-
-      const hasMutualRating = !!servicioData.calificacionPrestador;
-      if (hasMutualRating) {
-        updates.mutualRatingCompleted = true;
-        if (servicioData.status !== "en_disputa") {
-          updates.status = "cerrado_con_calificacion";
-        }
-      }
-
-      transaction.update(servicioRef, updates);
-
-      return {
-        mutualRatingCompleted: hasMutualRating,
-        usuarioId: servicioData.usuarioId,
-        prestadorId: servicioData.prestadorId,
-        titulo: servicioData.titulo || "un servicio",
-      };
-    });
-
-    if (result && result.mutualRatingCompleted) {
-      const notifTitle = "¡Tu servicio fue calificado exitosamente!";
-      const notifBody = `Tanto tú como el proveedor han calificado el servicio "${result.titulo}". El pago ha sido procesado.`;
-      await sendNotification(result.usuarioId, "usuario", notifTitle, notifBody);
-      await sendNotification(result.prestadorId, "prestador", notifTitle, notifBody);
-    }
-    return {success: true, message: "Calificación registrada exitosamente."};
-  } catch (error: any) {
-    functions.logger.error(`Error al calificar servicio ${servicioId} por usuario ${userId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar la calificación.", error.message);
-  }
-});
-
-export const rateServiceByProvider = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-  }
-  const providerId = context.auth.uid;
-  const {servicioId, estrellas, comentario} = data;
-
-  if (!servicioId || typeof servicioId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'servicioId'.");
-  }
-  if (typeof estrellas !== "number" || estrellas < 1 || estrellas > 5) {
-    throw new functions.https.HttpsError("invalid-argument", "La 'calificacion' (estrellas) debe ser un número entre 1 y 5.");
-  }
-
-  const servicioRef = db.collection("solicitudes_servicio").doc(servicioId);
-
-  try {
-    const result = await db.runTransaction(async (transaction) => {
-      const servicioDoc = await transaction.get(servicioRef);
-      if (!servicioDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
-      }
-      const servicioData = servicioDoc.data() as ServiceRequest;
-
-      if (servicioData.prestadorId !== providerId) {
-        throw new functions.https.HttpsError("permission-denied", "No puedes calificar este servicio.");
-      }
-      if (servicioData.status !== "completado_por_usuario" && servicioData.status !== "cerrado_automaticamente" && servicioData.status !== "cerrado_con_calificacion") {
-        throw new functions.https.HttpsError("failed-precondition", `Solo puedes calificar servicios que el usuario haya confirmado o estén cerrados. Estado actual: ${servicioData.status}`);
-      }
-      if (servicioData.calificacionPrestador) {
-        throw new functions.https.HttpsError("already-exists", "Ya has calificado a este usuario para este servicio.");
-      }
-
-      const now = admin.firestore.Timestamp.now();
-      const nuevaCalificacion: CalificacionDetallada = {
-        estrellas,
-        fecha: now,
-        ...(comentario && {comentario}),
-      };
-
-      const updates: Partial<ServiceRequest> & { updatedAt: admin.firestore.Timestamp } = {
-        calificacionPrestador: nuevaCalificacion,
-        updatedAt: now,
-      };
-
-      const hasMutualRating = !!servicioData.calificacionUsuario;
-      if (hasMutualRating) {
-        updates.mutualRatingCompleted = true;
-        if (servicioData.status !== "en_disputa") {
-          updates.status = "cerrado_con_calificacion";
-        }
-      }
-
-      transaction.update(servicioRef, updates);
-
-      return {
-        mutualRatingCompleted: hasMutualRating,
-        usuarioId: servicioData.usuarioId,
-        prestadorId: servicioData.prestadorId,
-        titulo: servicioData.titulo || "un servicio",
-      };
-    });
-
-    if (result && result.mutualRatingCompleted) {
-      const notifTitle = "¡Tu servicio fue calificado exitosamente!";
-      const notifBody = `Tanto tú como el usuario han calificado el servicio "${result.titulo}". El pago ha sido procesado.`;
-      await sendNotification(result.usuarioId, "usuario", notifTitle, notifBody);
-      await sendNotification(result.prestadorId, "prestador", notifTitle, notifBody);
-    }
-
-    return {success: true, message: "Calificación de usuario registrada exitosamente."};
-  } catch (error: any) {
-    functions.logger.error(`Error al calificar usuario para servicio ${servicioId} por proveedor ${providerId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar la calificación.", error.message);
-  }
-});
-
-export const buscarPrestadoresInteligente = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-  }
-  const {textoBusqueda, latUsuario, lngUsuario} = data;
-
-  if (!textoBusqueda || typeof textoBusqueda !== "string" || typeof latUsuario !== "number" || typeof lngUsuario !== "number") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'textoBusqueda', 'latUsuario' y 'lngUsuario'.");
-  }
-
-  const textoBusquedaLower = textoBusqueda.toLowerCase();
-
-  try {
-    const prestadoresSnapshot = await db.collection("prestadores").get();
-    const prestadoresCandidatos: PrestadorBuscado[] = [];
-
-    for (const doc of prestadoresSnapshot.docs) {
-      const provider = doc.data() as ProviderData;
-      if (!provider.isAvailable || !provider.currentLocation) continue;
-
-      let match = false;
-      if (provider.nombre?.toLowerCase().includes(textoBusquedaLower)) match = true;
-      if (!match && provider.empresa?.toLowerCase().includes(textoBusquedaLower)) match = true;
-      if (!match && provider.specialties?.some((s) => s.toLowerCase().includes(textoBusquedaLower))) match = true;
-
-      if (!match && provider.services) {
-        for (const service of provider.services) {
-          if (service.title.toLowerCase().includes(textoBusquedaLower)) {
-            match = true; break;
-          }
-          if (service.description.toLowerCase().includes(textoBusquedaLower)) {
-            match = true; break;
-          }
-          const categoryInfo = SERVICE_CATEGORIES.find((c) => c.id === service.category);
-          if (categoryInfo?.name.toLowerCase().includes(textoBusquedaLower)) {
-            match = true; break;
-          }
-          if (categoryInfo?.keywords.some((k) => k.toLowerCase().includes(textoBusquedaLower))) {
-            match = true; break;
-          }
-        }
-      }
-
-      if (match) {
-        const distanciaKm = calculateDistance(
-          latUsuario,
-          lngUsuario,
-          provider.currentLocation.lat,
-          provider.currentLocation.lng
-        );
-
-        prestadoresCandidatos.push({
-          id: doc.id,
-          nombre: provider.nombre || "N/A",
-          empresa: provider.empresa,
-          distanciaKm: parseFloat(distanciaKm.toFixed(1)),
-          calificacion: provider.rating || 0,
-          avatarUrl: provider.avatarUrl,
-          categoriaPrincipal: provider.services?.[0]?.category ? (SERVICE_CATEGORIES.find((c)=>c.id === provider.services?.[0]?.category)?.name || provider.services?.[0]?.category) : "General",
-        });
-      }
-    }
-
-    prestadoresCandidatos.sort((a, b) => {
-      if (a.distanciaKm && b.distanciaKm && a.distanciaKm < b.distanciaKm) return -1;
-      if (a.distanciaKm && b.distanciaKm && a.distanciaKm > b.distanciaKm) return 1;
-      if (a.calificacion > b.calificacion) return -1;
-      if (a.calificacion < b.calificacion) return 1;
-      return 0;
-    });
-
-    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó: "${textoBusqueda}". Resultados: ${prestadoresCandidatos.length}.`, undefined, {texto: textoBusqueda, lat: latUsuario, lng: lngUsuario});
-
-    return prestadoresCandidatos;
-  } catch (error: any) {
-    functions.logger.error("Error en buscarPrestadoresInteligente:", error);
-    throw new functions.https.HttpsError("internal", "Error al buscar prestadores.", error.message);
-  }
-});
-
-export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-  }
-  const {categoriaId} = data;
-
-  if (!categoriaId || typeof categoriaId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'categoriaId'.");
-  }
-
-  try {
-    const prestadoresQuery = db.collection("prestadores")
-      .where("isAvailable", "==", true)
-      .where("categoryIds", "array-contains", categoriaId)
-      .where("aceptaTrabajosVirtuales", "==", true)
-      .orderBy("rating", "desc");
-
-    const prestadoresSnapshot = await prestadoresQuery.get();
-
-    if (prestadoresSnapshot.empty) {
-      return [];
-    }
-
-    const resultados: Omit<PrestadorBuscado, "distanciaKm">[] = [];
-
-    for (const doc of prestadoresSnapshot.docs) {
-      const provider = doc.data() as ProviderData;
-
-      resultados.push({
-        id: doc.id,
-        nombre: provider.nombre || "N/A",
-        empresa: provider.empresa,
-        calificacion: provider.rating || 0,
-        avatarUrl: provider.avatarUrl,
-        categoriaPrincipal: SERVICE_CATEGORIES.find((c) => c.id === (provider.categoryIds?.[0]))?.name || "General",
-      });
-    }
-
-    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó trabajos virtuales por categoría: "${categoriaId}". Resultados: ${resultados.length}.`, undefined, {categoriaId});
-
-    return resultados;
-  } catch (error: any) {
-    functions.logger.error("Error en buscarPrestadoresPorFiltros:", error);
-    if (error.code === "failed-precondition") {
-      throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions (isAvailable, categoryIds, aceptaTrabajosVirtuales, rating).");
-    }
-    throw new functions.https.HttpsError("internal", "Error al buscar prestadores.", error.message);
-  }
-});
-
-
-const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-  const R = 6371; // Radius of the earth in km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-};
-
-
-export const reportarProblemaServicio = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-  }
-  const idUsuarioReportante = context.auth.uid;
-  const {idServicio, rol, categoria, descripcionProblema, archivoAdjuntoURL} = data;
-
-  if (!idServicio || typeof idServicio !== "string") throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idServicio'.");
-  if (!rol || (rol !== "usuario" && rol !== "prestador")) throw new functions.https.HttpsError("invalid-argument", "El 'rol' del reportante es requerido.");
-  if (!categoria || typeof categoria !== "string") throw new functions.https.HttpsError("invalid-argument", "Se requiere 'categoria' del reporte.");
-  if (!descripcionProblema || typeof descripcionProblema !== "string") throw new functions.https.HttpsError("invalid-argument", "Se requiere 'descripcionProblema'.");
-
-  const servicioRef = db.collection("solicitudes_servicio").doc(idServicio);
-  const reportesRef = db.collection("reportes");
-  const garantiasRef = db.collection("garantiasPendientes");
-  const now = admin.firestore.Timestamp.now();
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const servicioDoc = await transaction.get(servicioRef);
-      if (!servicioDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Servicio con ID ${idServicio} no encontrado.`);
-      }
-      const servicioData = servicioDoc.data() as ServiceRequest;
-
-      const userDoc = await db.collection("usuarios").doc(idUsuarioReportante).get();
-      if (userDoc.data()?.isBlocked) {
-        throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes reportar problemas.");
-      }
-
-
-      const [idReportado, rolReportado] = rol === "usuario" ? [servicioData.prestadorId, "prestador"] : [servicioData.usuarioId, "usuario"];
-
-      if (idUsuarioReportante !== servicioData.usuarioId && idUsuarioReportante !== servicioData.prestadorId) throw new functions.https.HttpsError("permission-denied", "No participaste en este servicio.");
-      if (rol === "usuario" && idUsuarioReportante !== servicioData.usuarioId) throw new functions.https.HttpsError("permission-denied", "Tu rol no coincide con tu participación en este servicio.");
-      if (rol === "prestador" && idUsuarioReportante !== servicioData.prestadorId) throw new functions.https.HttpsError("permission-denied", "Tu rol no coincide con tu participación en este servicio.");
-      if (!servicioData.fechaFinalizacionEfectiva) throw new functions.https.HttpsError("failed-precondition", "El servicio aún no ha finalizado para poder reportar un problema.");
-
-      const fechaFinalizacion = (servicioData.fechaFinalizacionEfectiva as admin.firestore.Timestamp).toDate();
-      const plazoMaximoReporte = new Date(fechaFinalizacion.getTime() + PLAZO_REPORTE_DIAS * 24 * 60 * 60 * 1000);
-      if (now.toDate() > plazoMaximoReporte) throw new functions.https.HttpsError("failed-precondition", "El plazo para reportar problemas ha expirado.");
-
-      if (servicioData.reporteActivoId) {
-        const reporteExistenteDoc = await transaction.get(reportesRef.doc(servicioData.reporteActivoId));
-        if (reporteExistenteDoc.exists) throw new functions.https.HttpsError("already-exists", "Ya existe un reporte activo para este servicio.");
-      }
-
-      const nuevoReporteRef = reportesRef.doc();
-      const reporteData: ReporteServicioData = {
-        idServicio: idServicio,
-        idUsuarioReportante: idUsuarioReportante,
-        rolReportante: rol as "usuario" | "prestador",
-        idReportado: idReportado,
-        rolReportado: rolReportado,
-        categoria,
-        descripcionProblema,
-        fechaReporte: now,
-        estadoReporte: "pendiente_revision_admin",
-        garantiaActivada: false,
-        ...(archivoAdjuntoURL && {archivoAdjuntoURL: archivoAdjuntoURL as string}),
-        idServicioOriginalData: {
-          titulo: servicioData.titulo,
-          status: servicioData.status,
-          paymentStatus: servicioData.paymentStatus,
-          montoCobrado: servicioData.montoCobrado,
-        },
-      };
-      transaction.set(nuevoReporteRef, reporteData);
-
-      const updateServicio: Partial<ServiceRequest> = {
-        reporteActivoId: nuevoReporteRef.id,
-        estadoDisputa: "abierta",
-        updatedAt: now,
-      };
-      if (servicioData.paymentStatus === "retenido_para_liberacion" || servicioData.paymentStatus === "liberado_al_proveedor") {
-        updateServicio.paymentStatus = "congelado_por_disputa";
-      }
-      transaction.update(servicioRef, updateServicio);
-
-      await logActivity(idUsuarioReportante, rol as "usuario" | "prestador", "REPORTE_PROBLEMA_CREADO", `Reporte #${nuevoReporteRef.id} creado para servicio ${idServicio} por ${rol} ${idUsuarioReportante}.`, {tipo: "reporte_servicio", id: nuevoReporteRef.id}, {descripcion: descripcionProblema});
-      await sendNotification(idReportado, rolReportado, "Reporte de Problema Recibido", `Se ha registrado un reporte para el servicio "${servicioData.titulo || idServicio}". Un administrador lo revisará pronto.`, {servicioId: idServicio, reporteId: nuevoReporteRef.id});
-
-      if (rol === "usuario") {
-        const usuarioDocSnap = await db.collection("usuarios").doc(idUsuarioReportante).get();
-        const esPremium = (usuarioDocSnap.data() as UserData)?.isPremium || false;
-
-        if (esPremium) {
-          const nuevaGarantiaRef = garantiasRef.doc();
-          const garantiaData: GarantiaPendienteData = {
-            idServicio: idServicio,
-            idUsuario: idUsuarioReportante,
-            idPrestador: servicioData.prestadorId,
-            idReporte: nuevoReporteRef.id,
-            fechaSolicitudGarantia: now,
-            estadoGarantia: "pendiente_revision",
-            descripcionProblemaOriginal: descripcionProblema,
-            detallesServicioOriginal: {titulo: servicioData.titulo, status: servicioData.status},
-          };
-          transaction.set(nuevaGarantiaRef, garantiaData);
-          transaction.update(nuevoReporteRef, {garantiaActivada: true, idGarantiaPendiente: nuevaGarantiaRef.id});
-          await logActivity(idUsuarioReportante, "usuario", "GARANTIA_REGISTRADA", `Garantía #${nuevaGarantiaRef.id} registrada para reporte ${nuevoReporteRef.id} de usuario premium.`, {tipo: "garantia", id: nuevaGarantiaRef.id});
-          return {status: "garantiaActivada", reporteId: nuevoReporteRef.id, garantiaId: nuevaGarantiaRef.id};
-        }
-      }
-      return {status: "reporteRegistrado", reporteId: nuevoReporteRef.id};
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error al reportar problema para servicio ${idServicio}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar el reporte.", error.message);
-  }
-});
-
-
-export const reactivarServicioRecurrente = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un usuario autenticado.");
-  }
-  const initiatorId = context.auth.uid;
-  const {idServicioAnterior, accion, notasIniciador, nuevaFecha, nuevaHora} = data;
-
-  if (!idServicioAnterior || typeof idServicioAnterior !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idServicioAnterior'.");
-  }
-  if (!accion || (accion !== "solicitar_nuevamente" && accion !== "ofrecer_nuevamente")) {
-    throw new functions.https.HttpsError("invalid-argument", "La 'accion' debe ser 'solicitar_nuevamente' o 'ofrecer_nuevamente'.");
-  }
-
-  const servicioAnteriorRef = db.collection("solicitudes_servicio").doc(idServicioAnterior);
-
-  try {
-    const servicioAnteriorDoc = await servicioAnteriorRef.get();
-    if (!servicioAnteriorDoc.exists) {
-      throw new functions.https.HttpsError("not-found", `Servicio anterior con ID ${idServicioAnterior} no encontrado.`);
-    }
-    const servicioAnteriorData = servicioAnteriorDoc.data() as ServiceRequest;
-
-    let initiatorRoleInOldService: "usuario" | "prestador";
-    if (initiatorId === servicioAnteriorData.usuarioId) {
-      initiatorRoleInOldService = "usuario";
-    } else if (initiatorId === servicioAnteriorData.prestadorId) {
-      initiatorRoleInOldService = "prestador";
-    } else {
-      throw new functions.https.HttpsError("permission-denied", "No participaste en el servicio anterior.");
-    }
-
-    if (accion === "solicitar_nuevamente" && initiatorRoleInOldService !== "usuario") {
-      throw new functions.https.HttpsError("failed-precondition", "Solo el usuario original puede 'solicitar_nuevamente'.");
-    }
-    if (accion === "ofrecer_nuevamente" && initiatorRoleInOldService !== "prestador") {
-      throw new functions.https.HttpsError("failed-precondition", "Solo el prestador original puede 'ofrecer_nuevamente'.");
-    }
-
-    const usuarioId = servicioAnteriorData.usuarioId;
-    const prestadorId = servicioAnteriorData.prestadorId;
-
-    const [usuarioDoc, prestadorDoc] = await Promise.all([
-      db.collection("usuarios").doc(usuarioId).get(),
-      db.collection("prestadores").doc(prestadorId).get(),
-    ]);
-
-    if (usuarioDoc.data()?.isBlocked) {
-      throw new functions.https.HttpsError("failed-precondition", "La cuenta del usuario está bloqueada y no puede reactivar servicios.");
-    }
-    if (prestadorDoc.data()?.isBlocked) {
-      throw new functions.https.HttpsError("failed-precondition", "El proveedor no está disponible para ser contratado en este momento.");
-    }
-
-    const userBlocksProviderQuery = db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", prestadorId).limit(1);
-    const userBlocksProviderSnap = await userBlocksProviderQuery.get();
-    if (!userBlocksProviderSnap.empty) {
-      throw new functions.https.HttpsError("permission-denied", "No puedes reactivar servicios con este proveedor porque lo has bloqueado.");
-    }
-
-    const providerBlocksUserQuery = db.collection("bloqueos").where("bloqueadorRef", "==", prestadorId).where("bloqueadoRef", "==", usuarioId).limit(1);
-    const providerBlocksUserSnap = await providerBlocksUserQuery.get();
-    if (!providerBlocksUserSnap.empty) {
-      throw new functions.https.HttpsError("permission-denied", "No puedes reactivar servicios con este proveedor en este momento.");
-    }
-
-    const now = admin.firestore.Timestamp.now();
-    const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
-
-    const newServiceRequestData: Partial<ServiceRequest> = {
-      usuarioId: servicioAnteriorData.usuarioId,
-      prestadorId: servicioAnteriorData.prestadorId,
-      titulo: `Reactivación: ${servicioAnteriorData.titulo || "Servicio Anterior"}`,
-      serviceType: servicioAnteriorData.serviceType,
-      location: servicioAnteriorData.location,
-      notes: notasIniciador || `Reactivación de servicio: ${idServicioAnterior}`,
-      precio: servicioAnteriorData.precio,
-      hourlyRate: servicioAnteriorData.hourlyRate,
-      durationHours: servicioAnteriorData.durationHours,
-      selectedFixedServices: servicioAnteriorData.selectedFixedServices,
-      totalAmount: servicioAnteriorData.totalAmount,
-      estimatedTotal: servicioAnteriorData.estimatedTotal,
-      originatingServiceId: idServicioAnterior,
-      isRecurringAttempt: true,
-      actorDelCambioId: initiatorId,
-      actorDelCambioRol: initiatorRoleInOldService,
-      createdAt: now,
-      updatedAt: now,
-      paymentStatus: "no_aplica",
-    };
-
-    if (nuevaFecha) newServiceRequestData.serviceDate = nuevaFecha;
-    if (nuevaHora) newServiceRequestData.serviceTime = nuevaHora;
-
-    let targetNotificationUserId = "";
-    let targetNotificationUserType: "usuario" | "prestador" = "usuario";
-    let notificationTitle = "";
-    let notificationBody = "";
-    let logAction: ActivityLogAction = "SOLICITUD_CREADA";
-
-    if (accion === "solicitar_nuevamente") {
-      newServiceRequestData.status = "agendado";
-      newServiceRequestData.reactivationOfferedBy = "usuario";
-      targetNotificationUserId = servicioAnteriorData.prestadorId;
-      targetNotificationUserType = "prestador";
-      notificationTitle = "Solicitud de Reactivación de Servicio";
-      notificationBody = `El usuario ${initiatorId} desea reactivar el servicio "${servicioAnteriorData.titulo || idServicioAnterior}". Por favor, revisa y confirma los detalles.`;
-      logAction = "SERVICIO_REACTIVADO_SOLICITUD";
-    } else { // "ofrecer_nuevamente"
-      newServiceRequestData.status = "pendiente_confirmacion_usuario";
-      newServiceRequestData.reactivationOfferedBy = "prestador";
-      targetNotificationUserId = servicioAnteriorData.usuarioId;
-      targetNotificationUserType = "usuario";
-      notificationTitle = "Oferta para Reactivar Servicio";
-      notificationBody = `El prestador ${initiatorId} te ofrece reactivar el servicio "${servicioAnteriorData.titulo || idServicioAnterior}". Por favor, revisa y confirma si deseas proceder.`;
-      logAction = "SERVICIO_REACTIVADO_OFERTA";
-    }
-
-    await nuevaSolicitudRef.set(newServiceRequestData);
-
-    await logActivity(
-      initiatorId,
-      initiatorRoleInOldService,
-      logAction,
-      `Intento de reactivación (${accion}) para servicio anterior ${idServicioAnterior}. Nueva solicitud: ${nuevaSolicitudRef.id}.`,
-      {tipo: "solicitud_servicio", id: nuevaSolicitudRef.id},
-      {idServicioAnterior, notas: notasIniciador}
-    );
-
-    await sendNotification(targetNotificationUserId, targetNotificationUserType, notificationTitle, notificationBody, {
-      newServiceRequestId: nuevaSolicitudRef.id,
-      originatingServiceId: idServicioAnterior,
-    });
-
-    return {success: true, newServiceRequestId: nuevaSolicitudRef.id};
-  } catch (error: any) {
-    functions.logger.error(`Error en reactivarServicioRecurrente para ${idServicioAnterior}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar la reactivación del servicio.", error.message);
-  }
-});
-
-export const startServiceByProvider = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "La función debe ser llamada por un prestador autenticado.");
-  }
-  const providerId = context.auth.uid;
-  const {servicioId} = data;
-
-  if (!servicioId || typeof servicioId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'servicioId'.");
-  }
-
-  const servicioRef = db.collection("solicitudes_servicio").doc(servicioId);
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const servicioDoc = await transaction.get(servicioRef);
-      if (!servicioDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
-      }
-      const servicioData = servicioDoc.data() as ServiceRequest;
-
-      if (servicioData.prestadorId !== providerId) {
-        throw new functions.https.HttpsError("permission-denied", "No eres el prestador asignado a este servicio.");
-      }
-
-      const validPreviousStates: ServiceRequestStatus[] = ["confirmada_prestador", "pagada", "en_camino_proveedor"];
-      if (!validPreviousStates.includes(servicioData.status)) {
-        throw new functions.https.HttpsError("failed-precondition", `No se puede iniciar el servicio desde el estado actual '${servicioData.status}'. Estados válidos previos: ${validPreviousStates.join(", ")}.`);
-      }
-
-      const now = admin.firestore.Timestamp.now();
-      const updates: Partial<ServiceRequest> = {
-        status: "servicio_iniciado",
-        actualStartTime: now,
-        updatedAt: now,
-        actorDelCambioId: providerId,
-        actorDelCambioRol: "prestador",
-      };
-
-      transaction.update(servicioRef, updates);
-
-      await logActivity(
-        providerId,
-        "prestador",
-        "CAMBIO_ESTADO_SOLICITUD",
-        `Prestador ${providerId} inició el servicio ${servicioId}.`,
-        {tipo: "solicitud_servicio", id: servicioId},
-        {estadoAnterior: servicioData.status, estadoNuevo: "servicio_iniciado"}
-      );
-
-      await sendNotification(
-        servicioData.usuarioId,
-        "usuario",
-        "¡Servicio Iniciado!",
-        `El prestador ${providerId} (ID: ${providerId.substring(0, 5)}) ha comenzado el servicio "${servicioData.titulo || "reservado"}".`,
-        {servicioId: servicioId, nuevoEstado: "servicio_iniciado"}
-      );
-
-      return {success: true, message: "Servicio marcado como iniciado correctamente."};
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error al iniciar servicio ${servicioId} por prestador ${providerId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al iniciar el servicio.", error.message);
-  }
-});
-
-export const confirmServiceAndHandlePayment = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-  }
-  const userId = context.auth.uid;
-  const {serviceId, serviceDetails, paymentAmount} = data;
-
-  if (!serviceId || typeof serviceId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'serviceId'.");
-  }
-  if (typeof paymentAmount !== "number" || paymentAmount <= 0) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'paymentAmount' válido y positivo.");
-  }
-
-  const originalServiceRef = db.collection("solicitudes_servicio").doc(serviceId);
-  const servicioConfirmadoRef = db.collection("serviciosConfirmados").doc(serviceId);
-  const pagoPendienteRef = db.collection("pagosPendientes").doc(serviceId);
-  const now = admin.firestore.Timestamp.now();
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const originalServiceDoc = await transaction.get(originalServiceRef);
-      if (!originalServiceDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Servicio original con ID ${serviceId} no encontrado.`);
-      }
-      const originalServiceData = originalServiceDoc.data() as ServiceRequest;
-
-      if (originalServiceData.usuarioId !== userId) {
-        throw new functions.https.HttpsError("permission-denied", "No eres el usuario de este servicio.");
-      }
-
-      if (originalServiceData.status !== "confirmada_prestador" && originalServiceData.status !== "pendiente_confirmacion_usuario") {
-        throw new functions.https.HttpsError("failed-precondition", `El servicio no está en un estado válido para confirmación y pago. Estado actual: ${originalServiceData.status}`);
-      }
-      if (originalServiceData.paymentStatus !== "pendiente_cobro" && originalServiceData.paymentStatus !== "no_aplica") {
-        if (!(originalServiceData.isRecurringAttempt && originalServiceData.reactivationOfferedBy === "prestador" && originalServiceData.paymentStatus === "no_aplica")) {
-          throw new functions.https.HttpsError("failed-precondition", `El estado de pago del servicio no es 'pendiente_cobro' o no es una oferta de reactivación válida. Estado pago: ${originalServiceData.paymentStatus}`);
-        }
-      }
-
-      const servicioConfirmadoPayload: ServicioConfirmadoData = {
-        userId: userId,
-        providerId: originalServiceData.prestadorId,
-        paymentAmount: paymentAmount,
-        status: "confirmado",
-        confirmadoEn: now,
-        puedeCancelarHasta: admin.firestore.Timestamp.fromMillis(now.toMillis() + MINUTOS_VENTANA_CANCELACION * 60 * 1000),
-        iniciado: false,
-        ...(serviceDetails && {serviceDetails: serviceDetails as string}),
-      };
-      transaction.set(servicioConfirmadoRef, servicioConfirmadoPayload);
-
-      const pagoPendientePayload: PagoPendienteData = {
-        userId: userId,
-        providerId: originalServiceData.prestadorId,
-        paymentAmount: paymentAmount,
-        retenido: true,
-        status: "esperando_calificacion",
-        creadoEn: now,
-      };
-      transaction.set(pagoPendienteRef, pagoPendientePayload);
-
-      const updateOriginalService: Partial<ServiceRequest> = {
-        status: "pagada",
-        paymentStatus: "retenido_para_liberacion",
-        montoCobrado: paymentAmount,
-        updatedAt: now,
-        actorDelCambioId: userId,
-        actorDelCambioRol: "usuario",
-        cancellationWindowExpiresAt: admin.firestore.Timestamp.fromMillis(now.toMillis() + MINUTOS_VENTANA_CANCELACION * 60 * 1000),
-        paymentIntentId: `sim_pi_${serviceId}_${now.toMillis()}`,
-      };
-      transaction.update(originalServiceRef, updateOriginalService);
-
-      await logActivity(
-        userId,
-        "usuario",
-        "SERVICIO_CONFIRMADO_PAGADO",
-        `Usuario confirmó y pagó servicio ${serviceId}. Monto: ${paymentAmount}. Detalles: ${serviceDetails || "N/A"}`,
-        {tipo: "solicitud_servicio", id: serviceId},
-        {paymentAmount, serviceDetails: serviceDetails || "N/A"}
-      );
-
-      await sendNotification(
-        originalServiceData.prestadorId,
-        "prestador",
-        "¡Servicio Confirmado y Pagado!",
-        `El usuario ha confirmado y pagado el servicio "${originalServiceData.titulo || serviceId}". Monto: $${paymentAmount}.`,
-        {serviceId: serviceId, status: "pagada"}
-      );
-
-      return {success: true, message: "Servicio confirmado y pago retenido exitosamente."};
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error en confirmServiceAndHandlePayment para servicio ${serviceId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al confirmar el servicio y procesar el pago.", error.message);
-  }
-});
-
-export const cancelService = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-  }
-  const callingUserId = context.auth.uid;
-  const {serviceId} = data;
-
-  if (!serviceId || typeof serviceId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'serviceId'.");
-  }
-
-  const servicioConfirmadoRef = db.collection("serviciosConfirmados").doc(serviceId);
-  const cancelacionesRef = db.collection("cancelaciones");
-
-  const now = admin.firestore.Timestamp.now();
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const servicioConfirmadoDoc = await transaction.get(servicioConfirmadoRef);
-      if (!servicioConfirmadoDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Servicio confirmado con ID ${serviceId} no encontrado.`);
-      }
-      const servicioConfirmadoData = servicioConfirmadoDoc.data() as ServicioConfirmadoData;
-
-      let actor: "usuario" | "prestador";
-      let otraParteId: string;
-      let otraParteRol: "usuario" | "prestador";
-
-      if (callingUserId === servicioConfirmadoData.userId) {
-        actor = "usuario";
-        otraParteId = servicioConfirmadoData.providerId;
-        otraParteRol = "prestador";
-      } else if (callingUserId === servicioConfirmadoData.providerId) {
-        actor = "prestador";
-        otraParteId = servicioConfirmadoData.userId;
-        otraParteRol = "usuario";
-      } else {
-        throw new functions.https.HttpsError("permission-denied", "No estás autorizado para cancelar este servicio.");
-      }
-
-      if (servicioConfirmadoData.iniciado === true) {
-        throw new functions.https.HttpsError("failed-precondition", "No se puede cancelar un servicio que ya ha comenzado.");
-      }
-
-      let penalizacionMonto = 0;
-      let penalizacionPorcentaje = 0;
-      let logAction: ActivityLogAction = "SERVICIO_CANCELADO_SIN_PENALIZACION";
-      let messageToUser = `Servicio ${serviceId} cancelado exitosamente.`;
-
-      if (now.toMillis() > (servicioConfirmadoData.puedeCancelarHasta as admin.firestore.Timestamp).toMillis()) {
-        penalizacionPorcentaje = COMISION_CANCELACION_TARDIA_PORCENTAJE;
-        penalizacionMonto = servicioConfirmadoData.paymentAmount * penalizacionPorcentaje;
-        logAction = "SERVICIO_CANCELADO_CON_PENALIZACION";
-        messageToUser = `Servicio ${serviceId} cancelado. Se aplicó una penalización de $${penalizacionMonto.toFixed(2)} por cancelación tardía.`;
-        functions.logger.info(`Cancelación tardía para servicio ${serviceId} por ${actor}. Penalización: $${penalizacionMonto.toFixed(2)}`);
-      } else {
-        functions.logger.info(`Cancelación dentro de ventana para servicio ${serviceId} por ${actor}. Sin penalización.`);
-      }
-
-      const cancelacionPayload: CancelacionData = {
-        serviceId: serviceId,
-        actor: actor,
-        penalizacionMonto: penalizacionMonto > 0 ? penalizacionMonto : undefined,
-        penalizacionPorcentaje: penalizacionPorcentaje > 0 ? penalizacionPorcentaje : undefined,
-        fechaCancelacion: now,
-      };
-      transaction.set(cancelacionesRef.doc(), cancelacionPayload);
-      transaction.delete(servicioConfirmadoRef);
-
-      await logActivity(
-        callingUserId,
-        actor,
-        logAction,
-        `Servicio ${serviceId} cancelado por ${actor}. Penalización: $${penalizacionMonto.toFixed(2)}.`,
-        {tipo: "cancelacion", id: serviceId},
-        {montoPenalizacion: penalizacionMonto, porcentajePenalizacion: penalizacionPorcentaje}
-      );
-
-      await sendNotification(
-        otraParteId,
-        otraParteRol,
-        "Servicio Cancelado",
-        `El servicio (ID: ${serviceId.substring(0, 6)}) ha sido cancelado por ${actor}. ${penalizacionMonto > 0 ? `Se aplicó una penalización de $${penalizacionMonto.toFixed(2)}.` : "No se aplicó penalización."}`,
-        {serviceId: serviceId, actorCancelacion: actor}
-      );
-      functions.logger.warn(`[cancelService] DEUDA TÉCNICA: Actualizaciones a 'pagosPendientes' y 'solicitudes_servicio' para ${serviceId} no implementadas en esta función.`);
-
-
-      return {success: true, message: messageToUser, penalizacionAplicada: penalizacionMonto};
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error al cancelar servicio ${serviceId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar la cancelación del servicio.", error.message);
-  }
-});
-
-
-export const solicitarUnirseAComunidad = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-  }
-  const usuarioId = context.auth.uid;
-  const {comunidadId} = data;
-
-  if (!comunidadId || typeof comunidadId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'comunidadId'.");
-  }
-
-  const comunidadRef = db.collection("comunidades").doc(comunidadId);
-  const now = admin.firestore.Timestamp.now();
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const comunidadDoc = await transaction.get(comunidadRef);
-      if (!comunidadDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Comunidad con ID ${comunidadId} no encontrada.`);
-      }
-      const comunidadData = comunidadDoc.data() as ComunidadData;
-
-      if (comunidadData.tipo === "privada") {
-        if (comunidadData.miembros?.includes(usuarioId)) {
-          throw new functions.https.HttpsError("already-exists", "Ya eres miembro de esta comunidad.");
-        }
-        if (comunidadData.solicitudesPendientes?.includes(usuarioId)) {
-          throw new functions.https.HttpsError("already-exists", "Tu solicitud para unirte a esta comunidad ya está pendiente.");
-        }
-        transaction.update(comunidadRef, {
-          solicitudesPendientes: admin.firestore.FieldValue.arrayUnion(usuarioId),
-          updatedAt: now,
-        });
-        await logActivity(usuarioId, "usuario", "COMUNIDAD_SOLICITUD_UNIRSE", `Usuario ${usuarioId} solicitó unirse a comunidad privada '${comunidadData.nombre}' (ID: ${comunidadId}).`, {tipo: "comunidad", id: comunidadId});
-
-        if (comunidadData.embajador_uid && comunidadData.embajador_uid !== usuarioId) {
-          await sendNotification(comunidadData.embajador_uid, "usuario", "Nueva Solicitud de Unión", `El usuario ${usuarioId} desea unirse a tu comunidad "${comunidadData.nombre}".`, {comunidadId: comunidadId, solicitanteId: usuarioId});
-          await logActivity("sistema", "sistema", "COMUNIDAD_EMBAJADOR_NOTIFICADO_SOLICITUD", `Embajador ${comunidadData.embajador_uid} notificado de solicitud de ${usuarioId} para comunidad ${comunidadId}.`, {tipo: "comunidad", id: comunidadId});
-        }
-        return {success: true, message: "Tu solicitud para unirte ha sido enviada. Espera la aprobación del embajador."};
-      } else if (comunidadData.tipo === "publica") {
-        if (comunidadData.miembros?.includes(usuarioId)) {
-          throw new functions.https.HttpsError("already-exists", "Ya eres miembro de esta comunidad.");
-        }
-        transaction.update(comunidadRef, {
-          miembros: admin.firestore.FieldValue.arrayUnion(usuarioId),
-          updatedAt: now,
-        });
-        await logActivity(usuarioId, "usuario", "COMUNIDAD_USUARIO_UNIDO", `Usuario ${usuarioId} se unió a comunidad pública '${comunidadData.nombre}' (ID: ${comunidadId}).`, {tipo: "comunidad", id: comunidadId});
-        return {success: true, message: `¡Te has unido a la comunidad "${comunidadData.nombre}"!`};
-      } else {
-        throw new functions.https.HttpsError("failed-precondition", "Tipo de comunidad desconocido o no manejado.");
-      }
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error al solicitar unirse a comunidad ${comunidadId} por usuario ${usuarioId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar la solicitud para unirse a la comunidad.", error.message);
-  }
-});
-
-export const gestionarSolicitudComunidad = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-  }
-  const embajadorId = context.auth.uid;
-  const {comunidadId, solicitanteUid, accion} = data; // accion: "aprobar" | "rechazar"
-
-  if (!comunidadId || typeof comunidadId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'comunidadId'.");
-  }
-  if (!solicitanteUid || typeof solicitanteUid !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'solicitanteUid'.");
-  }
-  if (!accion || (accion !== "aprobar" && accion !== "rechazar")) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere una 'accion' válida ('aprobar' o 'rechazar').");
-  }
-
-  const comunidadRef = db.collection("comunidades").doc(comunidadId);
-  const now = admin.firestore.Timestamp.now();
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const comunidadDoc = await transaction.get(comunidadRef);
-      if (!comunidadDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Comunidad con ID ${comunidadId} no encontrada.`);
-      }
-      const comunidadData = comunidadDoc.data() as ComunidadData;
-
-      if (comunidadData.embajador_uid !== embajadorId) {
-        throw new functions.https.HttpsError("permission-denied", "No eres el embajador de esta comunidad y no puedes gestionar solicitudes.");
-      }
-
-      if (!comunidadData.solicitudesPendientes?.includes(solicitanteUid)) {
-        throw new functions.https.HttpsError("failed-precondition", `El usuario ${solicitanteUid} no tiene una solicitud pendiente para esta comunidad o ya fue procesada.`);
-      }
-
-      let logMessage = "";
-      let logActionType: ActivityLogAction;
-      let notifTitle = "";
-      let notifBody = "";
-
-      if (accion === "aprobar") {
-        transaction.update(comunidadRef, {
-          solicitudesPendientes: admin.firestore.FieldValue.arrayRemove(solicitanteUid),
-          miembros: admin.firestore.FieldValue.arrayUnion(solicitanteUid),
-          updatedAt: now,
-        });
-        logActionType = "COMUNIDAD_SOLICITUD_APROBADA";
-        logMessage = `Embajador ${embajadorId} aprobó solicitud de ${solicitanteUid} para unirse a comunidad '${comunidadData.nombre}' (ID: ${comunidadId}).`;
-        notifTitle = "¡Solicitud Aprobada!";
-        notifBody = `Tu solicitud para unirte a la comunidad "${comunidadData.nombre}" ha sido aprobada. ¡Bienvenido/a!`;
-      } else { // accion === "rechazar"
-        transaction.update(comunidadRef, {
-          solicitudesPendientes: admin.firestore.FieldValue.arrayRemove(solicitanteUid),
-          updatedAt: now,
-        });
-        logActionType = "COMUNIDAD_SOLICITUD_RECHAZADA";
-        logMessage = `Embajador ${embajadorId} rechazó solicitud de ${solicitanteUid} para unirse a comunidad '${comunidadData.nombre}' (ID: ${comunidadId}).`;
-        notifTitle = "Solicitud Rechazada";
-        notifBody = `Lamentablemente, tu solicitud para unirte a la comunidad "${comunidadData.nombre}" ha sido rechazada.`;
-      }
-
-      await logActivity(embajadorId, "usuario", logActionType, logMessage, {tipo: "comunidad", id: comunidadId}, {solicitanteProcesado: solicitanteUid});
-      await sendNotification(solicitanteUid, "usuario", notifTitle, notifBody, {comunidadId: comunidadId, accionRealizada: accion});
-
-      return {success: true, message: `Solicitud de ${solicitanteUid} ${accion === "aprobar" ? "aprobada" : "rechazada"} exitosamente.`};
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error al gestionar solicitud para comunidad ${comunidadId} por embajador ${embajadorId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar la gestión de la solicitud.", error.message);
-  }
-});
-
-export const manageCommunityNotice = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-  }
-  const embajadorId = context.auth.uid;
-  const {comunidadId, action, noticeData, noticeId} = data as {
-    comunidadId: string,
-    action: "create" | "update",
-    noticeData: Partial<AvisoComunidadDataFirestore>,
-    noticeId?: string
-  };
-
-  if (!comunidadId || typeof comunidadId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'comunidadId'.");
-  }
-  if (!action || (action !== "create" && action !== "update")) {
-    throw new functions.https.HttpsError("invalid-argument", "La 'action' debe ser 'create' o 'update'.");
-  }
-  if (!noticeData || typeof noticeData !== "object") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'noticeData'.");
-  }
-  if (action === "update" && (!noticeId || typeof noticeId !== "string")) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'noticeId' para la acción 'update'.");
-  }
-
-  const comunidadRef = db.collection("comunidades").doc(comunidadId);
-  const avisosComunidadRef = comunidadRef.collection("avisos");
-  const now = admin.firestore.Timestamp.now();
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const comunidadDoc = await transaction.get(comunidadRef);
-      if (!comunidadDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Comunidad con ID ${comunidadId} no encontrada.`);
-      }
-      const comunidadData = comunidadDoc.data() as ComunidadData;
-
-      if (comunidadData.embajador_uid !== embajadorId) {
-        throw new functions.https.HttpsError("permission-denied", "No eres el embajador de esta comunidad.");
-      }
-
-      let finalNoticeId = noticeId;
-      let logActionType: ActivityLogAction = "COMUNIDAD_AVISO_CREADO";
-      let logMessage = "";
-
-      if (noticeData.activo === true) {
-        const activeNoticesQuery = avisosComunidadRef.where("activo", "==", true);
-        const activeNoticesSnapshot = await transaction.get(activeNoticesQuery);
-        let activeNotices = activeNoticesSnapshot.docs.map((doc) => ({id: doc.id, ...doc.data()} as AvisoComunidadDataFirestore & {id: string}));
-
-        let isBecomingActive = false;
-        if (action === "update" && noticeId) {
-          const currentNoticeSnap = await transaction.get(avisosComunidadRef.doc(noticeId));
-          if (currentNoticeSnap.exists) {
-            const currentNoticeData = currentNoticeSnap.data() as AvisoComunidadDataFirestore;
-            if (currentNoticeData.activo === false && noticeData.activo === true) {
-              isBecomingActive = true;
-            }
-            if (currentNoticeData.activo === true) {
-              activeNotices = activeNotices.filter((n) => n.id !== noticeId);
-            }
-          }
-        }
-
-        if ( (action === "create" && activeNotices.length >= MAX_ACTIVE_COMMUNITY_NOTICES) ||
-             (isBecomingActive && activeNotices.length >= MAX_ACTIVE_COMMUNITY_NOTICES) ) {
-          activeNotices.sort((a, b) => a.fechaPublicacion.toMillis() - b.fechaPublicacion.toMillis());
-          const oldestActiveNotice = activeNotices[0];
-          if (oldestActiveNotice) {
-            transaction.update(avisosComunidadRef.doc(oldestActiveNotice.id), {activo: false, anclado: false});
-            functions.logger.info(`[manageCommunityNotice] Desactivado aviso más antiguo ${oldestActiveNotice.id} en comunidad ${comunidadId} para hacer espacio.`);
-          }
-        }
-      }
-
-      if (noticeData.anclado === true) {
-        const ancladosQuery = avisosComunidadRef.where("anclado", "==", true);
-        const ancladosSnapshot = await transaction.get(ancladosQuery);
-        ancladosSnapshot.forEach((doc) => {
-          if (action === "create" || (action === "update" && doc.id !== noticeId)) {
-            transaction.update(doc.ref, {anclado: false});
-            functions.logger.info(`[manageCommunityNotice] Desanclado aviso ${doc.id} en comunidad ${comunidadId}.`);
-          }
-        });
-      }
-
-      if (action === "create") {
-        const newNoticeRef = avisosComunidadRef.doc();
-        finalNoticeId = newNoticeRef.id;
-        const completeNoticeData: AvisoComunidadDataFirestore = {
-          titulo: noticeData.titulo || "Sin Título",
-          descripcion: noticeData.descripcion || "",
-          fechaPublicacion: now,
-          activo: noticeData.activo !== undefined ? noticeData.activo : true,
-          anclado: noticeData.anclado || false,
-          autor_uid: embajadorId,
-          ...(noticeData.fechaExpiracion && {fechaExpiracion: noticeData.fechaExpiracion}),
-        };
-        transaction.set(newNoticeRef, completeNoticeData);
-        logMessage = `Embajador ${embajadorId} creó aviso '${completeNoticeData.titulo}' (ID: ${finalNoticeId}) en comunidad ${comunidadId}.`;
-        logActionType = "COMUNIDAD_AVISO_CREADO";
-      } else if (action === "update" && noticeId) {
-        const noticeToUpdateRef = avisosComunidadRef.doc(noticeId);
-        const updatePayload: Partial<AvisoComunidadDataFirestore> = {...noticeData};
-        delete updatePayload.fechaPublicacion;
-        delete updatePayload.autor_uid;
-        transaction.update(noticeToUpdateRef, updatePayload);
-        logMessage = `Embajador ${embajadorId} actualizó aviso ID: ${noticeId} en comunidad ${comunidadId}.`;
-        logActionType = "COMUNIDAD_AVISO_ACTUALIZADO";
-      } else {
-        throw new functions.https.HttpsError("internal", "Acción o noticeId inválido para la operación.");
-      }
-
-      await logActivity(embajadorId, "usuario", logActionType, logMessage, {tipo: "aviso_comunidad", id: finalNoticeId || "N/A"}, {comunidadId: comunidadId, detallesAviso: noticeData});
-
-      return {success: true, message: `Aviso ${action === "create" ? "creado" : "actualizado"} exitosamente.`, noticeId: finalNoticeId};
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error en manageCommunityNotice para comunidad ${comunidadId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al gestionar el aviso de la comunidad.", error.message);
-  }
-});
-
-
-export const onNewCommunityNoticeSendNotifications = functions.firestore
-  .document("comunidades/{comunidadId}/avisos/{avisoId}")
-  .onCreate(async (snapshot, context) => {
-    const avisoData = snapshot.data() as AvisoComunidadDataFirestore | undefined;
-    const comunidadId = context.params.comunidadId;
-    const avisoId = context.params.avisoId;
-
-    if (!avisoData) {
-      functions.logger.error(`[NewAvisoTrigger ${comunidadId}/${avisoId}] No hay datos en el aviso, saliendo.`);
-      return null;
-    }
-
-    if (avisoData.activo !== true) {
-      functions.logger.log(`[NewAvisoTrigger ${comunidadId}/${avisoId}] El aviso no está activo, no se enviarán notificaciones.`);
-      return null;
-    }
-
-    functions.logger.info(`[NewAvisoTrigger ${comunidadId}/${avisoId}] Nuevo aviso activo detectado. Título: "${avisoData.titulo}". Iniciando envío de notificaciones.`);
-
-    try {
-      const comunidadDocRef = db.collection("comunidades").doc(comunidadId);
-      const comunidadDoc = await comunidadDocRef.get();
-
-      if (!comunidadDoc.exists) {
-        functions.logger.error(`[NewAvisoTrigger ${comunidadId}/${avisoId}] Comunidad con ID ${comunidadId} no encontrada.`);
-        return null;
-      }
-      const comunidadData = comunidadDoc.data() as ComunidadData;
-      const miembros = comunidadData.miembros;
-
-      if (!miembros || miembros.length === 0) {
-        functions.logger.log(`[NewAvisoTrigger ${comunidadId}/${avisoId}] La comunidad "${comunidadData.nombre}" no tiene miembros para notificar.`);
-        return null;
-      }
-
-      const notifTitle = `Nuevo aviso en ${comunidadData.nombre}: ${avisoData.titulo}`;
-      const notifBody = `Se ha publicado un nuevo aviso en la comunidad "${comunidadData.nombre}". ¡Échale un vistazo!`;
-      const notifData = {
-        comunidadId: comunidadId,
-        avisoId: avisoId,
-        type: "NEW_COMMUNITY_NOTICE",
-      };
-
-      const notificationPromises = miembros.map((miembroUid) => {
-        if (miembroUid === avisoData.autor_uid) {
-          return Promise.resolve();
-        }
-        return sendNotification(miembroUid, "usuario", notifTitle, notifBody, notifData);
-      });
-
-      await Promise.all(notificationPromises);
-      functions.logger.info(`[NewAvisoTrigger ${comunidadId}/${avisoId}] Notificaciones enviadas a ${miembros.length} miembros para el aviso.`);
-
-      await logActivity(
-        "sistema",
-        "sistema",
-        "COMUNIDAD_NUEVO_AVISO_NOTIFICADO",
-        `Notificaciones enviadas a ${miembros.length} miembros por nuevo aviso "${avisoData.titulo}" en comunidad "${comunidadData.nombre}".`,
-        {tipo: "aviso_comunidad", id: avisoId},
-        {comunidadId, avisoTitulo: avisoData.titulo, miembrosNotificados: miembros.length}
-      );
-    } catch (error) {
-      functions.logger.error(`[NewAvisoTrigger ${comunidadId}/${avisoId}] Error al enviar notificaciones por nuevo aviso:`, error);
-    }
-    return null;
-  });
-
-export const confirmarCitaPorPrestador = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para confirmar una cita (prestador).");
-  }
-  const prestadorIdAutenticado = context.auth.uid;
-  const {citaId, accion} = data; // accion puede ser "confirmar" o "rechazar"
-
-  if (!citaId || typeof citaId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'citaId'.");
-  }
-  if (!accion || (accion !== "confirmar" && accion !== "rechazar")) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere una 'accion' válida ('confirmar' o 'rechazar').");
-  }
-
-  const citaRef = db.collection("citas").doc(citaId);
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const citaDoc = await transaction.get(citaRef);
-      if (!citaDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Cita con ID ${citaId} no encontrada.`);
-      }
-      const citaData = citaDoc.data() as CitaDataFirestore;
-
-      if (citaData.prestadorId !== prestadorIdAutenticado) {
-        throw new functions.https.HttpsError("permission-denied", "No tienes permiso para modificar esta cita. No corresponde a tu ID de prestador.");
-      }
-
-      if (citaData.estado !== "pendiente_confirmacion") {
-        throw new functions.https.HttpsError("failed-precondition", `Solo se pueden ${accion} citas en estado 'pendiente_confirmacion'. Estado actual: ${citaData.estado}.`);
-      }
-
-      const now = admin.firestore.Timestamp.now();
-      const updateData: Partial<CitaDataFirestore> & {updatedAt: admin.firestore.Timestamp} = {
-        updatedAt: now,
-      };
-      let logActionType: ActivityLogAction;
-      let logMessage = "";
-
-      if (accion === "confirmar") {
-        updateData.estado = "confirmada_prestador";
-        updateData.fechaConfirmacionPrestador = now;
-        updateData.paymentStatus = "pendiente_cobro"; // Prepara para el cobro
-        updateData.ordenCobroId = `sim_orden_${citaId}_${Date.now()}`; // ID de orden simulado
-        logActionType = "CITA_CONFIRMADA_PRESTADOR";
-        logMessage = `Prestador ${prestadorIdAutenticado} confirmó cita ${citaId}.`;
-      } else { // accion === "rechazar"
-        updateData.estado = "rechazada_prestador";
-        updateData.fechaRechazoPrestador = now;
-        logActionType = "CITA_RECHAZADA_PRESTADOR";
-        logMessage = `Prestador ${prestadorIdAutenticado} rechazó cita ${citaId}.`;
-      }
-
-      transaction.update(citaRef, updateData);
-      await logActivity(
-        prestadorIdAutenticado,
-        "prestador",
-        logActionType,
-        logMessage,
-        {tipo: "cita", id: citaId},
-        {usuarioId: citaData.usuarioId}
-      );
-      return {success: true, message: `Cita ${accion === "confirmar" ? "confirmada" : "rechazada"} exitosamente.`};
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error en confirmarCitaPorPrestador (cita ${citaId}, accion ${accion}):`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", `Error al ${accion} la cita.`, error.message);
-  }
-});
-
-export const cancelarCitaConfirmadaPorCliente = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para cancelar una cita.");
-  }
-  const clienteUid = context.auth.uid;
-  const {citaId, motivoCancelacion} = data as {citaId: string, motivoCancelacion?: string};
-
-  if (!citaId || typeof citaId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'citaId'.");
-  }
-
-  const citaRef = db.collection("citas").doc(citaId);
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const citaDoc = await transaction.get(citaRef);
-      if (!citaDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Cita con ID ${citaId} no encontrada.`);
-      }
-      const citaData = citaDoc.data() as CitaDataFirestore;
-
-      if (citaData.usuarioId !== clienteUid) {
-        throw new functions.https.HttpsError("permission-denied", "No tienes permiso para cancelar esta cita.");
-      }
-
-      const validPreviousStates: CitaEstadoFirestore[] = ["confirmada_prestador", "pagada"];
-      if (!validPreviousStates.includes(citaData.estado)) {
-        throw new functions.https.HttpsError("failed-precondition", `Solo se pueden cancelar citas con estado '${validPreviousStates.join("' o '")}'. Estado actual: ${citaData.estado}.`);
-      }
-      if (citaData.estado === "servicio_iniciado" || citaData.estado === "completada" || citaData.estado === "completado_por_prestador" || citaData.estado === "completado_por_usuario") {
-        throw new functions.https.HttpsError("failed-precondition", "No se puede cancelar una cita que ya ha iniciado o sido completada.");
-      }
-
-      const now = admin.firestore.Timestamp.now();
-      const fechaHoraCita = citaData.fechaHoraSolicitada.toDate();
-      const horasRestantes = (fechaHoraCita.getTime() - now.toDate().getTime()) / (1000 * 60 * 60);
-
-      const montoTotalServicio = citaData.montoTotalEstimado || citaData.precioServicio || 0;
-      let penalizacionTotalCalculada = 0;
-      let montoParaPlataforma = 0;
-      let montoParaPrestador = 0;
-      let reglaAplicada: ">2h" | "<=2h";
-
-      if (horasRestantes > 2) {
-        reglaAplicada = ">2h";
-        penalizacionTotalCalculada = montoTotalServicio * PENALIZACION_CLIENTE_CITA_MAS_2H_PCT;
-        montoParaPlataforma = penalizacionTotalCalculada;
-        montoParaPrestador = 0;
-      } else {
-        reglaAplicada = "<=2h";
-        penalizacionTotalCalculada = montoTotalServicio * PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_TOTAL;
-        montoParaPlataforma = montoTotalServicio * PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PLATAFORMA;
-        montoParaPrestador = montoTotalServicio * PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PRESTADOR;
-      }
-      const montoReembolsoProgramadoUsuario = Math.max(0, montoTotalServicio - penalizacionTotalCalculada);
-
-      const updates: Partial<CitaDataFirestore> & {updatedAt: admin.firestore.Timestamp} = {
-        estado: "cancelada_usuario",
-        fechaCancelacion: now,
-        canceladaPor: clienteUid,
-        rolCancelador: "usuario",
-        motivoCancelacion: motivoCancelacion || "Cancelación por el usuario.",
-        detallesCancelacion: {
-          penalizacionTotalCalculada,
-          montoParaPlataforma,
-          montoParaPrestador,
-          montoReembolsoProgramadoUsuario,
-          reglaAplicada,
-        },
-        updatedAt: now,
-      };
-
-      // Lógica simulada de ajuste de PaymentStatus
-      if (citaData.paymentStatus === "procesado_exitosamente" || citaData.paymentStatus === "retenido_para_liberacion") {
-        if (montoReembolsoProgramadoUsuario === montoTotalServicio) {
-          updates.paymentStatus = "reembolsado_total"; // No penalty, full refund
-        } else if (montoReembolsoProgramadoUsuario > 0) {
-          updates.paymentStatus = "reembolsado_parcial";
-        } else { // No refund if penalty >= total
-          updates.paymentStatus = "liberado_al_proveedor"; // Assume penalty covers what would be released or more
-        }
-      } else if (citaData.paymentStatus === "pendiente_cobro") {
-        // If payment was pending, it might just not be processed, or a penalty is charged.
-        // For simplicity, we'll assume no charge attempt is made now, or it's adjusted if a penalty applies.
-        // This part needs solid payment gateway integration.
-        updates.paymentStatus = "no_aplica"; // Or a specific "cancelled_before_payment"
-      }
-
-      transaction.update(citaRef, updates);
-
-      await logActivity(
-        clienteUid,
-        "usuario",
-        "CITA_CANCELADA_USUARIO_PENALIZACION",
-        `Cliente canceló cita ${citaId}. Regla: ${reglaAplicada}. Penalización: $${penalizacionTotalCalculada.toFixed(2)}. Reembolso prog.: $${montoReembolsoProgramadoUsuario.toFixed(2)}.`,
-        {tipo: "cita", id: citaId},
-        updates.detallesCancelacion
-      );
-
-      // Notificar al proveedor
-      const prestadorDoc = await db.collection("prestadores").doc(citaData.prestadorId).get();
-      const nombrePrestador = prestadorDoc.exists ? (prestadorDoc.data() as ProviderData)?.nombre || "El prestador" : "El prestador";
-
-      await sendNotification(
-        citaData.prestadorId,
-        "prestador",
-        "Cita Cancelada por Cliente",
-        `La cita para "${citaData.detallesServicio}" con ${nombrePrestador} el ${fechaHoraCita.toLocaleDateString()} ha sido cancelada por el cliente. Compensación (si aplica): $${montoParaPrestador.toFixed(2)}.`,
-        {citaId: citaId, motivo: motivoCancelacion || "Sin motivo especificado"}
-      );
-
-      return {
-        success: true,
-        message: `Cita cancelada. Penalización aplicada: $${penalizacionTotalCalculada.toFixed(2)}. Monto a reembolsar (estimado): $${montoReembolsoProgramadoUsuario.toFixed(2)}.`,
-        detallesCancelacion: updates.detallesCancelacion,
-      };
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error al cancelar cita ${citaId} por cliente ${clienteUid}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar la cancelación de la cita.", error.message);
-  }
-});
-
-
-export const onCitaActualizadaNotificarYProcesar = functions.firestore
-  .document("citas/{citaId}")
-  .onUpdate(async (change, context) => {
-    const citaId = context.params.citaId;
-    const beforeData = change.before.data() as CitaDataFirestore | undefined;
-    const afterData = change.after.data() as CitaDataFirestore | undefined;
-
-    if (!beforeData || !afterData) {
-      functions.logger.log(`[onCitaActualizada ${citaId}] No hay datos antes o después, saliendo.`);
-      return null;
-    }
-
-    // Solo actuar si el estado ha cambiado
-    if (beforeData.estado === afterData.estado) {
-      return null;
-    }
-
-    const usuarioId = afterData.usuarioId;
-    const prestadorId = afterData.prestadorId;
-    let prestadorNombre = "El prestador";
-    try {
-      const prestadorDoc = await db.collection("prestadores").doc(prestadorId).get();
-      if (prestadorDoc.exists) {
-        prestadorNombre = (prestadorDoc.data() as ProviderData)?.nombre || "El prestador";
-      }
-    } catch (e) {
-      functions.logger.error(`[onCitaActualizada ${citaId}] Error al obtener nombre del prestador ${prestadorId}:`, e);
-    }
-
-    const detallesCita = afterData.detallesServicio || "tu cita";
-    let fechaCitaFormateada = "fecha no disponible";
-    let horaCitaFormateada = "hora no disponible";
-
-    if (afterData.fechaHoraSolicitada) {
-      try {
-        const fechaHora = afterData.fechaHoraSolicitada.toDate();
-        fechaCitaFormateada = fechaHora.toLocaleDateString("es-MX", {weekday: "long", year: "numeric", month: "long", day: "numeric"});
-        horaCitaFormateada = fechaHora.toLocaleTimeString("es-MX", {hour: "2-digit", minute: "2-digit"});
-      } catch (e) {
-        functions.logger.error(`[onCitaActualizada ${citaId}] Error al formatear fechaHoraSolicitada:`, e);
-      }
-    }
-
-    // Si la cita es confirmada por el proveedor
-    if (afterData.estado === "confirmada_prestador" && beforeData.estado !== "confirmada_prestador") {
-      functions.logger.info(`[onCitaActualizada ${citaId}] Cita confirmada por prestador. Notificando al cliente y procesando campos de seguimiento.`);
-
-      // Lógica para pago (simulada)
-      await logActivity(
-        "sistema", "sistema", "CITA_PAGO_INICIADO",
-        `Proceso de pago iniciado (simulado) para cita confirmada ${citaId}. Monto: ${afterData.montoTotalEstimado || afterData.precioServicio || 0}.`,
-        {tipo: "cita", id: citaId},
-        {usuarioId, prestadorId, monto: afterData.montoTotalEstimado || afterData.precioServicio || 0}
-      );
-
-      // Notificación al cliente
-      const montoCita = (afterData.montoTotalEstimado || afterData.precioServicio || 0).toFixed(2);
-      await sendNotification(
-        usuarioId, "usuario", "¡Tu Cita ha sido Confirmada!",
-        `El prestador ${prestadorNombre} ha confirmado tu cita para "${detallesCita}" el ${fechaCitaFormateada} a las ${horaCitaFormateada}. Se procederá con el cobro de $${montoCita}.`,
-        {citaId, tipo: "CITA_CONFIRMADA"}
-      );
-
-      // Lógica para definir la ventana de seguimiento
-      const fechaHoraCitaMillis = afterData.fechaHoraSolicitada.toMillis();
-      const timestampActivacionSeguimiento = fechaHoraCitaMillis - DOS_HORAS_EN_MS;
-
-      const updatePayload: Partial<CitaDataFirestore> = {
-        permiteSeguimientoDesdeTimestamp: admin.firestore.Timestamp.fromMillis(timestampActivacionSeguimiento),
-        notificadoParaEstarEnLinea: false, // Inicializar
-      };
-
-      // Log de la definición de la ventana de seguimiento
-      await logActivity(
-        "sistema", "sistema", "CITA_VENTANA_SEGUIMIENTO_DEFINIDA",
-        `Ventana de seguimiento definida para cita ${citaId}. Seguimiento posible desde: ${new Date(timestampActivacionSeguimiento).toISOString()}`,
-        {tipo: "cita", id: citaId},
-        {timestampActivacionSeguimiento}
-      );
-
-      // Notificar al proveedor si la cita es pronto
-      const ahoraMillis = Date.now();
-      if (timestampActivacionSeguimiento - ahoraMillis < TREINTA_MINUTOS_EN_MS && // Si la ventana de seguimiento empieza en menos de 30 min
-          ahoraMillis < fechaHoraCitaMillis && // Y la cita aún no ha pasado
-          !afterData.notificadoParaEstarEnLinea) {
-        await sendNotification(
-          prestadorId, "prestador", "Cita Próxima - ¡Ponte en Línea!",
-          `Tu cita para "${detallesCita}" con ${usuarioId} es pronto. Asegúrate de estar en línea para el seguimiento.`,
-          {citaId, tipo: "CITA_PROXIMA_IR_ONLINE"}
-        );
-        updatePayload.notificadoParaEstarEnLinea = true;
-        await logActivity("sistema", "sistema", "CITA_PROVEEDOR_NOTIFICADO_ONLINE", `Proveedor ${prestadorId} notificado para estar en línea para cita ${citaId}.`, {tipo: "cita", id: citaId});
-      }
-
-      await change.after.ref.update(updatePayload);
-      functions.logger.info(`[onCitaActualizada ${citaId}] Campos de seguimiento actualizados en la cita.`);
-    } else if (afterData.estado === "rechazada_prestador" && beforeData.estado !== "rechazada_prestador") {
-      functions.logger.info(`[onCitaActualizada ${citaId}] Cita rechazada por prestador. Notificando al cliente.`);
-      await sendNotification(
-        usuarioId, "usuario", "Cita Rechazada",
-        `Lamentablemente, el prestador ${prestadorNombre} ha tenido que rechazar tu cita para "${detallesCita}" el ${fechaCitaFormateada}.`,
-        {citaId, tipo: "CITA_RECHAZADA"}
-      );
-    } else if (afterData.estado === "cancelada_usuario" && beforeData.estado !== "cancelada_usuario") {
-      functions.logger.info(`[onCitaActualizada ${citaId}] Cita cancelada por usuario. Notificación al proveedor ya manejada en la función callable 'cancelarCitaConfirmadaPorCliente'.`);
-      // La notificación al proveedor sobre la cancelación del usuario ya se hace en la función callable `cancelarCitaConfirmadaPorCliente`.
-      // Aquí solo se loguearía el cambio de estado si es necesario por el trigger.
-    }
-    return null;
-  });
-
-export const registerProviderProfile = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrarte como proveedor.");
-  }
-  const providerId = context.auth.uid;
-  const {name, specialties, selectedCategoryIds, newCategoryName, codigoInvitacion} = data;
-
-  if (!name || typeof name !== "string" || name.length < 3) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre válido (mínimo 3 caracteres).");
-  }
-  if (!Array.isArray(specialties) || !Array.isArray(selectedCategoryIds)) {
-    throw new functions.https.HttpsError("invalid-argument", "Especialidades y categorías deben ser un arreglo.");
-  }
-
-  const providerRef = db.collection("prestadores").doc(providerId);
-
-  try {
-    const providerDoc = await providerRef.get();
-    if (providerDoc.exists) {
-      throw new functions.https.HttpsError("already-exists", "Ya existe un perfil de proveedor para este usuario.");
-    }
-
-    const now = admin.firestore.Timestamp.now();
-    const batch = db.batch();
-
-    const newProviderData: Partial<ProviderData> = {
-      nombre: name,
-      specialties: specialties,
-      categoryIds: selectedCategoryIds,
-      isAvailable: false, // Por defecto no disponible hasta que lo activen
-      rating: 0,
-      avatarUrl: `https://placehold.co/100x100/7F7F7F/FFFFFF.png?text=${name.charAt(0)}`,
-    };
-
-    if (codigoInvitacion && typeof codigoInvitacion === "string") {
-      const referrerQuery = db.collection("usuarios").where("codigoPropio", "==", codigoInvitacion).limit(1);
-      const referrerSnapshot = await referrerQuery.get();
-
-      if (!referrerSnapshot.empty) {
-        const referrerDoc = referrerSnapshot.docs[0];
-        const referrerData = referrerDoc.data() as UserData;
-        const referrerUID = referrerDoc.id;
-
-        if (referrerData.isBlocked) {
-          functions.logger.warn(`Intento de registro con código de embajador bloqueado. Embajador UID: ${referrerUID}, Código: ${codigoInvitacion}.`);
-          await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Intento de registro con código de invitación bloqueado (${codigoInvitacion}).`, {tipo: "prestador", id: providerId});
-        } else {
-          newProviderData.referidoPor = referrerUID;
-
-          const bonificacionesRef = db.collection("bonificaciones");
-          const updatesReferrer: Partial<UserData> = {
-            referidos: admin.firestore.FieldValue.arrayUnion(providerId) as any,
-            balanceBonos: admin.firestore.FieldValue.increment(BONO_POR_AFILIACION) as any,
-          };
-          batch.update(referrerDoc.ref, updatesReferrer);
-
-          const nuevaBonificacionData: Omit<BonificacionData, "id"> = {
-            usuarioId: referrerUID,
-            monto: BONO_POR_AFILIACION,
-            motivo: "afiliacion_exitosa",
-            fecha: now,
-            origen: "sistema",
-            detalles: {
-              origenTexto: "Bonificación por referir a un nuevo usuario",
-              afiliadoId: providerId,
-            },
-          };
-          const nuevaBonificacionRef = bonificacionesRef.doc();
-          batch.set(nuevaBonificacionRef, nuevaBonificacionData);
-
-          await logActivity(
-            "sistema",
-            "sistema",
-            "EMBAJADOR_BONO_ASIGNADO",
-            `Bono de $${BONO_POR_AFILIACION} asignado a embajador ${referrerUID} por nueva afiliación de ${providerId}.`,
-            {tipo: "usuario", id: referrerUID},
-            {monto: BONO_POR_AFILIACION, afiliadoId: providerId, bonificacionId: nuevaBonificacionRef.id}
-          );
-        }
-      } else {
-        functions.logger.warn(`Código de invitación "${codigoInvitacion}" no encontrado. Registrando proveedor sin referencia.`);
-      }
-    }
-
-    batch.set(providerRef, newProviderData, {merge: true});
-    if (!newProviderData.referidoPor) {
-      await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Usuario ${providerId} se registró como proveedor: ${name}.`, {tipo: "prestador", id: providerId});
-    }
-
-    if (newCategoryName && typeof newCategoryName === "string" && newCategoryName.trim().length > 2) {
-      const proposalRef = db.collection("propuestas_categorias").doc();
-      const proposalData: CategoriaPropuestaData = {
-        providerId: providerId,
-        nombrePropuesto: newCategoryName.trim(),
-        estado: "pendiente",
-        fechaCreacion: now,
-      };
-      batch.set(proposalRef, proposalData);
-      await logActivity(providerId, "usuario", "CATEGORIA_PROPUESTA", `Proveedor ${providerId} propuso nueva categoría: "${newCategoryName.trim()}".`, {tipo: "categoria_propuesta", id: proposalRef.id});
-    }
-
-    await batch.commit();
-
-    return {success: true, message: "¡Felicidades! Tu perfil de proveedor ha sido creado.", providerId: providerId};
-  } catch (error: any) {
-    functions.logger.error(`Error registrando proveedor ${providerId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al crear el perfil de proveedor.", error.message);
-  }
-});
-
-
-export const onCategoryProposalUpdate = functions.firestore
-  .document("propuestas_categorias/{proposalId}")
-  .onUpdate(async (change, context) => {
-    const proposalId = context.params.proposalId;
-    const beforeData = change.before.data() as CategoriaPropuestaData;
-    const afterData = change.after.data() as CategoriaPropuestaData;
-
-    if (!beforeData || !afterData) {
-      functions.logger.log(`[CategoryProposalTrigger ${proposalId}] No data, exiting.`);
-      return null;
-    }
-
-    // Only trigger if 'estado' changes from 'pendiente'
-    if (beforeData.estado !== "pendiente" || beforeData.estado === afterData.estado) {
-      functions.logger.log(`[CategoryProposalTrigger ${proposalId}] No relevant state change from 'pendiente', exiting. Before: ${beforeData.estado}, After: ${afterData.estado}`);
-      return null;
-    }
-
-    const {providerId, nombrePropuesto} = afterData;
-
-    if (afterData.estado === "aprobada") {
-      functions.logger.info(`[CategoryProposalTrigger ${proposalId}] Proposal for "${nombrePropuesto}" approved. Adding to official categories.`);
-      try {
-        const newCategoryRef = await db.collection("categorias_oficiales").add({
-          nombre_categoria: nombrePropuesto,
-          fecha_creacion: admin.firestore.Timestamp.now(),
-          origen: "propuesta_prestador",
-        });
-
-        await logActivity(
-          "sistema_admin", // Assume an admin made the change
-          "admin",
-          "CATEGORIA_APROBADA",
-          `Categoría propuesta "${nombrePropuesto}" (ID: ${proposalId}) fue aprobada y añadida como '${newCategoryRef.id}' a categorias_oficiales.`,
-          {tipo: "categoria_propuesta", id: proposalId},
-          {newOfficialCategoryId: newCategoryRef.id}
-        );
-
-        await sendNotification(
-          providerId,
-          "prestador",
-          "¡Tu categoría fue aprobada!",
-          `La categoría "${nombrePropuesto}" que propusiste ha sido aprobada y ya está disponible.`,
-          {proposalId, newCategoryId: newCategoryRef.id}
-        );
-      } catch (error) {
-        functions.logger.error(`[CategoryProposalTrigger ${proposalId}] Error adding approved category:`, error);
-      }
-    } else if (afterData.estado === "rechazada") {
-      functions.logger.info(`[CategoryProposalTrigger ${proposalId}] Proposal for "${nombrePropuesto}" was rejected.`);
-
-      await logActivity(
-        "sistema_admin",
-        "admin",
-        "CATEGORIA_RECHAZADA",
-        `Categoría propuesta "${nombrePropuesto}" (ID: ${proposalId}) fue rechazada.`,
-        {tipo: "categoria_propuesta", id: proposalId}
-      );
-
-      await sendNotification(
-        providerId,
-        "prestador",
-        "Categoría Propuesta Revisada",
-        `La categoría "${nombrePropuesto}" que propusiste ha sido revisada y no fue aprobada en esta ocasión.`,
-        {proposalId}
-      );
-    }
-
-    return null;
-  });
-
-export const generarRecomendacionesDeRecontratacion = functions.pubsub
-  .schedule("every 24 hours")
-  .onRun(async (context) => {
-    functions.logger.info("Ejecutando generarRecomendacionesDeRecontratacion...");
-
-    const now = new Date();
-    const thirtyDaysAgo = new Date(now.setDate(now.getDate() - 30));
-    const thirtyDaysAgoTimestamp = admin.firestore.Timestamp.fromDate(thirtyDaysAgo);
-
-    const relacionesQuery = db.collection("relacionesUsuarioPrestador")
-      .where("ultimoServicioFecha", "<", thirtyDaysAgoTimestamp);
-
-    const snapshot = await relacionesQuery.get();
-
-    if (snapshot.empty) {
-      functions.logger.log("No hay relaciones de más de 30 días para procesar.");
-      return null;
-    }
-
-    const batch = db.batch();
-    const recomendacionesRef = db.collection("recomendaciones");
-
-    let recommendationsCreated = 0;
-
-    for (const doc of snapshot.docs) {
-      const relacion = doc.data() as RelacionUsuarioPrestadorData;
-      const categoriasRelacion = relacion.categoriasServicios || [];
-
-      const periodicCategory = categoriasRelacion.find((catId) =>
-        SERVICE_CATEGORIES.find((sc) => sc.id === catId)?.isPeriodic
-      );
-
-      if (periodicCategory) {
-        const categoriaInfo = SERVICE_CATEGORIES.find((sc) => sc.id === periodicCategory);
-        if (!categoriaInfo) continue;
-
-        const providerDoc = await db.collection("prestadores").doc(relacion.prestadorId).get();
-        if (!providerDoc.exists) continue;
-
-        const providerName = (providerDoc.data() as ProviderData)?.nombre || "un prestador";
-        const message = `¿Necesitas ayuda de nuevo con ${categoriaInfo.name}? Podrías volver a contratar a ${providerName}.`;
-
-        const recomendacionData: Omit<RecomendacionData, "id"> = {
-          type: "re-hire-suggestion",
-          suggestionSource: "sistema",
-          usuarioId: relacion.usuarioId,
-          prestadorId: relacion.prestadorId,
-          categoria: periodicCategory,
-          mensaje: message,
-          estado: "pendiente",
-          fechaCreacion: admin.firestore.Timestamp.now(),
-        };
-
-        const newRecomendacionRef = recomendacionesRef.doc();
-        batch.set(newRecomendacionRef, recomendacionData);
-        recommendationsCreated++;
-
-        await logActivity(
-          "sistema",
-          "sistema",
-          "RECOMENDACION_RECONTRATACION_CREADA",
-          `Recomendación creada para usuario ${relacion.usuarioId} de recontratar a prestador ${relacion.prestadorId} para ${periodicCategory}.`,
-          {tipo: "recomendacion", id: newRecomendacionRef.id},
-          {usuarioId: relacion.usuarioId, prestadorId: relacion.prestadorId, categoria: periodicCategory}
-        );
-
-        await sendNotification(
-          relacion.usuarioId,
-          "usuario",
-          `¿Necesitas ayuda de nuevo con ${categoriaInfo.name}?`,
-          `Notamos que ha pasado un tiempo. ¡${providerName} está disponible para ayudarte de nuevo!`,
-          {recomendacionId: newRecomendacionRef.id}
-        );
-      }
-    }
-
-    if (recommendationsCreated > 0) {
-      await batch.commit();
-      functions.logger.info(`Se crearon ${recommendationsCreated} recomendaciones de recontratación.`);
-    } else {
-      functions.logger.log("No se generaron nuevas recomendaciones en esta ejecución.");
-    }
-
-    return null;
-  });
-
-export const enviarRecordatorioRecontratacion = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar un recordatorio (prestador).");
-  }
-  const prestadorId = context.auth.uid;
-  const {usuarioId, categoriaId, mensajePersonalizado} = data;
-
-  if (!usuarioId || typeof usuarioId !== "string" || !categoriaId || typeof categoriaId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'usuarioId' y 'categoriaId' válidos.");
-  }
-
-  const now = admin.firestore.Timestamp.now();
-  const prestadorRef = db.collection("prestadores").doc(prestadorId);
-  const relacionId = `${usuarioId}_${prestadorId}`;
-  const relacionRef = db.collection("relacionesUsuarioPrestador").doc(relacionId);
-
-  try {
-    return await db.runTransaction(async (transaction) => {
-      const prestadorDoc = await transaction.get(prestadorRef);
-      if (!prestadorDoc.exists) {
-        throw new functions.https.HttpsError("not-found", "No se encontró tu perfil de prestador.");
-      }
-      const prestadorData = prestadorDoc.data() as ProviderData;
-
-      const relacionDoc = await transaction.get(relacionRef);
-      if (!relacionDoc.exists) {
-        throw new functions.https.HttpsError("not-found", "No se encontró una relación de servicio previa con este usuario.");
-      }
-      const relacionData = relacionDoc.data() as RelacionUsuarioPrestadorData;
-
-      // Lógica de límite de envíos para no-premium
-      if (!prestadorData.isPremium) {
-        if (relacionData.lastReminderSent) {
-          const sixtyDaysInMillis = 60 * 24 * 60 * 60 * 1000;
-          const lastSentDate = relacionData.lastReminderSent.toMillis();
-          if (now.toMillis() - lastSentDate < sixtyDaysInMillis) {
-            throw new functions.https.HttpsError("failed-precondition", "Ya has enviado un recordatorio a este cliente recientemente. Por favor, espera 60 días para enviar otro.");
-          }
-        }
-      }
-
-      const prestadorNombre = prestadorData.nombre || "Tu prestador de confianza";
-      const categoria = SERVICE_CATEGORIES.find((c) => c.id === categoriaId);
-      const nombreCategoria = categoria?.name || "un servicio";
-      const mensaje = mensajePersonalizado || `${prestadorNombre} te invita a agendar de nuevo un servicio de ${nombreCategoria}.`;
-
-      const recomendacionData: Omit<RecomendacionData, "id"> = {
-        usuarioId: usuarioId,
-        prestadorId: prestadorId,
-        categoria: categoriaId,
-        mensaje: mensaje,
-        estado: "pendiente",
-        fechaCreacion: now,
-        type: "re-hire-suggestion",
-        suggestionSource: "invita-prestador",
-      };
-      const recomendacionRef = db.collection("recomendaciones").doc();
-      transaction.set(recomendacionRef, recomendacionData);
-
-      // Actualizar la fecha del último recordatorio enviado en la relación
-      transaction.update(relacionRef, {lastReminderSent: now});
-
-      await logActivity(
-        prestadorId, "prestador", "RECONTRATACION_RECORDATORIO_ENVIADO",
-        `Prestador ${prestadorId} envió recordatorio a usuario ${usuarioId} para categoría ${categoriaId}.`,
-        {tipo: "recomendacion", id: recomendacionRef.id},
-        {prestadorId, categoriaId, usuarioId}
-      );
-
-      const notifTitle = `Un recordatorio de ${prestadorNombre}`;
-      const notifBody = mensaje;
-
-      await sendNotification(usuarioId, "usuario", notifTitle, notifBody, {
-        type: "REHIRE_REMINDER",
-        providerId: prestadorId,
-        categoryId: categoriaId,
-        recommendationId: recomendacionRef.id,
-      });
-
-      return {success: true, message: `Recordatorio enviado a usuario ${usuarioId}.`, recomendacionId: recomendacionRef.id};
-    });
-  } catch (error: any) {
-    functions.logger.error(`Error al enviar recordatorio de ${prestadorId} a ${usuarioId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar el envío del recordatorio.", error.message);
-  }
-});
-
-export const getPastClientsForProvider = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para ver tus clientes pasados (proveedor).");
-  }
-  const providerId = context.auth.uid;
-  await logActivity(providerId, "prestador", "PROVIDER_GET_PAST_CLIENTS", `Proveedor ${providerId} solicitó su lista de clientes pasados.`);
-
-  try {
-    const relationsQuery = db.collection("relacionesUsuarioPrestador")
-      .where("prestadorId", "==", providerId)
-      .orderBy("ultimoServicioFecha", "desc");
-
-    const snapshot = await relationsQuery.get();
-    if (snapshot.empty) {
-      return [];
-    }
-
-    const pastClientsPromises = snapshot.docs.map(async (doc) => {
-      const relacion = doc.data() as RelacionUsuarioPrestadorData;
-      const userDoc = await db.collection("usuarios").doc(relacion.usuarioId).get();
-      const userData = userDoc.exists() ? userDoc.data() as UserData : null;
-      const lastCategory = SERVICE_CATEGORIES.find((c) => c.id === relacion.categoriasServicios[relacion.categoriasServicios.length - 1]);
-
-      return {
-        usuarioId: relacion.usuarioId,
-        nombreUsuario: userData?.nombre || "Usuario Desconocido",
-        avatarUrl: "https://placehold.co/100x100.png", // UserData doesn't have avatarUrl yet, so using a placeholder.
-        ultimoServicioFecha: (relacion.ultimoServicioFecha as admin.firestore.Timestamp).toMillis(),
-        ultimaCategoriaId: lastCategory?.id || "general",
-        ultimaCategoriaNombre: lastCategory?.name || "Servicio General",
-        serviciosContratados: relacion.serviciosContratados,
-      };
-    });
-
-    const pastClients = await Promise.all(pastClientsPromises);
-    return pastClients;
-  } catch (error: any) {
-    functions.logger.error(`Error al obtener clientes pasados para proveedor ${providerId}:`, error);
-    if (error.code === "failed-precondition") {
-      throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener clientes pasados requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
-    }
-    throw new functions.https.HttpsError("internal", "Error al obtener la lista de clientes.", error.message);
-  }
-});
-
-export const getBlockedUsers = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
-  }
-  const adminId = context.auth.uid;
-  await logActivity(adminId, "admin", "ADMIN_GET_BLOCKED_USERS", `Admin ${adminId} solicitó la lista de usuarios bloqueados.`);
-
-  try {
-    const blockedUsersQuery = db.collection("usuarios").where("isBlocked", "==", true);
-    const blockedProvidersQuery = db.collection("prestadores").where("isBlocked", "==", true);
-
-    const [usersSnapshot, providersSnapshot] = await Promise.all([
-      blockedUsersQuery.get(),
-      blockedProvidersQuery.get(),
-    ]);
-
-    const blockedUsers = usersSnapshot.docs.map((doc) => {
-      const userData = doc.data() as UserData;
-      return {
-        id: doc.id,
-        type: "usuario",
-        name: userData.nombre,
-        // email: data.email, // Assuming email is stored
-        isBlocked: userData.isBlocked,
-        blockReason: userData.blockReason,
-        blockDate: userData.blockDate?.toMillis(),
-      };
-    });
-
-    const blockedProviders = providersSnapshot.docs.map((doc) => {
-      const data = doc.data() as ProviderData;
-      return {
-        id: doc.id,
-        type: "prestador",
-        name: data.nombre,
-        // email: data.email, // Assuming email is stored
-        isBlocked: data.isBlocked,
-        blockReason: data.blockReason,
-        blockDate: data.blockDate?.toMillis(),
-      };
-    });
-
-    return [...blockedUsers, ...blockedProviders];
-  } catch (error: any) {
-    functions.logger.error("Error fetching blocked users:", error);
-    throw new functions.https.HttpsError("internal", "Failed to fetch blocked users.", error.message);
-  }
-});
-
-export const updateUserBlockStatus = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
-  }
-  const adminId = context.auth.uid;
-  // Add admin role check here
-
-  const {userId, userType, blockStatus, reason} = data;
-
-  if (!userId || !userType || typeof blockStatus !== "boolean") {
-    throw new functions.https.HttpsError("invalid-argument", "Missing required parameters: userId, userType, blockStatus.");
-  }
-  if (userType !== "usuario" && userType !== "prestador") {
-    throw new functions.https.HttpsError("invalid-argument", "userType must be 'usuario' or 'prestador'.");
-  }
-
-  const collectionName = userType === "usuario" ? "usuarios" : "prestadores";
-  const userRef = db.collection(collectionName).doc(userId);
-
-  try {
-    const updatePayload: { isBlocked: boolean; blockDate?: admin.firestore.FieldValue; blockReason?: admin.firestore.FieldValue | string } = {
-      isBlocked: blockStatus,
-    };
-
-    if (blockStatus) {
-      updatePayload.blockDate = admin.firestore.FieldValue.serverTimestamp();
-      updatePayload.blockReason = reason || "No reason specified.";
-    } else {
-      // When unblocking, clear the reason and date
-      updatePayload.blockReason = admin.firestore.FieldValue.delete();
-      updatePayload.blockDate = admin.firestore.FieldValue.delete();
-    }
-
-    await userRef.update(updatePayload);
-
-    const logAction = blockStatus ? "ADMIN_BLOCK_USER" : "ADMIN_UNBLOCK_USER";
-    const logDescription = `Admin ${adminId} ${blockStatus ? "blocked" : "unblocked"} ${userType} ${userId}. Reason: ${reason || "N/A"}`;
-    await logActivity(adminId, "admin", logAction, logDescription, {type: userType, id: userId}, {reason});
-
-    return {success: true, message: `User ${userId} status updated to ${blockStatus ? "blocked" : "unblocked"}.`};
-  } catch (error: any) {
-    functions.logger.error(`Error updating block status for ${userType} ${userId}:`, error);
-    throw new functions.https.HttpsError("internal", "Failed to update user block status.", error.message);
-  }
-});
-
-
-export const getProvidersForValidation = functions.https.onCall(async (data, context) => {
-  if (!context.auth /* && !context.auth.token.admin */) { // Descomentar para producción
-    throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-  }
-  const adminId = context.auth.uid;
-  await logActivity(adminId, "admin", "ADMIN_GET_PROVIDERS_FOR_VALIDATION", `Admin ${adminId} solicitó la lista de proveedores para validación.`);
-
-  try {
-    const providersSnapshot = await db.collection("prestadores")
-      .where("documentosValidos", "==", false)
-      .get();
-
-    if (providersSnapshot.empty) {
-      return [];
-    }
-
-    const providersToValidate = providersSnapshot.docs.map((doc) => {
-      const providerData = doc.data() as ProviderData;
-      return {
-        id: doc.id,
-        nombre: providerData.nombre,
-        avatarUrl: providerData.avatarUrl,
-        comentarioValidacion: (providerData as any).comentarioValidacion,
-        documentosVerificables: (providerData as any).documentosVerificables || [],
-      };
-    });
-
-    return providersToValidate;
-  } catch (error: any) {
-    console.error("Error fetching providers for validation:", error);
-    if (error.code === "failed-precondition") {
-      throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
-    }
-    throw new functions.https.HttpsError("internal", "Error al obtener proveedores para validación.");
-  }
-});
-
-
-export const getPendingReports = functions.https.onCall(async (data, context) => {
-  if (!context.auth /* && !context.auth.token.admin */) {
-    throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-  }
-  const adminId = context.auth.uid;
-  await logActivity(adminId, "admin", "ADMIN_GET_PENDING_REPORTS", `Admin ${adminId} solicitó la lista de reportes pendientes.`);
-
-  try {
-    const reportsSnapshot = await db.collection("reportes")
-      .where("estadoReporte", "==", "pendiente_revision_admin")
-      .orderBy("fechaReporte", "asc")
-      .get();
-
-    if (reportsSnapshot.empty) {
-      return [];
-    }
-
-    return reportsSnapshot.docs.map((doc) => ({id: doc.id, ...doc.data()}));
-  } catch (error: any) {
-    console.error("Error fetching pending reports:", error);
-    if (error.code === "failed-precondition") {
-      throw new functions.https.HttpsError("failed-precondition", "La consulta de reportes pendientes requiere un índice compuesto. Por favor, créalo desde el enlace en los logs de Firebase Functions.");
-    }
-    throw new functions.https.HttpsError("internal", "Error al obtener los reportes pendientes.");
-  }
-});
-
-
-export const resolveReport = functions.https.onCall(async (data, context) => {
-  if (!context.auth /* && !context.auth.token.admin */) {
-    throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-  }
-  const adminId = context.auth.uid;
-  const {reporteId, decision, comentarioAdmin} = data;
-
-  if (!reporteId || !decision || !comentarioAdmin) {
-    throw new functions.https.HttpsError("invalid-argument", "Faltan parámetros: reporteId, decision, comentarioAdmin.");
-  }
-
-  const reporteRef = db.collection("reportes").doc(reporteId);
-  const now = admin.firestore.Timestamp.now();
-
-  return db.runTransaction(async (transaction) => {
-    const reporteDoc = await transaction.get(reporteRef);
-    if (!reporteDoc.exists) {
-      throw new functions.https.HttpsError("not-found", `Reporte con ID ${reporteId} no encontrado.`);
-    }
-    const reporteData = reporteDoc.data() as ReporteServicioData;
-
-    transaction.update(reporteRef, {
-      estadoReporte: decision,
-      resolucionAdmin: comentarioAdmin,
-      fechaResolucion: now,
-      resueltaPorAdminId: adminId,
-    });
-
-    // Actualizar también el servicio relacionado
-    const servicioRef = db.collection("solicitudes_servicio").doc(reporteData.idServicio);
-    transaction.update(servicioRef, {
-      estadoDisputa: "resuelta",
-      status: "cerrado_con_disputa_resuelta",
-      updatedAt: now,
-      // Si la decisión es compensar, el pago podría ser reembolsado.
-      ...(decision === "resuelto_compensacion" && {paymentStatus: "reembolsado_parcial"}),
-    });
-
-    await logActivity(adminId, "admin", "REPORTE_PROBLEMA_RESUELTO", `Admin resolvió reporte ${reporteId} con decisión: ${decision}.`, {tipo: "reporte_servicio", id: reporteId}, {comentario: comentarioAdmin});
-
-    // Notificar a las partes
-    await sendNotification(reporteData.idUsuarioReportante, reporteData.rolReportante, "Tu Reporte Ha Sido Resuelto", `Un administrador ha resuelto tu reporte para el servicio #${reporteData.idServicio.substring(0, 6)}. Decisión: ${decision}.`);
-    await sendNotification(reporteData.idReportado, reporteData.rolReportado, "Un Reporte Sobre Tu Servicio Ha Sido Resuelto", `Un administrador ha resuelto un reporte sobre el servicio #${reporteData.idServicio.substring(0, 6)}. Decisión: ${decision}.`);
-
-    return {success: true, message: "Reporte resuelto exitosamente."};
-  });
-});
-
-
-export const getActiveServices = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-  }
-  const adminId = context.auth.uid;
-  await logActivity(adminId, "admin", "ADMIN_GET_ACTIVE_SERVICES", `Admin ${adminId} solicitó la lista de servicios activos.`);
-
-  try {
-    const servicesSnapshot = await db.collection("solicitudes_servicio")
-      .where("status", "in", ["agendado", "confirmada_prestador", "pagada", "en_camino_proveedor", "servicio_iniciado"])
-      .orderBy("createdAt", "desc")
-      .get();
-
-    const services = await Promise.all(servicesSnapshot.docs.map(async (doc) => {
-      const serviceData = doc.data() as ServiceRequest;
-      const userDoc = await db.collection("usuarios").doc(serviceData.usuarioId).get();
-      const providerDoc = await db.collection("prestadores").doc(serviceData.prestadorId).get();
-
-      return {
-        id: doc.id,
-        status: serviceData.status,
-        userName: userDoc.exists() ? userDoc.data()?.nombre : "Usuario Desconocido",
-        providerName: providerDoc.exists() ? providerDoc.data()?.nombre : "Proveedor Desconocido",
-        serviceTitle: serviceData.titulo || "Servicio sin título",
-        scheduledDate: (serviceData.serviceDate && serviceData.serviceTime) ? new Date(`${serviceData.serviceDate}T${serviceData.serviceTime}`).getTime() : (serviceData.createdAt as admin.firestore.Timestamp).toMillis(),
-        createdAt: (serviceData.createdAt as admin.firestore.Timestamp).toMillis(),
-      };
-    }));
-
-    return services;
-  } catch (error: any) {
-    console.error("Error fetching active services:", error);
-    if (error.code === "failed-precondition") {
-      throw new functions.https.HttpsError("failed-precondition", "La consulta de servicios activos requiere un índice compuesto. Por favor, créalo desde el enlace en los logs de Firebase Functions.");
-    }
-    throw new functions.https.HttpsError("internal", "Error al obtener los servicios activos.");
-  }
-});
-
-
-export const adminCancelService = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-  const adminId = context.auth.uid;
-  const {serviceId, reason} = data;
-
-  if (!serviceId || !reason) throw new functions.https.HttpsError("invalid-argument", "Faltan 'serviceId' o 'reason'.");
-
-  const serviceRef = db.collection("solicitudes_servicio").doc(serviceId);
-
-  return db.runTransaction(async (transaction) => {
-    const serviceDoc = await transaction.get(serviceRef);
-    if (!serviceDoc.exists) throw new functions.https.HttpsError("not-found", "Servicio no encontrado.");
-
-    transaction.update(serviceRef, {
-      status: "cancelada_admin",
-      paymentStatus: "reembolsado_total", // Asumir reembolso completo en cancelación de admin
-      actorDelCambioId: adminId,
-      actorDelCambioRol: "admin",
-      updatedAt: admin.firestore.Timestamp.now(),
-      notes: admin.firestore.FieldValue.arrayUnion(`Cancelado por admin: ${reason}`),
-    });
-
-    await logActivity(adminId, "admin", "ADMIN_CANCEL_SERVICE", `Admin canceló servicio ${serviceId}. Razón: ${reason}`, {tipo: "solicitud_servicio", id: serviceId}, {reason});
-
-    const serviceData = serviceDoc.data() as ServiceRequest;
-    await sendNotification(serviceData.usuarioId, "usuario", "Servicio Cancelado", `Tu servicio "${serviceData.titulo}" ha sido cancelado por un administrador. Razón: ${reason}`);
-    await sendNotification(serviceData.prestadorId, "prestador", "Servicio Cancelado", `El servicio "${serviceData.titulo}" ha sido cancelado por un administrador. Razón: ${reason}`);
-
-    return {success: true};
-  });
-});
-
-export const adminForceCompleteService = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-  const adminId = context.auth.uid;
-  const {serviceId, reason} = data;
-
-  if (!serviceId || !reason) throw new functions.https.HttpsError("invalid-argument", "Faltan 'serviceId' o 'reason'.");
-
-  const serviceRef = db.collection("solicitudes_servicio").doc(serviceId);
-
-  return db.runTransaction(async (transaction) => {
-    const serviceDoc = await transaction.get(serviceRef);
-    if (!serviceDoc.exists) throw new functions.https.HttpsError("not-found", "Servicio no encontrado.");
-
-    transaction.update(serviceRef, {
-      status: "cerrado_forzado_admin",
-      paymentStatus: "liberado_al_proveedor", // Asumir que se libera el pago
-      actorDelCambioId: adminId,
-      actorDelCambioRol: "admin",
-      updatedAt: admin.firestore.Timestamp.now(),
-      notes: admin.firestore.FieldValue.arrayUnion(`Completado forzosamente por admin: ${reason}`),
-    });
-
-    await logActivity(adminId, "admin", "ADMIN_FORCE_COMPLETE_SERVICE", `Admin completó forzosamente el servicio ${serviceId}. Razón: ${reason}`, {tipo: "solicitud_servicio", id: serviceId}, {reason});
-
-    const serviceData = serviceDoc.data() as ServiceRequest;
-    await sendNotification(serviceData.usuarioId, "usuario", "Servicio Completado", `Tu servicio "${serviceData.titulo}" ha sido marcado como completado por un administrador.`);
-    await sendNotification(serviceData.prestadorId, "prestador", "Servicio Completado y Pago Liberado", `El servicio "${serviceData.titulo}" ha sido completado por un administrador y el pago ha sido liberado.`);
-
-    return {success: true};
-  });
-});
-
-
-export const getPendingWarranties = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-  const adminId = context.auth.uid;
-  await logActivity(adminId, "admin", "ADMIN_GET_PENDING_WARRANTIES", `Admin ${adminId} solicitó la lista de garantías pendientes.`);
-  try {
-    const snapshot = await db.collection("garantiasPendientes")
-      .where("estadoGarantia", "==", "pendiente_revision")
-      .orderBy("fechaSolicitudGarantia", "asc")
-      .get();
-
-    if (snapshot.empty) return [];
-
-    return snapshot.docs.map((doc) => ({id: doc.id, ...doc.data()}));
-  } catch (error: any) {
-    if (error.code === "failed-precondition") {
-      throw new functions.https.HttpsError("failed-precondition", "La consulta de garantías pendientes requiere un índice compuesto. Por favor, créalo.");
-    }
-    throw new functions.https.HttpsError("internal", "Error al obtener las garantías pendientes.");
-  }
-});
-
-
-export const resolveWarranty = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-  const adminId = context.auth.uid;
-  const {garantiaId, decision, notasAdmin} = data;
-
-  if (!garantiaId || !decision || !notasAdmin) {
-    throw new functions.https.HttpsError("invalid-argument", "Faltan parámetros requeridos.");
-  }
-
-  const warrantyRef = db.collection("garantiasPendientes").doc(garantiaId);
-
-  return db.runTransaction(async (transaction) => {
-    const warrantyDoc = await transaction.get(warrantyRef);
-    if (!warrantyDoc.exists) throw new functions.https.HttpsError("not-found", "Garantía no encontrada.");
-
-    const warrantyData = warrantyDoc.data() as GarantiaPendienteData;
-    const serviceRef = db.collection("solicitudes_servicio").doc(warrantyData.idServicio);
-
-    transaction.update(warrantyRef, {
-      estadoGarantia: decision,
-      notasResolucion: notasAdmin,
-      fechaResolucion: admin.firestore.Timestamp.now(),
-      resueltaPorAdminId: adminId,
-    });
-
-    transaction.update(serviceRef, {
-      garantiaActiva: false, // La garantía ya fue procesada
-      paymentStatus: decision === "aprobada_compensacion" ? "reembolsado_parcial" : "liberado_al_proveedor",
-    });
-
-    const logAction = decision === "aprobada_compensacion" ? "GARANTIA_APROBADA" : "GARANTIA_RECHAZADA";
-    await logActivity(adminId, "admin", logAction, `Admin resolvió garantía ${garantiaId} como ${decision}.`, {tipo: "garantia", id: garantiaId});
-
-    await sendNotification(warrantyData.idUsuario, "usuario", "Resolución de Garantía", `Tu solicitud de garantía para el servicio #${warrantyData.idServicio.substring(0, 6)} ha sido resuelta como: ${decision}.`);
-
-    return {success: true};
-  });
-});
-
-export const getBanners = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-
-  const {region, idioma, categoria} = data;
-  const now = admin.firestore.Timestamp.now();
-  const actorId = context.auth.uid;
-  await logActivity(actorId, "usuario", "USER_GET_BANNERS", `Usuario ${actorId} solicitó banners.`, undefined, {region, idioma, categoria});
-
-  let query: admin.firestore.Query = db.collection("banners")
-    .where("activo", "==", true)
-    .where("fechaInicio", "<=", now);
-  // No podemos hacer dos < > en campos distintos, el de fechaFin se hará en código.
-
-  // Filtros opcionales que sí se pueden aplicar en la query
-  if (idioma) query = query.where("idiomas", "array-contains", idioma);
-  if (region) query = query.where("regiones", "array-contains", region);
-  if (categoria) query = query.where("categorias", "array-contains", categoria);
-
-  try {
-    const snapshot = await query.orderBy("orden", "asc").get();
-    const banners = snapshot.docs
-      .map((doc) => ({id: doc.id, ...doc.data()} as BannerPublicitario))
-      .filter((banner) => !banner.fechaFin || banner.fechaFin >= now); // Filtro final en código
-
-    return banners;
-  } catch (error: any) {
-    if (error.code === "failed-precondition") {
-      throw new functions.https.HttpsError("failed-precondition", "La consulta de banners requiere uno o más índices compuestos. Por favor, créalos desde los logs de Firebase.");
-    }
-    throw new functions.https.HttpsError("internal", "Error al obtener banners.");
-  }
-});
-
-export const processSubscriptionPayment = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para procesar suscripciones.");
-  }
-  const {providerId, planId} = data;
-
-  if (!providerId || !planId || !SUBSCRIPTION_PLANS[planId as keyof typeof SUBSCRIPTION_PLANS]) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'providerId' y 'planId' válidos.");
-  }
-
-  const plan = SUBSCRIPTION_PLANS[planId as keyof typeof SUBSCRIPTION_PLANS];
-  const now = admin.firestore.Timestamp.now();
-  const providerRef = db.collection("prestadores").doc(providerId);
-
-  try {
-    const providerDoc = await providerRef.get();
-    if (!providerDoc.exists) {
-      throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
-    }
-    const providerData = providerDoc.data() as ProviderData;
-
-    if (providerData.referidoPor) {
-      const embajadorUID = providerData.referidoPor;
-      const commissionAmount = plan.price * plan.commissionRate;
-
-      if (commissionAmount > 0) {
-        const comisionesRef = db.collection("comisiones");
-        const providerNameForCommission = providerData.nombre || `prestador ${providerId.substring(0, 5)}`;
-
-        const comisionDataForCollection = {
-          idUsuarioGanador: embajadorUID,
-          tipo: "suscripcion",
-          monto: commissionAmount,
-          detalle: `Suscripción de @${providerNameForCommission}`,
-          fecha: now,
-          referenciaID: `sub_${providerId}_${now.toMillis()}`,
-        };
-        await comisionesRef.add(comisionDataForCollection);
-      }
-    }
-
-    const newExpirationDate = new Date(now.toDate().getTime() + plan.durationDays * 24 * 60 * 60 * 1000);
-    await providerRef.update({
-      isPremium: true,
-      membresiaExpira: admin.firestore.Timestamp.fromDate(newExpirationDate),
-    });
-
-    return {success: true, message: `Suscripción '${planId}' procesada para ${providerData.nombre}.`};
-  } catch (error: any) {
-    functions.logger.error(`Error procesando suscripción para ${providerId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar la suscripción.", error.message);
-  }
-});
-
-export const onCommissionCreated = functions.firestore
-  .document("comisiones/{commissionId}")
-  .onCreate(async (snapshot, context) => {
-    const commissionData = snapshot.data();
-    if (!commissionData) {
-      functions.logger.error("No data found in commission document.", {commissionId: context.params.commissionId});
-      return null;
-    }
-
-    const {idUsuarioGanador, monto} = commissionData;
-
-    if (!idUsuarioGanador || typeof monto !== "number" || monto <= 0) {
-      functions.logger.error("Commission document is missing idUsuarioGanador or has invalid monto.", {commissionId: context.params.commissionId, data: commissionData});
-      return null;
-    }
-
-    const userRef = db.collection("usuarios").doc(idUsuarioGanador);
-
-    try {
-      await userRef.set({
-        gananciasTotales: admin.firestore.FieldValue.increment(monto),
-      }, {merge: true});
-      functions.logger.info(`Updated gananciasTotales for user ${idUsuarioGanador} by ${monto}.`);
-
-      await logActivity(
-        "sistema",
-        "sistema",
-        "EMBAJADOR_COMISION_PAGADA",
-        `$${monto.toFixed(2)} agregados a las ganancias totales del embajador ${idUsuarioGanador} desde la comisión ${context.params.commissionId}.`,
-        {tipo: "usuario", id: idUsuarioGanador},
-        {monto, commissionId: context.params.commissionId}
-      );
-
-      return null;
-    } catch (error) {
-      functions.logger.error(`Failed to update gananciasTotales for user ${idUsuarioGanador}.`, {error: error});
-      return null;
-    }
-  });
-
-
-export const publicarPreguntaComunidad = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-  }
-  const idUsuario = context.auth.uid;
-  const {pregunta, ubicacion} = data;
-
-  if (!pregunta || typeof pregunta !== "string" || pregunta.length < 10) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere una pregunta válida (mínimo 10 caracteres).");
-  }
-  if (!ubicacion || typeof ubicacion.lat !== "number" || typeof ubicacion.lng !== "number") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere una ubicación válida.");
-  }
-
-  const nuevaPregunta: PreguntaComunidadData = {
-    idUsuario,
-    pregunta,
-    ubicacion,
-    fecha: admin.firestore.Timestamp.now(),
-    respuestas: [],
-    // A future improvement could be to use AI to generate tags from the question
-  };
-
-  try {
-    const preguntaRef = await db.collection("preguntasComunidad").add(nuevaPregunta);
-
-    await logActivity(
-      idUsuario,
-      "usuario",
-      "COMUNIDAD_PREGUNTA_PUBLICADA",
-      `Usuario ${idUsuario} publicó una nueva pregunta en la comunidad: "${pregunta.substring(0, 50)}..."`,
-      {tipo: "preguntaComunidad", id: preguntaRef.id},
-      {pregunta: pregunta}
-    );
-
-    return {success: true, message: "Pregunta publicada exitosamente.", preguntaId: preguntaRef.id};
-  } catch (error) {
-    functions.logger.error("Error al publicar pregunta en comunidad:", error);
-    throw new functions.https.HttpsError("internal", "No se pudo publicar tu pregunta.", error);
-  }
-});
-
-
-export const onNewCommunityResponse = functions.firestore
-  .document("respuestasComunidad/{respuestaId}")
-  .onCreate(async (snapshot, context) => {
-    const respuestaData = snapshot.data();
-    if (!respuestaData || !respuestaData.preguntaRef) {
-      functions.logger.error("Nueva respuesta no tiene preguntaRef", {respuestaId: context.params.respuestaId});
-      return null;
-    }
-
-    const preguntaRef = db.collection("preguntasComunidad").doc(respuestaData.preguntaRef);
-
-    try {
-      await preguntaRef.update({
-        respuestasRef: admin.firestore.FieldValue.arrayUnion(snapshot.ref),
-        respuestasCount: admin.firestore.FieldValue.increment(1),
-      });
-      functions.logger.info(`Referencia de respuesta ${snapshot.id} agregada a pregunta ${respuestaData.preguntaRef}.`);
-
-      // Opcional: Notificar al autor de la pregunta
-      // const preguntaDoc = await preguntaRef.get();
-      // if(preguntaDoc.exists) {
-      //   const preguntaData = preguntaDoc.data();
-      //   await sendNotification(...)
-      // }
-    } catch (error) {
-      functions.logger.error(`Error al actualizar pregunta ${respuestaData.preguntaRef} con nueva respuesta:`, error);
-    }
-    return null;
-  });
-
-export const responderPreguntaComunidad = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para responder.");
-  }
-  const idUsuarioResponde = context.auth.uid;
-  const {preguntaId, textoRespuesta, prestadorRecomendadoId} = data;
-
-  if (!preguntaId || typeof preguntaId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'preguntaId'.");
-  }
-  if (!textoRespuesta || typeof textoRespuesta !== "string" || textoRespuesta.length < 5) {
-    throw new functions.https.HttpsError("invalid-argument", "La respuesta debe tener al menos 5 caracteres.");
-  }
-  if (prestadorRecomendadoId && typeof prestadorRecomendadoId !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "El ID del prestador recomendado es inválido.");
-  }
-
-  const preguntaRef = db.collection("preguntasComunidad").doc(preguntaId);
-  const respuestaRef = db.collection("respuestasComunidad").doc(); // Crear nueva referencia para la respuesta
-
-
-  try {
-    const preguntaDoc = await preguntaRef.get();
-    if (!preguntaDoc.exists) {
-      throw new functions.https.HttpsError("not-found", `Pregunta con ID ${preguntaId} no encontrada.`);
-    }
-    const preguntaData = preguntaDoc.data() as PreguntaComunidadData;
-
-    const nuevaRespuesta: Omit<RespuestaPreguntaComunidadData, "id"> = {
-      autorId: idUsuarioResponde,
-      texto: textoRespuesta,
-      fecha: admin.firestore.Timestamp.now(),
-      ...(prestadorRecomendadoId && {prestadorRecomendadoId}),
-    };
-
-    await respuestaRef.set(nuevaRespuesta); // Guardar la nueva respuesta
-
-    await logActivity(
-      idUsuarioResponde,
-      "usuario",
-      "COMUNIDAD_PREGUNTA_RESPUESTA",
-      `Usuario ${idUsuarioResponde} respondió a la pregunta ${preguntaId}.`,
-      {tipo: "preguntaComunidad", id: preguntaId},
-      {texto: textoRespuesta, prestadorRecomendadoId, respuestaId: respuestaRef.id}
-    );
-
-    // Notify the original poster
-    if (preguntaData.idUsuario && preguntaData.idUsuario !== idUsuarioResponde) {
-      const autorDoc = await db.collection("usuarios").doc(idUsuarioResponde).get();
-      const nombreAutorRespuesta = autorDoc.exists() ? (autorDoc.data() as UserData)?.nombre || `Usuario ${idUsuarioResponde.substring(0, 5)}` : "Alguien";
-
-      await sendNotification(
-        preguntaData.idUsuario,
-        "usuario",
-        "Nueva respuesta a tu pregunta",
-        `${nombreAutorRespuesta} ha respondido a tu pregunta en la comunidad: "${preguntaData.pregunta.substring(0, 40)}..."`,
-        {preguntaId: preguntaId, tipo: "NUEVA_RESPUESTA_COMUNIDAD"}
-      );
-    }
-
-    return {success: true, message: "Respuesta publicada exitosamente."};
-  } catch (error: any) {
-    functions.logger.error(`Error al responder pregunta ${preguntaId}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "No se pudo publicar tu respuesta.", error);
-  }
-});
-
-export const onRecomendacionCreate = functions.firestore
-  .document("recomendaciones/{recomendacionId}")
-  .onCreate(async (snapshot, context) => {
-    const recomendacionData = snapshot.data() as RecomendacionData | undefined;
-    const recomendacionId = context.params.recomendacionId;
-
-    if (!recomendacionData) {
-      functions.logger.error(`[onRecomendacionCreate] No data found in new recommendation doc: ${recomendacionId}`);
-      return null;
-    }
-
-    if (recomendacionData.type !== "endorsement") {
-      functions.logger.info(`[onRecomendacionCreate] Recommendation ${recomendacionId} is of type '${recomendacionData.type}', not 'endorsement'. No count increment needed.`);
-      return null;
-    }
-
-    const {prestadorId} = recomendacionData;
-
-    if (!prestadorId) {
-      functions.logger.error(`[onRecomendacionCreate] New recommendation ${recomendacionId} is missing 'prestadorId'.`);
-      return null;
-    }
-
-    const prestadorRef = db.collection("prestadores").doc(prestadorId);
-
-    try {
-      await prestadorRef.set({ // Use set with merge to create the field if it doesn't exist
-        recommendationCount: admin.firestore.FieldValue.increment(1),
-      }, {merge: true});
-      functions.logger.info(`[onRecomendacionCreate] Incremented recommendationCount for provider ${prestadorId} due to new recommendation ${recomendacionId}.`);
-    } catch (error) {
-      functions.logger.error(`[onRecomendacionCreate] Failed to increment recommendationCount for provider ${prestadorId}.`, {error: error});
-    }
-
-    return null;
-  });
-
-export const recomendarNegocio = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para recomendar un negocio.");
-  }
-  const idUsuario = context.auth.uid;
-  const {idNegocio, comentarioOpcional} = data;
-
-  if (!idNegocio || typeof idNegocio !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idNegocio'.");
-  }
-
-  const recomendacionRef = db.collection("recomendaciones").doc();
-
-  try {
-    const nuevaRecomendacion: Omit<RecomendacionData, "id"> = {
-      type: "endorsement",
-      usuarioId: idUsuario,
-      prestadorId: idNegocio,
-      fechaCreacion: admin.firestore.Timestamp.now(),
-      ...(comentarioOpcional && {mensaje: comentarioOpcional}),
-    };
-
-    await recomendacionRef.set(nuevaRecomendacion);
-
-    await logActivity(
-      idUsuario,
-      "usuario",
-      "NEGOCIO_RECOMENDADO",
-      `Usuario ${idUsuario} recomendó al negocio ${idNegocio}.`,
-      {tipo: "recomendacion", id: recomendacionRef.id},
-      {idNegocio, comentario: comentarioOpcional || "Sin comentario"}
-    );
-
-    return {success: true, message: "¡Gracias por tu recomendación!", recomendacionId: recomendacionRef.id};
-  } catch (error: any) {
-    functions.logger.error(`Error al recomendar negocio ${idNegocio} por usuario ${idUsuario}:`, error);
-    if (error instanceof functions.https.HttpsError) throw error;
-    throw new functions.https.HttpsError("internal", "Error al procesar la recomendación.", error.message);
-  }
-});
-
-export const onTransactionCreate = functions.firestore
-  .document("transacciones/{transactionId}")
-  .onCreate(async (snapshot, context) => {
-    const transactionData = snapshot.data();
-    const transactionId = context.params.transactionId;
-
-    if (!transactionData || !transactionData.usuarioId) {
-      functions.logger.info(`[onTransactionCreate] Transacción ${transactionId} no tiene usuarioId. Saliendo.`);
-      return null;
-    }
-
-    const {usuarioId, monto} = transactionData;
-    if (typeof monto !== "number" || monto <= 0) {
-      functions.logger.info(`[onTransactionCreate] Transacción ${transactionId} tiene un monto inválido o cero. Saliendo.`);
-      return null;
-    }
-
-    try {
-      const userRef = db.collection("usuarios").doc(usuarioId);
-      const userDoc = await userRef.get();
-
-      if (!userDoc.exists) {
-        functions.logger.warn(`[onTransactionCreate] Documento de usuario ${usuarioId} no encontrado para la transacción ${transactionId}.`);
-        return null;
-      }
-
-      const userData = userDoc.data() as UserData;
-      if (!userData.referidoPor) {
-        functions.logger.info(`[onTransactionCreate] Usuario ${usuarioId} no fue referido. No se genera comisión.`);
-        return null;
-      }
-
-      const referrerId = userData.referidoPor;
-      const commissionAmount = monto * 0.05; // 5% de comisión
-
-      if (commissionAmount <= 0) {
-        functions.logger.info(`[onTransactionCreate] El monto de la comisión para la transacción ${transactionId} es cero o menor. No se genera comisión.`);
-        return null;
-      }
-
-      const commissionData = {
-        idUsuarioGanador: referrerId,
-        tipo: "afiliado",
-        monto: commissionAmount,
-        detalle: "Comisión por transacción de usuario referido",
-        fecha: admin.firestore.Timestamp.now(),
-        referenciaID: transactionId,
-      };
-
-      const newCommissionRef = await db.collection("comisiones").add(commissionData);
-
-      functions.logger.info(`[onTransactionCreate] Comisión de $${commissionAmount.toFixed(2)} creada para el recomendador ${referrerId} por la transacción ${transactionId}. ID de comisión: ${newCommissionRef.id}`);
-
-      await logActivity(
-        "sistema",
-        "sistema",
-        "EMBAJADOR_COMISION_AFILIADO",
-        `Comisión de $${commissionAmount.toFixed(2)} generada para embajador ${referrerId} por transacción de afiliado ${usuarioId}.`,
-        {tipo: "comision", id: newCommissionRef.id},
-        {monto: commissionAmount, transactionId: transactionId, referidoId: usuarioId}
-      );
-
-      return null;
-    } catch (error) {
-      functions.logger.error(`[onTransactionCreate] Error procesando la transacción ${transactionId}:`, error);
-      return null;
-    }
-  });
-
-export const cerrarServiciosAntiguos = functions.pubsub.schedule("every 24 hours").onRun(async (context) => {
-  const now = admin.firestore.Timestamp.now();
-  const plazoMillis = PLAZO_REPORTE_DIAS * 24 * 60 * 60 * 1000;
-  const limiteTimestamp = now.toMillis() - plazoMillis;
-
-  const serviciosQuery = db.collection("solicitudes_servicio")
-    .where("status", "==", "completado_por_usuario")
-    .where("userConfirmedCompletionAt", "<=", limiteTimestamp);
-
-  const snapshot = await serviciosQuery.get();
-
-  if (snapshot.empty) {
-    functions.logger.log("[CerrarServicios] No hay servicios antiguos para cerrar.");
-    return null;
-  }
-
-  const batch = db.batch();
-  let processedCount = 0;
-
-  for (const doc of snapshot.docs) {
-    const servicio = doc.data() as ServiceRequest;
-    if (servicio.calificacionUsuario) {
-      // Si por alguna razón fue calificado pero el estado no se actualizó, lo ignoramos.
-      continue;
-    }
-
-    await logActivity(
-      "sistema",
-      "sistema",
-      "CAMBIO_ESTADO_SOLICITUD", // Reusing an existing action type
-      `Servicio ${doc.id} cerrado automáticamente por falta de calificación tras ${PLAZO_REPORTE_DIAS} días.`,
-      {tipo: "solicitud_servicio", id: doc.id},
-      {estadoAnterior: servicio.status, estadoNuevo: "cerrado_automaticamente"}
-    );
-
-    batch.update(doc.ref, {
-      status: "cerrado_automaticamente",
-      updatedAt: now,
-      actorDelCambioId: "sistema",
-      actorDelCambioRol: "sistema",
-    });
-    processedCount++;
-  }
-
-  if (processedCount > 0) {
-    await batch.commit();
-    functions.logger.info(`[CerrarServicios] Se cerraron automáticamente ${processedCount} servicios.`);
-  }
-
-  return null;
-});
-
-export const getLatestVisibleAppVersion = functions.https.onCall(async (data, context) => {
-  try {
-    const versionsQuery = db.collection("versionApp")
-      .where("visible", "==", true)
-      .orderBy("fechaLanzamiento", "desc")
-      .limit(1);
-
-    const snapshot = await versionsQuery.get();
-
-    if (snapshot.empty) {
-      functions.logger.warn("[getLatestVisibleAppVersion] No visible app version found in the database.");
-      throw new functions.https.HttpsError("not-found", "No hay ninguna versión de la aplicación visible disponible en este momento.");
-    }
-
-    const latestVersionDoc = snapshot.docs[0];
-    const versionData = latestVersionDoc.data() as AppVersionData;
-
-    await logActivity(
-      context.auth?.uid || "sistema_anonimo",
-      context.auth?.uid ? "usuario" : "sistema",
-      "GET_LATEST_APP_VERSION",
-      `Se consultó la última versión visible de la app. Versión devuelta: ${versionData.numeroVersion}.`,
-      {tipo: "versionApp", id: latestVersionDoc.id}
-    );
-
-    return {
-      numeroVersion: versionData.numeroVersion,
-      descripcion: versionData.descripcion,
-      obligatoria: versionData.obligatoria,
-      fechaLanzamiento: versionData.fechaLanzamiento.toMillis(), // Convert to millis for easier client-side handling
-    };
-  } catch (error: any) {
-    functions.logger.error("[getLatestVisibleAppVersion] Error fetching latest app version:", error);
-    if (error instanceof functions.https.HttpsError) {
-      throw error;
-    }
-    throw new functions.https.HttpsError("internal", "No se pudo obtener la información de la versión de la aplicación.", error.message);
-  }
-});
-
-export const enviarSugerenciaUsuario = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar una sugerencia.");
-  }
-  const usuarioId = context.auth.uid;
-  const {tipo, mensaje} = data;
-
-  if (!tipo || typeof tipo !== "string" || !["mejora", "bug", "otra"].includes(tipo)) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere un 'tipo' de sugerencia válido ('mejora', 'bug', 'otra').");
-  }
-  if (!mensaje || typeof mensaje !== "string" || mensaje.trim().length < 10) {
-    throw new functions.https.HttpsError("invalid-argument", "El mensaje de la sugerencia debe tener al menos 10 caracteres.");
-  }
-
-  const now = admin.firestore.Timestamp.now();
-  const sugerenciaRef = db.collection("sugerenciasUsuarios").doc();
-
-  const nuevaSugerencia: Omit<SugerenciaUsuarioData, "id"> = {
-    usuarioId: usuarioId,
-    fechaEnvio: now,
-    tipo: tipo as "mejora" | "bug" | "otra",
-    mensaje: mensaje,
-    atendida: false,
-  };
-
-  try {
-    await sugerenciaRef.set(nuevaSugerencia);
-
-    await logActivity(
-      usuarioId,
-      "usuario",
-      "SUGERENCIA_ENVIADA",
-      `Usuario ${usuarioId} envió una sugerencia de tipo '${tipo}'.`,
-      {tipo: "sugerenciaUsuario", id: sugerenciaRef.id},
-      {tipoSugerencia: tipo}
-    );
-
-    return {success: true, message: "¡Gracias por tu sugerencia! La hemos recibido correctamente."};
-  } catch (error: any) {
-    functions.logger.error(`Error al guardar sugerencia para usuario ${usuarioId}:`, error);
-    throw new functions.https.HttpsError("internal", "No se pudo guardar tu sugerencia en este momento.", error.message);
-  }
-});
-
-
-export const registrarArchivoSoporte = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar un archivo.");
-  }
-  const usuarioId = context.auth.uid;
-  const {archivoURL, tipoArchivo, descripcion} = data;
-
-  if (!archivoURL || typeof archivoURL !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere la URL del archivo ('archivoURL').");
-  }
-  if (!tipoArchivo || typeof tipoArchivo !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere el tipo de archivo ('tipoArchivo').");
-  }
-
-  const ahora = admin.firestore.Timestamp.now();
-  const archivoRef = db.collection("archivosSoporte").doc();
-
-  const nuevoArchivoData: Omit<ArchivoSoporteData, "id"> = {
-    archivoURL,
-    tipoArchivo,
-    subidoPorRef: usuarioId,
-    fechaSubida: ahora,
-    ...(descripcion && {descripcion}),
-  };
-
-  try {
-    await archivoRef.set(nuevoArchivoData);
-
-    await logActivity(
-      usuarioId,
-      "usuario",
-      "ARCHIVO_SOPORTE_REGISTRADO",
-      `Usuario ${usuarioId} registró un nuevo archivo de soporte: ${tipoArchivo}.`,
-      {tipo: "archivoSoporte", id: archivoRef.id},
-      {url: archivoURL}
-    );
-
-    return {success: true, message: "Archivo registrado exitosamente.", archivoId: archivoRef.id};
-  } catch (error: any) {
-    functions.logger.error(`Error al registrar archivo de soporte para usuario ${usuarioId}:`, error);
-    throw new functions.https.HttpsError("internal", "No se pudo registrar tu archivo.", error.message);
-  }
-});
-
-export const logSoporteAction = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar una acción de soporte.");
-  }
-
-  // Verificar si el usuario tiene rol de admin o soporte
-  const isAdmin = context.auth.token.admin === true;
-  const isSoporte = context.auth.token.soporte === true;
-
-  if (!isAdmin && !isSoporte) {
-    throw new functions.https.HttpsError("permission-denied", "No tienes los privilegios necesarios para realizar esta acción.");
-  }
-
-  const soporteId = context.auth.uid;
-  const {accion, detalle, entidadAfectada} = data;
-
-  if (!accion || typeof accion !== "string" || accion.trim().length === 0) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere el campo 'accion' y no puede estar vacío.");
-  }
-  if (!detalle || typeof detalle !== "string" || detalle.trim().length === 0) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere el campo 'detalle' y no puede estar vacío.");
-  }
-
-  const ahora = admin.firestore.Timestamp.now();
-  const bitacoraRef = db.collection("bitacoraSoporte").doc();
-
-  const nuevaBitacora: Omit<BitacoraSoporteData, "id"> = {
-    soporteRef: soporteId,
-    fechaRegistro: ahora,
-    accion: accion,
-    detalle: detalle,
-    ...(entidadAfectada && {entidadAfectada}),
-  };
-
-  try {
-    await bitacoraRef.set(nuevaBitacora);
-
-    await logActivity(
-      soporteId,
-      isAdmin ? "admin" : "soporte" as any, // Asumiendo que el rol en logActivity acepta 'soporte'
-      "SOPORTE_LOG_MANUAL",
-      `[Soporte] ${accion}: ${detalle}`,
-      entidadAfectada,
-      {accionOriginal: accion}
-    );
-
-    return {success: true, message: "Acción de soporte registrada en la bitácora.", logId: bitacoraRef.id};
-  } catch (error: any) {
-    functions.logger.error(`Error al registrar acción de soporte por ${soporteId}:`, error);
-    throw new functions.https.HttpsError("internal", "No se pudo registrar la acción en la bitácora.", error.message);
-  }
-});
-
-export const logMetric = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar una métrica.");
-  }
-
-  const usuarioId = context.auth.uid;
-  const {evento, detalle} = data;
-
-  if (!evento || typeof evento !== "string" || evento.trim().length === 0) {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre de 'evento' válido y no puede estar vacío.");
-  }
-
-  const detalleFinal = (typeof detalle === "string") ? detalle : "";
-
-  const metricaRef = db.collection("metricas").doc();
-
-  const nuevaMetrica: Omit<MetricaData, "id"> = {
-    evento,
-    usuarioRef: usuarioId,
-    fecha: admin.firestore.Timestamp.now(),
-    detalle: detalleFinal,
-  };
-
-  try {
-    await metricaRef.set(nuevaMetrica);
-    functions.logger.info(`[Metrica] Evento '${evento}' registrado para usuario ${usuarioId}. ID: ${metricaRef.id}`);
-    return {success: true, message: "Métrica registrada exitosamente.", metricId: metricaRef.id};
-  } catch (error: any) {
-    functions.logger.error(`Error al registrar métrica para usuario ${usuarioId}:`, error);
-    throw new functions.https.HttpsError("internal", "No se pudo registrar la métrica.", error.message);
-  }
-});
-
-export const manageAdminSettings = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para gestionar la configuración.");
-  }
-  const {nombreOpcion, valor} = data; // valor can be boolean or undefined
-
-  if (!nombreOpcion || typeof nombreOpcion !== "string") {
-    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'nombreOpcion'.");
-  }
-
-  const settingRef = db.collection("adminPanelSettings").doc(nombreOpcion);
-  const actorId = context.auth.uid;
-  const isAdmin = context.auth.token.admin === true;
-
-  // WRITE operation
-  if (typeof valor === "boolean") {
-    if (!isAdmin) {
-      throw new functions.https.HttpsError("permission-denied", "No tienes permisos para modificar esta configuración.");
-    }
-
-    try {
-      await settingRef.update({
-        valor: valor,
-        fechaUltimoCambio: admin.firestore.Timestamp.now(),
-      });
-
-      await logActivity(
-        actorId,
-        "admin",
-        "ADMIN_SETTING_UPDATED",
-        `Admin ${actorId} actualizó la configuración '${nombreOpcion}' a '${valor}'.`,
-        {tipo: "adminPanelSetting", id: nombreOpcion},
-        {nuevoValor: valor}
-      );
-
-      return {success: true, message: `Configuración '${nombreOpcion}' actualizada.`};
-    } catch (error: any) {
-      functions.logger.error(`Error al actualizar configuración '${nombreOpcion}':`, error);
-      if (error.code === 5) { // NOT_FOUND error code
-        throw new functions.https.HttpsError("not-found", `La configuración '${nombreOpcion}' no existe.`);
-      }
-      throw new functions.https.HttpsError("internal", "Error al actualizar la configuración.", error.message);
-    }
-  } else { // READ operation
-    try {
-      const doc = await settingRef.get();
-      if (!doc.exists) {
-        throw new functions.https.HttpsError("not-found", `La configuración '${nombreOpcion}' no existe.`);
-      }
-      const settingData = doc.data() as AdminPanelSettingData;
-
-      // Log read access for admins for auditing purposes
-      if (isAdmin) {
-        await logActivity(
-          actorId,
-          "admin",
-          "ADMIN_SETTING_READ",
-          `Admin ${actorId} consultó la configuración '${nombreOpcion}'.`,
-          {tipo: "adminPanelSetting", id: nombreOpcion}
-        );
-      }
-
-      return {success: true, valor: settingData.valor};
-    } catch (error: any) {
-      functions.logger.error(`Error al leer configuración '${nombreOpcion}':`, error);
-      if (error instanceof functions.https.HttpsError) throw error;
-      throw new functions.https.HttpsError("internal", "Error al consultar la configuración.", error.message);
-    }
-  }
-});
