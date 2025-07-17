@@ -2,8 +2,9 @@
 import type {Metadata} from 'next';
 import { Montserrat } from 'next/font/google';
 import './globals.css';
-import { AppLayout } from '@/components/layout/AppLayout';
+import { AppHeader } from '@/components/layout/AppHeader'; // Directly import AppHeader
 import { Toaster } from "@/components/ui/toaster";
+import { cn } from '@/lib/utils'; // Import cn utility
 
 const montserrat = Montserrat({
   subsets: ['latin'],
@@ -12,9 +13,8 @@ const montserrat = Montserrat({
 });
 
 export const metadata: Metadata = {
-  title: 'ServiMap',
+  title: 'ConectaPro',
   description: 'Conecta con profesionales calificados en tiempo real.',
-  icons: null,
 };
 
 export default function RootLayout({
@@ -23,11 +23,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" suppressHydrationWarning className={montserrat.variable}>
-      <body className="antialiased">
-        <AppLayout>
-          {children}
-        </AppLayout>
+    <html lang="es" suppressHydrationWarning>
+      <body className={cn("min-h-screen bg-background font-sans antialiased", montserrat.variable)}>
+        <div className="relative flex min-h-screen flex-col">
+          <AppHeader />
+          <main className="flex-1">{children}</main>
+        </div>
         <Toaster />
       </body>
     </html>
