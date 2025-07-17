@@ -105,14 +105,16 @@ export const interpretarBusqueda = onRequest(
 // --- END: Genkit Implementation of interpretarBusqueda ---
 
 // --- Helper Functions ---
+
 /**
- * Envía notificaciones push a un usuario o prestador.
- * @param {string} userId - El UID del destinatario.
- * @param {"usuario" | "prestador"} userType - El tipo de destinatario.
- * @param {string} title - El título de la notificación.
- * @param {string} body - El cuerpo del mensaje de la notificación.
- * @param {Record<string, string>} [data] - Datos adicionales para el payload.
- * @return {Promise<void>} Una promesa que se resuelve cuando se completa.
+ * Registra una acción importante en la bitácora de eventos del sistema.
+ * @param {string} actorId - UID del actor que realiza la acción.
+ * @param {("usuario"|"prestador"|"sistema"|"admin")} actorRol - Rol del actor.
+ * @param {ActivityLogAction} accion - El tipo de acción realizada.
+ * @param {string} descripcion - Descripción legible de la acción.
+ * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad afectada.
+ * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra.
+ * @return {Promise<void>} Una promesa que se resuelve al completar el registro.
  */
 async function sendNotification(
   userId: string,
@@ -155,10 +157,10 @@ async function sendNotification(
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
  * @param {string} actorId - UID del actor que realiza la acción.
- * @param {string} actorRol - Rol del actor.
+ * @param {("usuario"|"prestador"|"sistema"|"admin")} actorRol - Rol del actor.
  * @param {ActivityLogAction} accion - El tipo de acción realizada.
  * @param {string} descripcion - Descripción legible de la acción.
- * @param {object} [entidadAfectada] - Entidad afectada.
+ * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad afectada.
  * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra.
  * @return {Promise<void>} Una promesa que se resuelve al completar el registro.
  */
@@ -444,9 +446,9 @@ export const onServiceStatusChangeSendNotification = onDocumentUpdated(
           targetUserId = usuarioId;
           targetUserType = "usuario";
           tituloNotif = "Oferta de Reactivación de Servicio";
-          cuerpoNotif =
-              `El prestador ${prestadorId} te ofrece ` +
-              `reactivar el servicio "${serviceTitle}".`;
+          const message = `El prestador ${prestadorId} te ofrece ` +
+            `reactivar el servicio "${serviceTitle}".`;
+          cuerpoNotif = message;
         } else {
           sendStdNotification = false;
         }
