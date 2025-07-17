@@ -669,7 +669,7 @@ async function logActivity(
   detallesAdicionales?: Record<string, unknown>
 ): Promise<void> {
   try {
-    await db.collection("logEventos").add({
+    const logData = {
       actorId,
       actorRol,
       accion,
@@ -677,7 +677,8 @@ async function logActivity(
       fecha: admin.firestore.Timestamp.now(),
       entidadAfectada: entidadAfectada || null,
       detallesAdicionales: detallesAdicionales || null,
-    });
+    };
+    await db.collection("logEventos").add(logData);
     const logMessage = `[LogActivityHelper] Log creado: ${descripcion}`;
     functions.logger.info(logMessage);
   } catch (error) {
@@ -1323,10 +1324,12 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
       await sendNotification(prestadorId, "prestador", "¡Cotización Aceptada!", notifBody, {solicitudId: nuevaSolicitudRef.id, cotizacionId});
       return {success: true, message: "Cotización aceptada y servicio creado.", servicioId: nuevaSolicitudRef.id};
     });
-  } catch (error) {
+  } catch (error: any) {
     const httpsError = error as functions.https.HttpsError;
     functions.logger.error(`Error al aceptar cotización ${cotizacionId}:`, httpsError);
     if (httpsError.code) throw httpsError;
     throw new functions.https.HttpsError("internal", "Error al procesar.", httpsError.message);
   }
 });
+
+    
