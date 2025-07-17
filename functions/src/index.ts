@@ -1,4 +1,5 @@
 
+'use server';
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {onRequest} from "firebase-functions/v2/https";
@@ -612,7 +613,7 @@ export interface AdminPanelSettingData {
  * @param {"usuario" | "prestador"} userType - El tipo de destinatario.
  * @param {string} title - El título de la notificación.
  * @param {string} body - El cuerpo del mensaje de la notificación.
- * @param {Record<string, string>} [data] - Datos adicionales para enviar en el payload.
+ * @param {Record<string, string>} [data] - Datos adicionales para el payload.
  * @return {Promise<void>}
  */
 async function sendNotification(
@@ -647,11 +648,11 @@ async function sendNotification(
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
  * @param {string} actorId - UID del actor que realiza la acción (o 'sistema').
- * @param {"usuario" | "prestador" | "sistema" | "admin"} actorRol - Rol del actor.
+ * @param {"usuario"|"prestador"|"sistema"|"admin"} actorRol - Rol del actor.
  * @param {ActivityLogAction} accion - El tipo de acción realizada.
  * @param {string} descripcion - Descripción legible de la acción.
- * @param {{tipo: string; id: string}} [entidadAfectada] - La entidad principal afectada.
- * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra en formato JSON.
+ * @param {{tipo: string; id: string}} [entidadAfectada] - La entidad principal.
+ * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra.
  * @return {Promise<void>}
  */
 async function logActivity(
@@ -1314,3 +1315,5 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
     throw new functions.https.HttpsError("internal", "Error al procesar.", error.message);
   }
 });
+
+    
