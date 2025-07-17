@@ -648,11 +648,12 @@ async function sendNotification(
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
  * @param {string} actorId - UID del actor que realiza la acción.
- * @param {string} actorRol - Rol del actor ("usuario", "prestador", etc.).
- * @param {string} accion - El tipo de acción realizada.
+ * @param {"usuario" | "prestador" | "sistema" | "admin"} actorRol - Rol del actor.
+ * @param {ActivityLogAction} accion - El tipo de acción realizada.
  * @param {string} descripcion - Descripción legible de la acción.
  * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad afectada.
- * @param {object} [detallesAdicionales] - Datos extra en formato de objeto.
+ * @param {Record<string, any>} [detallesAdicionales] - Datos extra en formato de objeto.
+ * @return {Promise<void>} Una promesa que se resuelve cuando se completa.
  */
 async function logActivity(
   actorId: string,
@@ -660,7 +661,7 @@ async function logActivity(
   accion: ActivityLogAction,
   descripcion: string,
   entidadAfectada?: {tipo: string; id: string},
-  detallesAdicionales?: Record<string, unknown>
+  detallesAdicionales?: Record<string, any>
 ): Promise<void> {
   try {
     await db.collection("logEventos").add({
@@ -1310,10 +1311,12 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
       await sendNotification(prestadorId, "prestador", "¡Cotización Aceptada!", notifBody, {solicitudId: nuevaSolicitudRef.id, cotizacionId});
       return {success: true, message: "Cotización aceptada y servicio creado.", servicioId: nuevaSolicitudRef.id};
     });
-  } catch (error: any) {
+  } catch (error) {
     const httpsError = error as functions.https.HttpsError;
     functions.logger.error(`Error al aceptar cotización ${cotizacionId}:`, httpsError);
     if (httpsError.code) throw httpsError;
     throw new functions.https.HttpsError("internal", "Error al procesar.", httpsError.message);
   }
 });
+
+    
