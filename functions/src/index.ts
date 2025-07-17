@@ -648,11 +648,11 @@ async function sendNotification(
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
  * @param {string} actorId - UID del actor que realiza la acción.
- * @param {"usuario" | "prestador" | "sistema" | "admin"} actorRol - Rol.
- * @param {ActivityLogAction} accion - El tipo de acción realizada.
+ * @param {string} actorRol - Rol del actor ("usuario", "prestador", etc.).
+ * @param {string} accion - El tipo de acción realizada.
  * @param {string} descripcion - Descripción legible de la acción.
- * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad principal.
- * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra.
+ * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad afectada.
+ * @param {object} [detallesAdicionales] - Datos extra en formato de objeto.
  */
 async function logActivity(
   actorId: string,

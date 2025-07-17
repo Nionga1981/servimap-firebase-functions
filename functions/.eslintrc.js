@@ -21,6 +21,7 @@ module.exports = {
   ignorePatterns: [
     "/lib/**/*", // Ignore built files.
     "/generated/**/*", // Ignore generated files.
+    "src/index_backup_*.ts",
   ],
   plugins: [
     "@typescript-eslint",
@@ -31,7 +32,7 @@ module.exports = {
     "import/no-unresolved": 0,
     "indent": ["error", 2],
     "object-curly-spacing": "off",
-    "max-len": "off", // Desactivar temporalmente la regla de longitud máxima
-    "require-jsdoc": "off", // Desactivar temporalmente la regla de JSDoc
+    "max-len": "off",
+    "require-jsdoc": "off",
   },
 };
