@@ -1,7 +1,7 @@
-
-
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import axios from "axios";
+import {onRequest} from "firebase-functions/v2/https";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
 
 if (admin.apps.length === 0) {
@@ -341,7 +341,13 @@ export type ActivityLogAction =
   | "ADMIN_GET_PENDING_WARRANTIES"
   | "ADMIN_GET_BLOCKED_USERS"
   | "USER_GET_BANNERS"
-  | "GET_LATEST_APP_VERSION";
+  | "GET_LATEST_APP_VERSION"
+  | "SUGERENCIA_ENVIADA"
+  | "ARCHIVO_SOPORTE_REGISTRADO"
+  | "SOPORTE_LOG_MANUAL"
+  | "METRICA_REGISTRADA"
+  | "ADMIN_SETTING_UPDATED"
+  | "ADMIN_SETTING_READ";
 
 export interface BonificacionData {
     id?: string;
@@ -723,6 +729,51 @@ export interface AppVersionData {
   linkIOS?: string;
 }
 
+export interface SugerenciaUsuarioData {
+  id?: string;
+  usuarioId: string;
+  fechaEnvio: admin.firestore.Timestamp;
+  tipo: "mejora" | "bug" | "otra";
+  mensaje: string;
+  atendida: boolean;
+}
+
+export interface ArchivoSoporteData {
+  id?: string;
+  archivoURL: string;
+  tipoArchivo: string;
+  descripcion?: string;
+  subidoPorRef: string;
+  fechaSubida: admin.firestore.Timestamp;
+}
+
+export interface BitacoraSoporteData {
+    id?: string;
+    soporteRef: string; // UID del admin/soporte que realizó la acción
+    fechaRegistro: admin.firestore.Timestamp;
+    accion: string;
+    detalle: string;
+    entidadAfectada?: {
+        tipo: string;
+        id: string;
+    };
+}
+
+export interface MetricaData {
+  id?: string;
+  evento: string;
+  usuarioRef: string;
+  fecha: admin.firestore.Timestamp;
+  detalle: string;
+}
+
+export interface AdminPanelSettingData {
+    // id (nombreOpcion) is the document ID
+    valor: boolean;
+    descripcion: string;
+    fechaUltimoCambio: admin.firestore.Timestamp;
+}
+
 
 // --- Helper para enviar notificaciones ---
 async function sendNotification(userId: string, userType: "usuario" | "prestador", title: string, body: string, data?: {[key: string]: string}) {
@@ -772,6 +823,61 @@ async function logActivity(
     functions.logger.error(`[LogActivityHelper] Error al crear log: ${descripcion}`, error);
   }
 }
+
+export const interpretarBusqueda = onRequest({cors: true}, async (req, res) => {
+    if (req.method !== "POST") {
+        res.status(405).send("Method Not Allowed");
+        return;
+    }
+
+    const {searchQuery} = req.body;
+    if (!searchQuery) {
+        res.status(400).json({error: "El campo 'searchQuery' es requerido."});
+        return;
+    }
+
+    const OPENAI_API_KEY = "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";
+    const prompt = `
+Analiza la siguiente búsqueda de un usuario y devuelve un objeto JSON con la estructura exacta: 
+{ "tipo": "...", "categoria": "...", "idiomaDetectado": "..." }
+
+- "tipo" debe ser "prestador" si parece ser un servicio móvil o una persona (por ejemplo: plomero, niñera, electricista a domicilio), o "negocio_fijo" si parece un lugar físico (por ejemplo: taller mecánico, consultorio dental, restaurante).
+- "categoria" debe ser un nombre de categoría simple en español y en minúsculas (por ejemplo: "plomería", "electricidad", "cuidado infantil", "reparación de autos").
+- "idiomaDetectado" debe ser el código ISO 639-1 del idioma detectado (por ejemplo: "es", "en").
+
+Texto de búsqueda: "${searchQuery}"
+`;
+
+
+    try {
+        const response = await axios.post(
+            "https://api.openai.com/v1/chat/completions",
+            {
+                model: "gpt-3.5-turbo",
+                messages: [{role: "user", content: prompt}],
+                temperature: 0,
+            },
+            {
+                headers: {
+                    "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                    "Content-Type": "application/json",
+                },
+            }
+        );
+
+        const resultText = response.data.choices[0].message.content;
+        try {
+            const jsonResult = JSON.parse(resultText);
+            res.status(200).json(jsonResult);
+        } catch (parseError) {
+            functions.logger.error("Error al parsear la respuesta de OpenAI:", parseError, "Respuesta recibida:", resultText);
+            res.status(500).json({error: "La respuesta de la IA no pudo ser procesada."});
+        }
+    } catch (error: any) {
+        functions.logger.error("Error llamando a la API de OpenAI:", error.response ? error.response.data : error.message);
+        res.status(502).json({error: "Hubo un problema al contactar el servicio de IA."});
+    }
+});
 
 export const createImmediateServiceRequest = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
@@ -4189,6 +4295,37 @@ export const publicarPreguntaComunidad = functions.https.onCall(async (data, con
 });
 
 
+export const onNewCommunityResponse = functions.firestore
+  .document("respuestasComunidad/{respuestaId}")
+  .onCreate(async (snapshot, context) => {
+    const respuestaData = snapshot.data();
+    if (!respuestaData || !respuestaData.preguntaRef) {
+      functions.logger.error("Nueva respuesta no tiene preguntaRef", {respuestaId: context.params.respuestaId});
+      return null;
+    }
+
+    const preguntaRef = db.collection("preguntasComunidad").doc(respuestaData.preguntaRef);
+    
+    try {
+      await preguntaRef.update({
+        respuestasRef: admin.firestore.FieldValue.arrayUnion(snapshot.ref),
+        respuestasCount: admin.firestore.FieldValue.increment(1)
+      });
+      functions.logger.info(`Referencia de respuesta ${snapshot.id} agregada a pregunta ${respuestaData.preguntaRef}.`);
+
+      // Opcional: Notificar al autor de la pregunta
+      // const preguntaDoc = await preguntaRef.get();
+      // if(preguntaDoc.exists) {
+      //   const preguntaData = preguntaDoc.data();
+      //   await sendNotification(...)
+      // }
+
+    } catch (error) {
+      functions.logger.error(`Error al actualizar pregunta ${respuestaData.preguntaRef} con nueva respuesta:`, error);
+    }
+    return null;
+  });
+
 export const responderPreguntaComunidad = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para responder.");
@@ -4207,6 +4344,8 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
   }
 
   const preguntaRef = db.collection("preguntasComunidad").doc(preguntaId);
+  const respuestaRef = db.collection("respuestasComunidad").doc(); // Crear nueva referencia para la respuesta
+
 
   try {
     const preguntaDoc = await preguntaRef.get();
@@ -4215,16 +4354,15 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
     }
     const preguntaData = preguntaDoc.data() as PreguntaComunidadData;
 
-    const nuevaRespuesta: RespuestaPreguntaComunidadData = {
+    const nuevaRespuesta: Omit<RespuestaPreguntaComunidadData, "id"> = {
       autorId: idUsuarioResponde,
       texto: textoRespuesta,
       fecha: admin.firestore.Timestamp.now(),
+      preguntaRef: preguntaId, // Referencia a la pregunta
       ...(prestadorRecomendadoId && { prestadorRecomendadoId }),
     };
 
-    await preguntaRef.update({
-      respuestas: admin.firestore.FieldValue.arrayUnion(nuevaRespuesta)
-    });
+    await respuestaRef.set(nuevaRespuesta); // Guardar la nueva respuesta
 
     await logActivity(
       idUsuarioResponde,
@@ -4232,7 +4370,7 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
       "COMUNIDAD_PREGUNTA_RESPUESTA",
       `Usuario ${idUsuarioResponde} respondió a la pregunta ${preguntaId}.`,
       { tipo: "preguntaComunidad", id: preguntaId },
-      { texto: textoRespuesta, prestadorRecomendadoId }
+      { texto: textoRespuesta, prestadorRecomendadoId, respuestaId: respuestaRef.id }
     );
     
     // Notify the original poster
@@ -4497,3 +4635,252 @@ export const getLatestVisibleAppVersion = functions.https.onCall(async (data, co
         throw new functions.https.HttpsError("internal", "No se pudo obtener la información de la versión de la aplicación.", error.message);
     }
 });
+
+export const enviarSugerenciaUsuario = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar una sugerencia.");
+    }
+    const usuarioId = context.auth.uid;
+    const { tipo, mensaje } = data;
+
+    if (!tipo || typeof tipo !== 'string' || !['mejora', 'bug', 'otra'].includes(tipo)) {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere un 'tipo' de sugerencia válido ('mejora', 'bug', 'otra').");
+    }
+    if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length < 10) {
+        throw new functions.https.HttpsError("invalid-argument", "El mensaje de la sugerencia debe tener al menos 10 caracteres.");
+    }
+
+    const now = admin.firestore.Timestamp.now();
+    const sugerenciaRef = db.collection("sugerenciasUsuarios").doc();
+
+    const nuevaSugerencia: Omit<SugerenciaUsuarioData, 'id'> = {
+        usuarioId: usuarioId,
+        fechaEnvio: now,
+        tipo: tipo as "mejora" | "bug" | "otra",
+        mensaje: mensaje,
+        atendida: false,
+    };
+
+    try {
+        await sugerenciaRef.set(nuevaSugerencia);
+
+        await logActivity(
+            usuarioId,
+            "usuario",
+            "SUGERENCIA_ENVIADA",
+            `Usuario ${usuarioId} envió una sugerencia de tipo '${tipo}'.`,
+            { tipo: "sugerenciaUsuario", id: sugerenciaRef.id },
+            { tipoSugerencia: tipo }
+        );
+
+        return { success: true, message: "¡Gracias por tu sugerencia! La hemos recibido correctamente." };
+    } catch (error: any) {
+        functions.logger.error(`Error al guardar sugerencia para usuario ${usuarioId}:`, error);
+        throw new functions.https.HttpsError("internal", "No se pudo guardar tu sugerencia en este momento.", error.message);
+    }
+});
+
+
+export const registrarArchivoSoporte = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar un archivo.");
+    }
+    const usuarioId = context.auth.uid;
+    const { archivoURL, tipoArchivo, descripcion } = data;
+
+    if (!archivoURL || typeof archivoURL !== 'string') {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere la URL del archivo ('archivoURL').");
+    }
+    if (!tipoArchivo || typeof tipoArchivo !== 'string') {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere el tipo de archivo ('tipoArchivo').");
+    }
+
+    const ahora = admin.firestore.Timestamp.now();
+    const archivoRef = db.collection("archivosSoporte").doc();
+
+    const nuevoArchivoData: Omit<ArchivoSoporteData, 'id'> = {
+        archivoURL,
+        tipoArchivo,
+        subidoPorRef: usuarioId,
+        fechaSubida: ahora,
+        ...(descripcion && { descripcion }),
+    };
+
+    try {
+        await archivoRef.set(nuevoArchivoData);
+
+        await logActivity(
+            usuarioId,
+            "usuario",
+            "ARCHIVO_SOPORTE_REGISTRADO",
+            `Usuario ${usuarioId} registró un nuevo archivo de soporte: ${tipoArchivo}.`,
+            { tipo: "archivoSoporte", id: archivoRef.id },
+            { url: archivoURL }
+        );
+
+        return { success: true, message: "Archivo registrado exitosamente.", archivoId: archivoRef.id };
+    } catch (error: any) {
+        functions.logger.error(`Error al registrar archivo de soporte para usuario ${usuarioId}:`, error);
+        throw new functions.https.HttpsError("internal", "No se pudo registrar tu archivo.", error.message);
+    }
+});
+
+export const logSoporteAction = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar una acción de soporte.");
+    }
+    
+    // Verificar si el usuario tiene rol de admin o soporte
+    const isAdmin = context.auth.token.admin === true;
+    const isSoporte = context.auth.token.soporte === true;
+
+    if (!isAdmin && !isSoporte) {
+        throw new functions.https.HttpsError("permission-denied", "No tienes los privilegios necesarios para realizar esta acción.");
+    }
+
+    const soporteId = context.auth.uid;
+    const { accion, detalle, entidadAfectada } = data;
+
+    if (!accion || typeof accion !== 'string' || accion.trim().length === 0) {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere el campo 'accion' y no puede estar vacío.");
+    }
+    if (!detalle || typeof detalle !== 'string' || detalle.trim().length === 0) {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere el campo 'detalle' y no puede estar vacío.");
+    }
+
+    const ahora = admin.firestore.Timestamp.now();
+    const bitacoraRef = db.collection("bitacoraSoporte").doc();
+
+    const nuevaBitacora: Omit<BitacoraSoporteData, 'id'> = {
+        soporteRef: soporteId,
+        fechaRegistro: ahora,
+        accion: accion,
+        detalle: detalle,
+        ...(entidadAfectada && { entidadAfectada }),
+    };
+
+    try {
+        await bitacoraRef.set(nuevaBitacora);
+
+        await logActivity(
+            soporteId,
+            isAdmin ? "admin" : "soporte" as any, // Asumiendo que el rol en logActivity acepta 'soporte'
+            "SOPORTE_LOG_MANUAL",
+            `[Soporte] ${accion}: ${detalle}`,
+            entidadAfectada,
+            { accionOriginal: accion }
+        );
+
+        return { success: true, message: "Acción de soporte registrada en la bitácora.", logId: bitacoraRef.id };
+    } catch (error: any) {
+        functions.logger.error(`Error al registrar acción de soporte por ${soporteId}:`, error);
+        throw new functions.https.HttpsError("internal", "No se pudo registrar la acción en la bitácora.", error.message);
+    }
+});
+
+export const logMetric = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar una métrica.");
+    }
+
+    const usuarioId = context.auth.uid;
+    const { evento, detalle } = data;
+
+    if (!evento || typeof evento !== 'string' || evento.trim().length === 0) {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre de 'evento' válido y no puede estar vacío.");
+    }
+
+    const detalleFinal = (typeof detalle === 'string') ? detalle : '';
+
+    const metricaRef = db.collection("metricas").doc();
+
+    const nuevaMetrica: Omit<MetricaData, 'id'> = {
+        evento,
+        usuarioRef: usuarioId,
+        fecha: admin.firestore.Timestamp.now(),
+        detalle: detalleFinal,
+    };
+
+    try {
+        await metricaRef.set(nuevaMetrica);
+        functions.logger.info(`[Metrica] Evento '${evento}' registrado para usuario ${usuarioId}. ID: ${metricaRef.id}`);
+        return { success: true, message: "Métrica registrada exitosamente.", metricId: metricaRef.id };
+    } catch (error: any) {
+        functions.logger.error(`Error al registrar métrica para usuario ${usuarioId}:`, error);
+        throw new functions.https.HttpsError("internal", "No se pudo registrar la métrica.", error.message);
+    }
+});
+
+export const manageAdminSettings = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para gestionar la configuración.");
+    }
+    const { nombreOpcion, valor } = data; // valor can be boolean or undefined
+
+    if (!nombreOpcion || typeof nombreOpcion !== 'string') {
+        throw new functions.https.HttpsError("invalid-argument", "Se requiere 'nombreOpcion'.");
+    }
+
+    const settingRef = db.collection("adminPanelSettings").doc(nombreOpcion);
+    const actorId = context.auth.uid;
+    const isAdmin = context.auth.token.admin === true;
+
+    // WRITE operation
+    if (typeof valor === 'boolean') {
+        if (!isAdmin) {
+            throw new functions.https.HttpsError("permission-denied", "No tienes permisos para modificar esta configuración.");
+        }
+
+        try {
+            await settingRef.update({
+                valor: valor,
+                fechaUltimoCambio: admin.firestore.Timestamp.now(),
+            });
+
+            await logActivity(
+                actorId,
+                "admin",
+                "ADMIN_SETTING_UPDATED",
+                `Admin ${actorId} actualizó la configuración '${nombreOpcion}' a '${valor}'.`,
+                { tipo: "adminPanelSetting", id: nombreOpcion },
+                { nuevoValor: valor }
+            );
+
+            return { success: true, message: `Configuración '${nombreOpcion}' actualizada.` };
+        } catch (error: any) {
+            functions.logger.error(`Error al actualizar configuración '${nombreOpcion}':`, error);
+            if (error.code === 5) { // NOT_FOUND error code
+                 throw new functions.https.HttpsError("not-found", `La configuración '${nombreOpcion}' no existe.`);
+            }
+            throw new functions.https.HttpsError("internal", "Error al actualizar la configuración.", error.message);
+        }
+    } 
+    // READ operation
+    else {
+        try {
+            const doc = await settingRef.get();
+            if (!doc.exists) {
+                throw new functions.https.HttpsError("not-found", `La configuración '${nombreOpcion}' no existe.`);
+            }
+            const settingData = doc.data() as AdminPanelSettingData;
+            
+            // Log read access for admins for auditing purposes
+            if (isAdmin) {
+                 await logActivity(
+                    actorId,
+                    "admin",
+                    "ADMIN_SETTING_READ",
+                    `Admin ${actorId} consultó la configuración '${nombreOpcion}'.`,
+                    { tipo: "adminPanelSetting", id: nombreOpcion }
+                );
+            }
+            
+            return { success: true, valor: settingData.valor };
+        } catch (error: any) {
+             functions.logger.error(`Error al leer configuración '${nombreOpcion}':`, error);
+             if (error instanceof functions.https.HttpsError) throw error;
+             throw new functions.https.HttpsError("internal", "Error al consultar la configuración.", error.message);
+        }
+    }
+});
+    

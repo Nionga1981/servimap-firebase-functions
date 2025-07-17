@@ -1,5 +1,7 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import axios from "axios";
+import {onRequest} from "firebase-functions/v2/https";
 import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
 
 if (admin.apps.length === 0) {
@@ -821,6 +823,58 @@ async function logActivity(
     functions.logger.error(`[LogActivityHelper] Error al crear log: ${descripcion}`, error);
   }
 }
+
+export const interpretarBusqueda = onRequest({cors: true}, async (req, res) => {
+    if (req.method !== "POST") {
+        res.status(405).send("Method Not Allowed");
+        return;
+    }
+
+    const {searchQuery} = req.body;
+    if (!searchQuery) {
+        res.status(400).json({error: "El campo 'searchQuery' es requerido."});
+        return;
+    }
+
+    const OPENAI_API_KEY = "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";
+    const prompt = `Analiza la siguiente búsqueda de un usuario y devuelve un objeto JSON con la estructura exacta: 
+{ "tipo": "...", "categoria": "...", "idiomaDetectado": "..." }
+
+- "tipo" debe ser "prestador" si parece ser un servicio móvil o una persona (por ejemplo: plomero, niñera, electricista a domicilio), o "negocio_fijo" si parece un lugar físico (por ejemplo: taller mecánico, consultorio dental, restaurante).
+- "categoria" debe ser un nombre de categoría simple en español y en minúsculas (por ejemplo: "plomería", "electricidad", "cuidado infantil", "reparación de autos").
+- "idiomaDetectado" debe ser el código ISO 639-1 del idioma detectado (por ejemplo: "es", "en").
+
+Texto de búsqueda: "${searchQuery}"`;
+
+    try {
+        const response = await axios.post(
+            "https://api.openai.com/v1/chat/completions",
+            {
+                model: "gpt-3.5-turbo",
+                messages: [{role: "user", content: prompt}],
+                temperature: 0,
+            },
+            {
+                headers: {
+                    "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                    "Content-Type": "application/json",
+                },
+            }
+        );
+
+        const resultText = response.data.choices[0].message.content;
+        try {
+            const jsonResult = JSON.parse(resultText);
+            res.status(200).json(jsonResult);
+        } catch (parseError) {
+            functions.logger.error("Error al parsear la respuesta de OpenAI:", parseError, "Respuesta recibida:", resultText);
+            res.status(500).json({error: "La respuesta de la IA no pudo ser procesada."});
+        }
+    } catch (error: any) {
+        functions.logger.error("Error llamando a la API de OpenAI:", error.response ? error.response.data : error.message);
+        res.status(502).json({error: "Hubo un problema al contactar el servicio de IA."});
+    }
+});
 
 export const createImmediateServiceRequest = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
@@ -4238,6 +4292,37 @@ export const publicarPreguntaComunidad = functions.https.onCall(async (data, con
 });
 
 
+export const onNewCommunityResponse = functions.firestore
+  .document("respuestasComunidad/{respuestaId}")
+  .onCreate(async (snapshot, context) => {
+    const respuestaData = snapshot.data();
+    if (!respuestaData || !respuestaData.preguntaRef) {
+      functions.logger.error("Nueva respuesta no tiene preguntaRef", {respuestaId: context.params.respuestaId});
+      return null;
+    }
+
+    const preguntaRef = db.collection("preguntasComunidad").doc(respuestaData.preguntaRef);
+    
+    try {
+      await preguntaRef.update({
+        respuestasRef: admin.firestore.FieldValue.arrayUnion(snapshot.ref),
+        respuestasCount: admin.firestore.FieldValue.increment(1)
+      });
+      functions.logger.info(`Referencia de respuesta ${snapshot.id} agregada a pregunta ${respuestaData.preguntaRef}.`);
+
+      // Opcional: Notificar al autor de la pregunta
+      // const preguntaDoc = await preguntaRef.get();
+      // if(preguntaDoc.exists) {
+      //   const preguntaData = preguntaDoc.data();
+      //   await sendNotification(...)
+      // }
+
+    } catch (error) {
+      functions.logger.error(`Error al actualizar pregunta ${respuestaData.preguntaRef} con nueva respuesta:`, error);
+    }
+    return null;
+  });
+
 export const responderPreguntaComunidad = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para responder.");
@@ -4256,6 +4341,8 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
   }
 
   const preguntaRef = db.collection("preguntasComunidad").doc(preguntaId);
+  const respuestaRef = db.collection("respuestasComunidad").doc(); // Crear nueva referencia para la respuesta
+
 
   try {
     const preguntaDoc = await preguntaRef.get();
@@ -4264,16 +4351,15 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
     }
     const preguntaData = preguntaDoc.data() as PreguntaComunidadData;
 
-    const nuevaRespuesta: RespuestaPreguntaComunidadData = {
+    const nuevaRespuesta: Omit<RespuestaPreguntaComunidadData, "id"> = {
       autorId: idUsuarioResponde,
       texto: textoRespuesta,
       fecha: admin.firestore.Timestamp.now(),
+      preguntaRef: preguntaId, // Referencia a la pregunta
       ...(prestadorRecomendadoId && { prestadorRecomendadoId }),
     };
 
-    await preguntaRef.update({
-      respuestas: admin.firestore.FieldValue.arrayUnion(nuevaRespuesta)
-    });
+    await respuestaRef.set(nuevaRespuesta); // Guardar la nueva respuesta
 
     await logActivity(
       idUsuarioResponde,
@@ -4281,7 +4367,7 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
       "COMUNIDAD_PREGUNTA_RESPUESTA",
       `Usuario ${idUsuarioResponde} respondió a la pregunta ${preguntaId}.`,
       { tipo: "preguntaComunidad", id: preguntaId },
-      { texto: textoRespuesta, prestadorRecomendadoId }
+      { texto: textoRespuesta, prestadorRecomendadoId, respuestaId: respuestaRef.id }
     );
     
     // Notify the original poster
