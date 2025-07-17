@@ -1,3 +1,4 @@
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {onRequest} from "firebase-functions/v2/https";
@@ -652,13 +653,11 @@ async function sendNotification(
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
  * @param {string} actorId UID del actor que realiza la acción.
- * @param {"usuario" | "prestador" | "sistema" | "admin"} actorRol Rol del actor.
+ * @param {("usuario" | "prestador" | "sistema" | "admin")} actorRol Rol del actor.
  * @param {ActivityLogAction} accion El tipo de acción realizada.
  * @param {string} descripcion Descripción legible de la acción.
- * @param {Object} [entidadAfectada] Entidad afectada.
- * @param {string} entidadAfectada.tipo - El tipo de entidad.
- * @param {string} entidadAfectada.id - El ID de la entidad.
- * @param {Object<string, unknown>} [detallesAdicionales] Datos extra.
+ * @param {{tipo: string; id: string}} [entidadAfectada] Entidad afectada.
+ * @param {Record<string, unknown>} [detallesAdicionales] Datos extra.
  * @return {Promise<void>} Una promesa que se resuelve al completar el registro.
  */
 async function logActivity(
@@ -1335,3 +1334,5 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
     throw new functions.https.HttpsError("internal", "Error al procesar.", httpsError.message);
   }
 });
+
+    
