@@ -34,5 +34,6 @@ module.exports = {
     "object-curly-spacing": "off",
     "max-len": ["error", { "code": 150 }],
     "require-jsdoc": "off",
+    "valid-jsdoc": "off"
   },
 };

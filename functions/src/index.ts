@@ -1,5 +1,4 @@
 
-"use server";
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {onRequest} from "firebase-functions/v2/https";
@@ -653,13 +652,13 @@ async function sendNotification(
 
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
- * @param {string} actorId - UID del actor que realiza la acción.
- * @param {("usuario" | "prestador" | "sistema" | "admin")} actorRol - Rol del actor.
- * @param {ActivityLogAction} accion - El tipo de acción realizada.
- * @param {string} descripcion - Descripción legible de la acción.
- * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad afectada (opcional).
- * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra (opcional).
- * @return {Promise<void>} Una promesa que se resuelve cuando se completa el registro.
+ * @param {string} actorId UID del actor que realiza la acción.
+ * @param {("usuario" | "prestador" | "sistema" | "admin")} actorRol Rol del actor.
+ * @param {ActivityLogAction} accion El tipo de acción realizada.
+ * @param {string} descripcion Descripción legible de la acción.
+ * @param {{tipo: string; id: string}} [entidadAfectada] Entidad afectada.
+ * @param {Record<string, unknown>} [detallesAdicionales] Datos extra.
+ * @return {Promise<void>} Una promesa que se resuelve al completar el registro.
  */
 async function logActivity(
   actorId: string,
@@ -1100,7 +1099,8 @@ export const logSolicitudServicioChanges = functions.firestore
             }
           });
           const logDesc = `Relación entre ${afterData.usuarioId} y ${afterData.prestadorId} actualizada.`;
-          await logActivity("sistema", "sistema", "RELACION_USUARIO_PRESTADOR_ACTUALIZADA", logDesc, {tipo: "relacionUsuarioPrestador", id: relationshipId});
+          const logDetails = {tipo: "relacionUsuarioPrestador", id: relationshipId};
+          await logActivity("sistema", "sistema", "RELACION_USUARIO_PRESTADOR_ACTUALIZADA", logDesc, logDetails);
         } catch (e) {
           functions.logger.error(`Error actualizando relación para ${relationshipId}:`, e);
         }
@@ -1118,12 +1118,12 @@ export const logSolicitudServicioChanges = functions.firestore
         detallesFinancierosNuevos.montoTotalPagadoPorUsuario = montoTotalPagadoPorUsuario;
         detallesFinancierosNuevos.comisionSistemaPagoPct = COMISION_SISTEMA_PAGO_PORCENTAJE;
         detallesFinancierosNuevos.comisionSistemaPagoMonto = montoTotalPagadoPorUsuario * COMISION_SISTEMA_PAGO_PORCENTAJE;
-        detallesFinancierosNuevos.montoNetoProcesador = montoTotalPagadoPorUsuario - (detallesFinancierosNuevos.comisionSistemaPagoMonto || 0);
+        const montoNeto = montoTotalPagadoPorUsuario - (detallesFinancierosNuevos.comisionSistemaPagoMonto || 0);
+        detallesFinancierosNuevos.montoNetoProcesador = montoNeto;
         detallesFinancierosNuevos.comisionAppPct = COMISION_APP_SERVICIOMAP_PORCENTAJE;
-        detallesFinancierosNuevos.comisionAppMonto = montoTotalPagadoPorUsuario * COMISION_APP_SERVICIOMAP_PORCENTAJE;
-        const comisionApp = detallesFinancierosNuevos.comisionAppMonto || 0;
+        const comisionApp = montoTotalPagadoPorUsuario * COMISION_APP_SERVICIOMAP_PORCENTAJE;
+        detallesFinancierosNuevos.comisionAppMonto = comisionApp;
         detallesFinancierosNuevos.aporteFondoFidelidadMonto = comisionApp * PORCENTAJE_COMISION_APP_PARA_FONDO_FIDELIDAD;
-        const montoNeto = detallesFinancierosNuevos.montoNetoProcesador || 0;
         detallesFinancierosNuevos.montoBrutoParaPrestador = montoNeto - comisionApp;
         detallesFinancierosNuevos.montoFinalLiberadoAlPrestador = detallesFinancierosNuevos.montoBrutoParaPrestador;
         detallesFinancierosNuevos.fechaLiberacion = now;
@@ -1153,8 +1153,9 @@ export const logSolicitudServicioChanges = functions.firestore
               puntosAcumulados: pointsEarned, historialPuntos: [userHistoryEntry],
             }, {merge: true});
           }
+          const logDescPts = `Usuario ganó ${pointsEarned} puntos.`;
           await logActivity(
-            afterData.usuarioId, "usuario", "PUNTOS_FIDELIDAD_GANADOS", `Usuario ganó ${pointsEarned} puntos.`,
+            afterData.usuarioId, "usuario", "PUNTOS_FIDELIDAD_GANADOS", logDescPts,
             {tipo: "usuario", id: afterData.usuarioId}, {puntos: pointsEarned, servicioId}
           );
         }
