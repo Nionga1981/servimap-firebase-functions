@@ -2,7 +2,9 @@ import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import axios from "axios";
 import {onRequest} from "firebase-functions/v2/https";
-import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants"; // Asumiendo que tienes este archivo o lo crearás
+import {SERVICE_CATEGORIES, REPORT_CATEGORIES} from "./constants";
+import {z} from "zod";
+import {ai} from "../../ai/genkit";
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -32,11 +34,11 @@ const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PLATAFORMA = 0.10; // 10% of servic
 const PENALIZACION_CLIENTE_CITA_MENOS_2H_PCT_PRESTADOR = 0.15; // 15% of service total to provider
 
 const SUBSCRIPTION_PLANS = {
-  'premium_monthly': {
+  "premium_monthly": {
     price: 5.00,
     commissionRate: 0.10, // 10%
     durationDays: 30,
-  }
+  },
 };
 
 
@@ -73,7 +75,7 @@ export type EstadoFinalServicio =
 
 const ESTADOS_FINALES_SERVICIO: EstadoFinalServicio[] = [
   "cerrado_automaticamente", "cerrado_con_calificacion", "cerrado_con_disputa_resuelta",
-  "cancelada_usuario", "cancelada_prestador", "rechazada_prestador", "cancelada_admin", "cerrado_forzado_admin"
+  "cancelada_usuario", "cancelada_prestador", "rechazada_prestador", "cancelada_admin", "cerrado_forzado_admin",
 ];
 
 export type PaymentStatus =
@@ -194,7 +196,7 @@ export interface ServiceRequest {
   calificacionUsuario?: CalificacionDetallada;
   calificacionPrestador?: CalificacionDetallada;
   paymentStatus?: PaymentStatus;
-  metodoPago?: 'tarjeta' | 'efectivo' | 'transferencia' | 'wallet';
+  metodoPago?: "tarjeta" | "efectivo" | "transferencia" | "wallet";
   originatingQuotationId?: string;
   precio?: number;
   montoCobrado?: number;
@@ -350,17 +352,17 @@ export type ActivityLogAction =
   | "ADMIN_SETTING_READ";
 
 export interface BonificacionData {
-    id?: string;
-    usuarioId: string; // ID del embajador
-    monto: number;
-    motivo: 'bono_por_afiliaciones' | 'otro' | 'afiliacion_exitosa';
-    fecha: admin.firestore.Timestamp;
-    origen: 'sistema' | 'admin';
-    detalles?: {
-      umbralAlcanzado?: number;
-      afiliadoId?: string;
-      origenTexto?: string;
-    };
+  id?: string;
+  usuarioId: string; // ID del embajador
+  monto: number;
+  motivo: "bono_por_afiliaciones" | "otro" | "afiliacion_exitosa";
+  fecha: admin.firestore.Timestamp;
+  origen: "sistema" | "admin";
+  detalles?: {
+    umbralAlcanzado?: number;
+    afiliadoId?: string;
+    origenTexto?: string;
+  };
 }
 
 
@@ -617,7 +619,7 @@ export interface CitaDataFirestore {
     montoParaPlataforma: number;
     montoParaPrestador: number;
     montoReembolsoProgramadoUsuario: number;
-    reglaAplicada: '>2h' | '<=2h';
+    reglaAplicada: ">2h" | "<=2h";
   };
   serviceType?: "fixed" | "hourly";
   precioServicio?: number;
@@ -629,11 +631,11 @@ export interface CitaDataFirestore {
 }
 
 export interface CategoriaPropuestaData {
-    id?: string;
-    providerId: string;
-    nombrePropuesto: string;
-    estado: 'pendiente' | 'aprobada' | 'rechazada';
-    fechaCreacion: admin.firestore.Timestamp;
+  id?: string;
+  providerId: string;
+  nombrePropuesto: string;
+  estado: "pendiente" | "aprobada" | "rechazada";
+  fechaCreacion: admin.firestore.Timestamp;
 }
 
 export interface RelacionUsuarioPrestadorData {
@@ -647,14 +649,14 @@ export interface RelacionUsuarioPrestadorData {
 
 export interface RecomendacionData {
   id?: string;
-  type: 're-hire-suggestion' | 'endorsement';
+  type: "re-hire-suggestion" | "endorsement";
   usuarioId: string;
   prestadorId: string;
   fechaCreacion: admin.firestore.Timestamp;
   categoria?: string;
   mensaje?: string;
-  estado?: 'pendiente' | 'vista' | 'aceptada' | 'descartada';
-  suggestionSource?: 'sistema' | 'invita-prestador';
+  estado?: "pendiente" | "vista" | "aceptada" | "descartada";
+  suggestionSource?: "sistema" | "invita-prestador";
 }
 
 export interface MonitoredService {
@@ -669,7 +671,7 @@ export interface MonitoredService {
 
 export interface BlockedUser {
   id: string;
-  type: 'usuario' | 'prestador';
+  type: "usuario" | "prestador";
   name?: string;
   email?: string; // Add email if available in your user/provider docs
   isBlocked: boolean;
@@ -748,15 +750,15 @@ export interface ArchivoSoporteData {
 }
 
 export interface BitacoraSoporteData {
-    id?: string;
-    soporteRef: string; // UID del admin/soporte que realizó la acción
-    fechaRegistro: admin.firestore.Timestamp;
-    accion: string;
-    detalle: string;
-    entidadAfectada?: {
-        tipo: string;
-        id: string;
-    };
+  id?: string;
+  soporteRef: string; // UID del admin/soporte que realizó la acción
+  fechaRegistro: admin.firestore.Timestamp;
+  accion: string;
+  detalle: string;
+  entidadAfectada?: {
+    tipo: string;
+    id: string;
+  };
 }
 
 export interface MetricaData {
@@ -768,10 +770,9 @@ export interface MetricaData {
 }
 
 export interface AdminPanelSettingData {
-    // id (nombreOpcion) is the document ID
-    valor: boolean;
-    descripcion: string;
-    fechaUltimoCambio: admin.firestore.Timestamp;
+  valor: boolean;
+  descripcion: string;
+  fechaUltimoCambio: admin.firestore.Timestamp;
 }
 
 
@@ -824,178 +825,187 @@ async function logActivity(
   }
 }
 
-export const interpretarBusqueda = onRequest({cors: true}, async (req, res) => {
-    if (req.method !== "POST") {
-        res.status(405).send("Method Not Allowed");
-        return;
-    }
-
-    const {searchQuery} = req.body;
-    if (!searchQuery) {
-        res.status(400).json({error: "El campo 'searchQuery' es requerido."});
-        return;
-    }
-
-    const OPENAI_API_KEY = "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";
-    const prompt = `Analiza la siguiente búsqueda de un usuario y devuelve un objeto JSON con la estructura exacta: 
-{ "tipo": "...", "categoria": "...", "idiomaDetectado": "..." }
-
-- "tipo" debe ser "prestador" si parece ser un servicio móvil o una persona (por ejemplo: plomero, niñera, electricista a domicilio), o "negocio_fijo" si parece un lugar físico (por ejemplo: taller mecánico, consultorio dental, restaurante).
-- "categoria" debe ser un nombre de categoría simple en español y en minúsculas (por ejemplo: "plomería", "electricidad", "cuidado infantil", "reparación de autos").
-- "idiomaDetectado" debe ser el código ISO 639-1 del idioma detectado (por ejemplo: "es", "en").
-
-Texto de búsqueda: "${searchQuery}"`;
-
-    try {
-        const response = await axios.post(
-            "https://api.openai.com/v1/chat/completions",
-            {
-                model: "gpt-3.5-turbo",
-                messages: [{role: "user", content: prompt}],
-                temperature: 0,
-            },
-            {
-                headers: {
-                    "Authorization": `Bearer ${OPENAI_API_KEY}`,
-                    "Content-Type": "application/json",
-                },
-            }
-        );
-
-        const resultText = response.data.choices[0].message.content;
-        try {
-            const jsonResult = JSON.parse(resultText);
-            res.status(200).json(jsonResult);
-        } catch (parseError) {
-            functions.logger.error("Error al parsear la respuesta de OpenAI:", parseError, "Respuesta recibida:", resultText);
-            res.status(500).json({error: "La respuesta de la IA no pudo ser procesada."});
-        }
-    } catch (error: any) {
-        functions.logger.error("Error llamando a la API de OpenAI:", error.response ? error.response.data : error.message);
-        res.status(502).json({error: "Hubo un problema al contactar el servicio de IA."});
-    }
+// --- START: Genkit Implementation of interpretarBusqueda ---
+const interpretarBusquedaInputSchema = z.object({
+  searchQuery: z.string().describe("El texto de búsqueda del usuario a analizar."),
 });
 
+const interpretarBusquedaOutputSchema = z.object({
+  tipo: z.enum(["prestador", "negocio_fijo"]).describe("El tipo de servicio. 'prestador' para servicios móviles/personas, 'negocio_fijo' para locales físicos."),
+  categoria: z.string().describe("La categoría del servicio en español y minúsculas (ej: plomería, electricidad)."),
+  idiomaDetectado: z.string().describe("El código ISO 639-1 del idioma detectado (ej: es, en)."),
+});
+
+const interpretarBusquedaPrompt = ai.definePrompt({
+  name: "interpretarBusquedaPrompt",
+  input: {schema: interpretarBusquedaInputSchema},
+  output: {schema: interpretarBusquedaOutputSchema},
+  prompt: `Analiza la siguiente búsqueda de un usuario y clasifícala.
+  - "tipo": "prestador" si es un servicio móvil o una persona (ej: plomero, jardinero). "negocio_fijo" si es un lugar (ej: taller, consultorio).
+  - "categoría": Una categoría simple en español y minúsculas (ej: plomería, jardinería).
+  - "idiomaDetectado": El código ISO 639-1 del idioma.
+
+  Texto de búsqueda: {{{searchQuery}}}`,
+});
+
+const interpretarBusquedaFlow = ai.defineFlow(
+  {
+    name: "interpretarBusquedaFlow",
+    inputSchema: interpretarBusquedaInputSchema,
+    outputSchema: interpretarBusquedaOutputSchema,
+  },
+  async (input) => {
+    const {output} = await interpretarBusquedaPrompt(input);
+    if (!output) {
+      throw new Error("La respuesta del modelo de IA fue nula.");
+    }
+    return output;
+  }
+);
+
+export const interpretarBusqueda = onRequest({cors: true}, async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).send("Method Not Allowed");
+    return;
+  }
+
+  const {searchQuery} = req.body;
+  if (!searchQuery) {
+    res.status(400).send("Falta el parámetro 'searchQuery'");
+    return;
+  }
+
+  try {
+    const result = await interpretarBusquedaFlow({searchQuery});
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Error en el flujo de interpretarBusqueda:", error);
+    res.status(500).send("Error al procesar la solicitud.");
+  }
+});
+// --- END: Genkit Implementation of interpretarBusqueda ---
+
+
 export const createImmediateServiceRequest = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-    }
-    const usuarioId = context.auth.uid;
-    const { providerId, selectedServices, totalAmount, location, metodoPago, codigoPromocion } = data;
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const usuarioId = context.auth.uid;
+  const {providerId, selectedServices, totalAmount, location, metodoPago, codigoPromocion} = data;
 
-    if (!providerId || !Array.isArray(selectedServices) || selectedServices.length === 0 || typeof totalAmount !== "number" || !location || !metodoPago) {
-        throw new functions.https.HttpsError("invalid-argument", "Faltan parámetros requeridos o son inválidos.");
-    }
+  if (!providerId || !Array.isArray(selectedServices) || selectedServices.length === 0 || typeof totalAmount !== "number" || !location || !metodoPago) {
+    throw new functions.https.HttpsError("invalid-argument", "Faltan parámetros requeridos o son inválidos.");
+  }
 
-    const now = admin.firestore.Timestamp.now();
-    const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
-    let montoFinal = totalAmount;
-    let promoAplicada: ServiceRequest['promoAplicada'] | undefined = undefined;
+  const now = admin.firestore.Timestamp.now();
+  const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
+  let montoFinal = totalAmount;
+  let promoAplicada: ServiceRequest["promoAplicada"] | undefined = undefined;
 
-    // Lógica de Promoción
-    if (codigoPromocion && typeof codigoPromocion === 'string') {
-        const promoQuery = db.collection("promociones").where("codigoPromocional", "==", codigoPromocion).limit(1);
-        const promoSnapshot = await promoQuery.get();
+  // Lógica de Promoción
+  if (codigoPromocion && typeof codigoPromocion === "string") {
+    const promoQuery = db.collection("promociones").where("codigoPromocional", "==", codigoPromocion).limit(1);
+    const promoSnapshot = await promoQuery.get();
 
-        if (promoSnapshot.empty) {
-            throw new functions.https.HttpsError("not-found", "El código de promoción no es válido o ha expirado.");
-        }
-
-        const promoDoc = promoSnapshot.docs[0];
-        const promoData = promoDoc.data() as PromocionFidelidad;
-
-        if (!promoData.activo || (promoData.fechaExpiracion && promoData.fechaExpiracion.toMillis() < now.toMillis()) || (typeof promoData.usosDisponibles === 'number' && promoData.usosDisponibles <= 0)) {
-            throw new functions.https.HttpsError("failed-precondition", "El código de promoción no está activo o ha expirado.");
-        }
-
-        let montoDescuento = 0;
-        if (promoData.tipoDescuento === 'porcentaje') {
-            montoDescuento = totalAmount * (promoData.valorDescuento / 100);
-        } else { // monto_fijo
-            montoDescuento = promoData.valorDescuento;
-        }
-
-        montoFinal = Math.max(0, totalAmount - montoDescuento);
-        promoAplicada = {
-            codigo: codigoPromocion,
-            descripcion: promoData.descripcion,
-            montoDescuento: montoDescuento,
-        };
-
-        // Decrementar usos si aplica
-        if (typeof promoData.usosDisponibles === 'number') {
-            await promoDoc.ref.update({ usosDisponibles: admin.firestore.FieldValue.increment(-1) });
-        }
-        await logActivity(usuarioId, "usuario", "PROMO_APLICADA", `Usuario aplicó promoción "${codigoPromocion}" al servicio ${nuevaSolicitudRef.id}. Descuento: $${montoDescuento.toFixed(2)}`, { tipo: 'solicitud_servicio', id: nuevaSolicitudRef.id }, promoAplicada);
+    if (promoSnapshot.empty) {
+      throw new functions.https.HttpsError("not-found", "El código de promoción no es válido o ha expirado.");
     }
 
-    const providerDoc = await db.collection("prestadores").doc(providerId).get();
-    if (!providerDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
+    const promoDoc = promoSnapshot.docs[0];
+    const promoData = promoDoc.data() as PromocionFidelidad;
+
+    if (!promoData.activo || (promoData.fechaExpiracion && promoData.fechaExpiracion.toMillis() < now.toMillis()) || (typeof promoData.usosDisponibles === "number" && promoData.usosDisponibles <= 0)) {
+      throw new functions.https.HttpsError("failed-precondition", "El código de promoción no está activo o ha expirado.");
     }
 
-    const providerData = providerDoc.data() as ProviderData;
-    if (providerData.isBlocked) {
-        throw new functions.https.HttpsError("failed-precondition", "Este proveedor no puede ser contratado en este momento.");
-    }
-    const userDoc = await db.collection("usuarios").doc(usuarioId).get();
-    const userData = userDoc.data() as UserData;
-    if (userData.isBlocked) {
-        throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes contratar servicios.");
-    }
-    
-    // Check for user-to-user blocks
-    const userBlocksProviderQuery = db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", providerId).limit(1);
-    const userBlocksProviderSnap = await userBlocksProviderQuery.get();
-    if (!userBlocksProviderSnap.empty) {
-        throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor porque lo has bloqueado.");
-    }
-    const providerBlocksUserQuery = db.collection("bloqueos").where("bloqueadorRef", "==", providerId).where("bloqueadoRef", "==", usuarioId).limit(1);
-    const providerBlocksUserSnap = await providerBlocksUserQuery.get();
-    if (!providerBlocksUserSnap.empty) {
-        throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor en este momento.");
+    let montoDescuento = 0;
+    if (promoData.tipoDescuento === "porcentaje") {
+      montoDescuento = totalAmount * (promoData.valorDescuento / 100);
+    } else { // monto_fijo
+      montoDescuento = promoData.valorDescuento;
     }
 
-
-    const nuevaSolicitudData: Omit<ServiceRequest, "id" | "serviceType"> & { serviceType: "fixed" } = {
-        usuarioId: usuarioId,
-        prestadorId: providerId,
-        status: "pagada",
-        createdAt: now,
-        updatedAt: now,
-        titulo: `Servicio inmediato: ${selectedServices.map((s: any) => s.title).join(", ")}`,
-        serviceType: "fixed",
-        selectedFixedServices: selectedServices,
-        totalAmount: totalAmount,
-        montoCobrado: montoFinal, // Usar el monto final con descuento
-        location: location,
-        metodoPago: metodoPago,
-        paymentStatus: "retenido_para_liberacion",
-        actorDelCambioId: usuarioId,
-        actorDelCambioRol: "usuario",
-        ...(promoAplicada && { promoAplicada }), // Añadir detalles de la promo
+    montoFinal = Math.max(0, totalAmount - montoDescuento);
+    promoAplicada = {
+      codigo: codigoPromocion,
+      descripcion: promoData.descripcion,
+      montoDescuento: montoDescuento,
     };
 
-    await nuevaSolicitudRef.set(nuevaSolicitudData);
+    // Decrementar usos si aplica
+    if (typeof promoData.usosDisponibles === "number") {
+      await promoDoc.ref.update({usosDisponibles: admin.firestore.FieldValue.increment(-1)});
+    }
+    await logActivity(usuarioId, "usuario", "PROMO_APLICADA", `Usuario aplicó promoción "${codigoPromocion}" al servicio ${nuevaSolicitudRef.id}. Descuento: $${montoDescuento.toFixed(2)}`, {tipo: "solicitud_servicio", id: nuevaSolicitudRef.id}, promoAplicada);
+  }
 
-    await logActivity(
-        usuarioId,
-        "usuario",
-        "SOLICITUD_CREADA",
-        `Usuario ${usuarioId} creó y pagó una solicitud #${nuevaSolicitudRef.id} para ${providerId}. Total: $${montoFinal.toFixed(2)}.`,
-        { tipo: "solicitud_servicio", id: nuevaSolicitudRef.id },
-        { totalAmount: montoFinal, metodoPago, promoAplicada }
-    );
+  const providerDoc = await db.collection("prestadores").doc(providerId).get();
+  if (!providerDoc.exists) {
+    throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
+  }
 
-    await sendNotification(
-        providerId,
-        "prestador",
-        "¡Nuevo Servicio Inmediato!",
-        `Has recibido un nuevo servicio inmediato de ${usuarioId}. ¡Prepárate!`,
-        { solicitudId: nuevaSolicitudRef.id }
-    );
+  const providerData = providerDoc.data() as ProviderData;
+  if (providerData.isBlocked) {
+    throw new functions.https.HttpsError("failed-precondition", "Este proveedor no puede ser contratado en este momento.");
+  }
+  const userDoc = await db.collection("usuarios").doc(usuarioId).get();
+  const userData = userDoc.data() as UserData;
+  if (userData.isBlocked) {
+    throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes contratar servicios.");
+  }
 
-    return { success: true, message: `Servicio solicitado exitosamente. Total: $${montoFinal.toFixed(2)}.`, solicitudId: nuevaSolicitudRef.id };
+  // Check for user-to-user blocks
+  const userBlocksProviderQuery = db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", providerId).limit(1);
+  const userBlocksProviderSnap = await userBlocksProviderQuery.get();
+  if (!userBlocksProviderSnap.empty) {
+    throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor porque lo has bloqueado.");
+  }
+  const providerBlocksUserQuery = db.collection("bloqueos").where("bloqueadorRef", "==", providerId).where("bloqueadoRef", "==", usuarioId).limit(1);
+  const providerBlocksUserSnap = await providerBlocksUserQuery.get();
+  if (!providerBlocksUserSnap.empty) {
+    throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor en este momento.");
+  }
+
+
+  const nuevaSolicitudData: Omit<ServiceRequest, "id" | "serviceType"> & { serviceType: "fixed" } = {
+    usuarioId: usuarioId,
+    prestadorId: providerId,
+    status: "pagada",
+    createdAt: now,
+    updatedAt: now,
+    titulo: `Servicio inmediato: ${selectedServices.map((s: any) => s.title).join(", ")}`,
+    serviceType: "fixed",
+    selectedFixedServices: selectedServices,
+    totalAmount: totalAmount,
+    montoCobrado: montoFinal, // Usar el monto final con descuento
+    location: location,
+    metodoPago: metodoPago,
+    paymentStatus: "retenido_para_liberacion",
+    actorDelCambioId: usuarioId,
+    actorDelCambioRol: "usuario",
+    ...(promoAplicada && {promoAplicada}), // Añadir detalles de la promo
+  };
+
+  await nuevaSolicitudRef.set(nuevaSolicitudData);
+
+  await logActivity(
+    usuarioId,
+    "usuario",
+    "SOLICITUD_CREADA",
+    `Usuario ${usuarioId} creó y pagó una solicitud #${nuevaSolicitudRef.id} para ${providerId}. Total: $${montoFinal.toFixed(2)}.`,
+    {tipo: "solicitud_servicio", id: nuevaSolicitudRef.id},
+    {totalAmount: montoFinal, metodoPago, promoAplicada}
+  );
+
+  await sendNotification(
+    providerId,
+    "prestador",
+    "¡Nuevo Servicio Inmediato!",
+    `Has recibido un nuevo servicio inmediato de ${usuarioId}. ¡Prepárate!`,
+    {solicitudId: nuevaSolicitudRef.id}
+  );
+
+  return {success: true, message: `Servicio solicitado exitosamente. Total: $${montoFinal.toFixed(2)}.`, solicitudId: nuevaSolicitudRef.id};
 });
 
 
@@ -1173,7 +1183,7 @@ export const logSolicitudServicioChanges = functions.firestore
         {tipo: "solicitud_servicio", id: solicitudId},
         {estadoAnterior: beforeData.status, estadoNuevo: afterData.status}
       );
-      
+
       if (afterData.status === "completado_por_usuario") {
         updatesToServiceRequest.userConfirmedCompletionAt = now.toMillis();
       }
@@ -1206,51 +1216,51 @@ export const logSolicitudServicioChanges = functions.firestore
     const wasNotFinalizedBefore = !ESTADOS_FINALES_SERVICIO.includes(beforeData.status as EstadoFinalServicio);
 
     if (isFinalizedState && wasNotFinalizedBefore) {
-        // --- START RELATIONSHIP TRACKING ---
-        const relationshipId = `${afterData.usuarioId}_${afterData.prestadorId}`;
-        const relationshipRef = db.collection("relacionesUsuarioPrestador").doc(relationshipId);
-        let serviceCategory = afterData.category;
-        if (!serviceCategory) {
-            const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
-            if (providerDoc.exists) {
-                const providerData = providerDoc.data() as ProviderData;
-                serviceCategory = providerData.categoryIds?.[0] || "general";
-            }
+      // --- START RELATIONSHIP TRACKING ---
+      const relationshipId = `${afterData.usuarioId}_${afterData.prestadorId}`;
+      const relationshipRef = db.collection("relacionesUsuarioPrestador").doc(relationshipId);
+      let serviceCategory = afterData.category;
+      if (!serviceCategory) {
+        const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
+        if (providerDoc.exists) {
+          const providerData = providerDoc.data() as ProviderData;
+          serviceCategory = providerData.categoryIds?.[0] || "general";
         }
-        if (serviceCategory) {
-            try {
-                await db.runTransaction(async (transaction) => {
-                    const relDoc = await transaction.get(relationshipRef);
-                    if (relDoc.exists) {
-                        transaction.update(relationshipRef, {
-                            serviciosContratados: admin.firestore.FieldValue.increment(1),
-                            ultimoServicioFecha: now,
-                            categoriasServicios: admin.firestore.FieldValue.arrayUnion(serviceCategory),
-                        });
-                    } else {
-                        const newRelationshipData: RelacionUsuarioPrestadorData = {
-                            usuarioId: afterData.usuarioId,
-                            prestadorId: afterData.prestadorId,
-                            serviciosContratados: 1,
-                            ultimoServicioFecha: now,
-                            categoriasServicios: [serviceCategory],
-                        };
-                        transaction.set(relationshipRef, newRelationshipData);
-                    }
-                });
-                await logActivity("sistema", "sistema", "RELACION_USUARIO_PRESTADOR_ACTUALIZADA", `Relación entre usuario ${afterData.usuarioId} y prestador ${afterData.prestadorId} actualizada.`, {tipo: "relacionUsuarioPrestador", id: relationshipId});
-            } catch (e) {
-                functions.logger.error(`Error actualizando relación para ${relationshipId}:`, e);
+      }
+      if (serviceCategory) {
+        try {
+          await db.runTransaction(async (transaction) => {
+            const relDoc = await transaction.get(relationshipRef);
+            if (relDoc.exists) {
+              transaction.update(relationshipRef, {
+                serviciosContratados: admin.firestore.FieldValue.increment(1),
+                ultimoServicioFecha: now,
+                categoriasServicios: admin.firestore.FieldValue.arrayUnion(serviceCategory),
+              });
+            } else {
+              const newRelationshipData: RelacionUsuarioPrestadorData = {
+                usuarioId: afterData.usuarioId,
+                prestadorId: afterData.prestadorId,
+                serviciosContratados: 1,
+                ultimoServicioFecha: now,
+                categoriasServicios: [serviceCategory],
+              };
+              transaction.set(relationshipRef, newRelationshipData);
             }
+          });
+          await logActivity("sistema", "sistema", "RELACION_USUARIO_PRESTADOR_ACTUALIZADA", `Relación entre usuario ${afterData.usuarioId} y prestador ${afterData.prestadorId} actualizada.`, {tipo: "relacionUsuarioPrestador", id: relationshipId});
+        } catch (e) {
+          functions.logger.error(`Error actualizando relación para ${relationshipId}:`, e);
         }
-        // --- END RELATIONSHIP TRACKING ---
+      }
+      // --- END RELATIONSHIP TRACKING ---
     }
 
 
     if ((isFinalizedState && wasNotFinalizedBefore && afterData.paymentStatus === "retenido_para_liberacion") ||
         (beforeData.paymentStatus === "retenido_para_liberacion" && afterData.paymentStatus === "liberado_al_proveedor" && isFinalizedState && beforeData.status !== afterData.status && afterData.status !== "en_disputa")) {
       const montoTotalPagadoPorUsuario = afterData.montoCobrado || afterData.precio || 0;
-      let detallesFinancierosNuevos: DetallesFinancieros = {...(afterData.detallesFinancieros as DetallesFinancieros || {})};
+      const detallesFinancierosNuevos: DetallesFinancieros = {...(afterData.detallesFinancieros as DetallesFinancieros || {})};
 
       if (montoTotalPagadoPorUsuario > 0 && !detallesFinancierosNuevos.montoFinalLiberadoAlPrestador) {
         detallesFinancierosNuevos.montoTotalPagadoPorUsuario = montoTotalPagadoPorUsuario;
@@ -1292,30 +1302,30 @@ export const logSolicitudServicioChanges = functions.firestore
           }
           await logActivity(afterData.usuarioId, "usuario", "PUNTOS_FIDELIDAD_GANADOS", `Usuario ganó ${pointsEarned} puntos por servicio ${solicitudId}.`, {tipo: "usuario", id: afterData.usuarioId}, {puntos: pointsEarned, servicioId});
         }
-        
+
         // --- START AMBASSADOR COMMISSION LOGIC ---
         const providerDoc = await db.collection("prestadores").doc(afterData.prestadorId).get();
         if (providerDoc.exists) {
-            const providerData = providerDoc.data() as ProviderData;
-            if (providerData.referidoPor) {
-                const embajadorUID = providerData.referidoPor;
-                const comisionAppMonto = detallesFinancierosNuevos.comisionAppMonto || 0;
-                const comisionEmbajador = comisionAppMonto * PORCENTAJE_COMISION_EMBAJADOR;
+          const providerData = providerDoc.data() as ProviderData;
+          if (providerData.referidoPor) {
+            const embajadorUID = providerData.referidoPor;
+            const comisionAppMonto = detallesFinancierosNuevos.comisionAppMonto || 0;
+            const comisionEmbajador = comisionAppMonto * PORCENTAJE_COMISION_EMBAJADOR;
 
-                if (comisionEmbajador > 0) {
-                    const comisionesRef = db.collection("comisiones");
-                    const providerNameForCommission = providerData.nombre || `prestador ${afterData.prestadorId.substring(0, 5)}`;
-                    const comisionDataForCollection = {
-                        idUsuarioGanador: embajadorUID,
-                        tipo: "servicio_completado",
-                        monto: comisionEmbajador,
-                        detalle: `Comisión por servicio completado por @${providerNameForCommission}`,
-                        fecha: now,
-                        referenciaID: solicitudId,
-                    };
-                    await comisionesRef.add(comisionDataForCollection);
-                }
+            if (comisionEmbajador > 0) {
+              const comisionesRef = db.collection("comisiones");
+              const providerNameForCommission = providerData.nombre || `prestador ${afterData.prestadorId.substring(0, 5)}`;
+              const comisionDataForCollection = {
+                idUsuarioGanador: embajadorUID,
+                tipo: "servicio_completado",
+                monto: comisionEmbajador,
+                detalle: `Comisión por servicio completado por @${providerNameForCommission}`,
+                fecha: now,
+                referenciaID: solicitudId,
+              };
+              await comisionesRef.add(comisionDataForCollection);
             }
+          }
         }
         // --- END AMBASSADOR COMMISSION LOGIC ---
 
@@ -1407,23 +1417,23 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(asy
 
       const prestadorDoc = await transaction.get(db.collection("prestadores").doc(prestadorId));
       if (!prestadorDoc.exists || prestadorDoc.data()?.isBlocked) {
-          throw new functions.https.HttpsError("failed-precondition", "Este proveedor no puede ser contratado en este momento.");
+        throw new functions.https.HttpsError("failed-precondition", "Este proveedor no puede ser contratado en este momento.");
       }
       const usuarioDoc = await transaction.get(db.collection("usuarios").doc(usuarioId));
       if (usuarioDoc.data()?.isBlocked) {
-          throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes contratar servicios.");
+        throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes contratar servicios.");
       }
-      
+
       const userBlocksProviderQuery = db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", prestadorId).limit(1);
       const userBlocksProviderSnap = await transaction.get(userBlocksProviderQuery);
       if (!userBlocksProviderSnap.empty) {
-          throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor porque lo has bloqueado.");
+        throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor porque lo has bloqueado.");
       }
-  
+
       const providerBlocksUserQuery = db.collection("bloqueos").where("bloqueadorRef", "==", prestadorId).where("bloqueadoRef", "==", usuarioId).limit(1);
       const providerBlocksUserSnap = await transaction.get(providerBlocksUserQuery);
       if (!providerBlocksUserSnap.empty) {
-          throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor en este momento.");
+        throw new functions.https.HttpsError("permission-denied", "No puedes contratar a este proveedor en este momento.");
       }
 
       const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
@@ -1489,7 +1499,7 @@ export const onServiceConfirmedCreateChatRoom = functions.firestore
             [usuarioId]: {nombre: (usuarioInfoDoc.data() as UserData)?.nombre || `Usuario ${usuarioId.substring(0, 5)}`, rol: "usuario"},
             [prestadorId]: {nombre: (prestadorInfoDoc.data() as ProviderData)?.nombre || `Prestador ${prestadorId.substring(0, 5)}`, rol: "prestador"},
           },
-          fechaCreacion: ahora, ultimaActualizacion: ahora, estadoChat: "activo", conteoNoLeido: {[usuarioId]: 0, [prestadorId]: 0}
+          fechaCreacion: ahora, ultimaActualizacion: ahora, estadoChat: "activo", conteoNoLeido: {[usuarioId]: 0, [prestadorId]: 0},
         };
         await chatDocRef.set(nuevoChatData);
         await logActivity("sistema", "sistema", "CHAT_CREADO", `Chat creado para solicitud ${solicitudId}.`, {tipo: "chat", id: solicitudId}, {solicitudServicioId: solicitudId});
@@ -1864,177 +1874,175 @@ export const crearSolicitudSoporte = functions.https.onCall(async (data, context
 });
 
 export const rateServiceByUser = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-    }
-    const userId = context.auth.uid;
-    const {
-        servicioId,
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const userId = context.auth.uid;
+  const {
+    servicioId,
+    estrellas,
+    comentario,
+    indicadoresRendimiento,
+    aspectosPositivos,
+    areasDeMejora,
+  } = data;
+
+  if (!servicioId || typeof servicioId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'servicioId'.");
+  }
+  if (typeof estrellas !== "number" || estrellas < 1 || estrellas > 5) {
+    throw new functions.https.HttpsError("invalid-argument", "La 'calificacion' (estrellas) debe ser un número entre 1 y 5.");
+  }
+
+  const servicioRef = db.collection("solicitudes_servicio").doc(servicioId);
+
+  try {
+    const result = await db.runTransaction(async (transaction) => {
+      const servicioDoc = await transaction.get(servicioRef);
+      if (!servicioDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
+      }
+      const servicioData = servicioDoc.data() as ServiceRequest;
+
+      const userDoc = await db.collection("usuarios").doc(userId).get();
+      if (userDoc.data()?.isBlocked) {
+        throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes calificar servicios.");
+      }
+
+      if (servicioData.usuarioId !== userId) {
+        throw new functions.https.HttpsError("permission-denied", "No puedes calificar este servicio.");
+      }
+      if (servicioData.status !== "completado_por_usuario" && servicioData.status !== "cerrado_automaticamente") {
+        throw new functions.https.HttpsError("failed-precondition", `Solo se pueden calificar servicios en estado 'completado_por_usuario' o 'cerrado_automaticamente'. Estado actual: ${servicioData.status}`);
+      }
+      if (servicioData.calificacionUsuario) {
+        throw new functions.https.HttpsError("already-exists", "Ya has calificado este servicio.");
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      const nuevaCalificacion: CalificacionDetallada = {
         estrellas,
-        comentario,
-        indicadoresRendimiento,
-        aspectosPositivos,
-        areasDeMejora,
-    } = data;
+        fecha: now,
+        ...(comentario && {comentario}),
+        ...(indicadoresRendimiento && {indicadoresRendimiento}),
+        ...(aspectosPositivos && Array.isArray(aspectosPositivos) && {aspectosPositivos}),
+        ...(areasDeMejora && Array.isArray(areasDeMejora) && {areasDeMejora}),
+      };
 
-    if (!servicioId || typeof servicioId !== "string") {
-        throw new functions.https.HttpsError("invalid-argument", "Se requiere 'servicioId'.");
-    }
-    if (typeof estrellas !== "number" || estrellas < 1 || estrellas > 5) {
-        throw new functions.https.HttpsError("invalid-argument", "La 'calificacion' (estrellas) debe ser un número entre 1 y 5.");
-    }
+      const updates: Partial<ServiceRequest> & { updatedAt: admin.firestore.Timestamp } = {
+        calificacionUsuario: nuevaCalificacion,
+        updatedAt: now,
+      };
 
-    const servicioRef = db.collection("solicitudes_servicio").doc(servicioId);
-
-    try {
-        const result = await db.runTransaction(async (transaction) => {
-            const servicioDoc = await transaction.get(servicioRef);
-            if (!servicioDoc.exists) {
-                throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
-            }
-            const servicioData = servicioDoc.data() as ServiceRequest;
-
-            const userDoc = await db.collection("usuarios").doc(userId).get();
-            if (userDoc.data()?.isBlocked) {
-                throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes calificar servicios.");
-            }
-
-            if (servicioData.usuarioId !== userId) {
-                throw new functions.https.HttpsError("permission-denied", "No puedes calificar este servicio.");
-            }
-            if (servicioData.status !== "completado_por_usuario" && servicioData.status !== "cerrado_automaticamente") {
-                throw new functions.https.HttpsError("failed-precondition", `Solo se pueden calificar servicios en estado 'completado_por_usuario' o 'cerrado_automaticamente'. Estado actual: ${servicioData.status}`);
-            }
-            if (servicioData.calificacionUsuario) {
-                throw new functions.https.HttpsError("already-exists", "Ya has calificado este servicio.");
-            }
-
-            const now = admin.firestore.Timestamp.now();
-            const nuevaCalificacion: CalificacionDetallada = {
-                estrellas,
-                fecha: now,
-                ...(comentario && { comentario }),
-                ...(indicadoresRendimiento && { indicadoresRendimiento }),
-                ...(aspectosPositivos && Array.isArray(aspectosPositivos) && { aspectosPositivos }),
-                ...(areasDeMejora && Array.isArray(areasDeMejora) && { areasDeMejora }),
-            };
-
-            const updates: Partial<ServiceRequest> & { updatedAt: admin.firestore.Timestamp } = {
-                calificacionUsuario: nuevaCalificacion,
-                updatedAt: now,
-            };
-
-            const hasMutualRating = !!servicioData.calificacionPrestador;
-            if (hasMutualRating) {
-                updates.mutualRatingCompleted = true;
-                if (servicioData.status !== "en_disputa") {
-                    updates.status = "cerrado_con_calificacion";
-                }
-            }
-            
-            transaction.update(servicioRef, updates);
-
-            return {
-                mutualRatingCompleted: hasMutualRating,
-                usuarioId: servicioData.usuarioId,
-                prestadorId: servicioData.prestadorId,
-                titulo: servicioData.titulo || "un servicio",
-            };
-        });
-
-        if (result && result.mutualRatingCompleted) {
-            const notifTitle = "¡Tu servicio fue calificado exitosamente!";
-            const notifBody = `Tanto tú como el proveedor han calificado el servicio "${result.titulo}". El pago ha sido procesado.`;
-            await sendNotification(result.usuarioId, "usuario", notifTitle, notifBody);
-            await sendNotification(result.prestadorId, "prestador", notifTitle, notifBody);
+      const hasMutualRating = !!servicioData.calificacionPrestador;
+      if (hasMutualRating) {
+        updates.mutualRatingCompleted = true;
+        if (servicioData.status !== "en_disputa") {
+          updates.status = "cerrado_con_calificacion";
         }
-        return { success: true, message: "Calificación registrada exitosamente." };
+      }
 
-    } catch (error: any) {
-        functions.logger.error(`Error al calificar servicio ${servicioId} por usuario ${userId}:`, error);
-        if (error instanceof functions.https.HttpsError) throw error;
-        throw new functions.https.HttpsError("internal", "Error al procesar la calificación.", error.message);
+      transaction.update(servicioRef, updates);
+
+      return {
+        mutualRatingCompleted: hasMutualRating,
+        usuarioId: servicioData.usuarioId,
+        prestadorId: servicioData.prestadorId,
+        titulo: servicioData.titulo || "un servicio",
+      };
+    });
+
+    if (result && result.mutualRatingCompleted) {
+      const notifTitle = "¡Tu servicio fue calificado exitosamente!";
+      const notifBody = `Tanto tú como el proveedor han calificado el servicio "${result.titulo}". El pago ha sido procesado.`;
+      await sendNotification(result.usuarioId, "usuario", notifTitle, notifBody);
+      await sendNotification(result.prestadorId, "prestador", notifTitle, notifBody);
     }
+    return {success: true, message: "Calificación registrada exitosamente."};
+  } catch (error: any) {
+    functions.logger.error(`Error al calificar servicio ${servicioId} por usuario ${userId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar la calificación.", error.message);
+  }
 });
 
 export const rateServiceByProvider = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
-    }
-    const providerId = context.auth.uid;
-    const { servicioId, estrellas, comentario } = data;
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
+  }
+  const providerId = context.auth.uid;
+  const {servicioId, estrellas, comentario} = data;
 
-    if (!servicioId || typeof servicioId !== "string") {
-        throw new functions.https.HttpsError("invalid-argument", "Se requiere 'servicioId'.");
-    }
-    if (typeof estrellas !== "number" || estrellas < 1 || estrellas > 5) {
-        throw new functions.https.HttpsError("invalid-argument", "La 'calificacion' (estrellas) debe ser un número entre 1 y 5.");
-    }
+  if (!servicioId || typeof servicioId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'servicioId'.");
+  }
+  if (typeof estrellas !== "number" || estrellas < 1 || estrellas > 5) {
+    throw new functions.https.HttpsError("invalid-argument", "La 'calificacion' (estrellas) debe ser un número entre 1 y 5.");
+  }
 
-    const servicioRef = db.collection("solicitudes_servicio").doc(servicioId);
+  const servicioRef = db.collection("solicitudes_servicio").doc(servicioId);
 
-    try {
-        const result = await db.runTransaction(async (transaction) => {
-            const servicioDoc = await transaction.get(servicioRef);
-            if (!servicioDoc.exists) {
-                throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
-            }
-            const servicioData = servicioDoc.data() as ServiceRequest;
+  try {
+    const result = await db.runTransaction(async (transaction) => {
+      const servicioDoc = await transaction.get(servicioRef);
+      if (!servicioDoc.exists) {
+        throw new functions.https.HttpsError("not-found", `Servicio con ID ${servicioId} no encontrado.`);
+      }
+      const servicioData = servicioDoc.data() as ServiceRequest;
 
-            if (servicioData.prestadorId !== providerId) {
-                throw new functions.https.HttpsError("permission-denied", "No puedes calificar este servicio.");
-            }
-            if (servicioData.status !== "completado_por_usuario" && servicioData.status !== "cerrado_automaticamente" && servicioData.status !== "cerrado_con_calificacion") {
-                throw new functions.https.HttpsError("failed-precondition", `Solo puedes calificar servicios que el usuario haya confirmado o estén cerrados. Estado actual: ${servicioData.status}`);
-            }
-            if (servicioData.calificacionPrestador) {
-                throw new functions.https.HttpsError("already-exists", "Ya has calificado a este usuario para este servicio.");
-            }
+      if (servicioData.prestadorId !== providerId) {
+        throw new functions.https.HttpsError("permission-denied", "No puedes calificar este servicio.");
+      }
+      if (servicioData.status !== "completado_por_usuario" && servicioData.status !== "cerrado_automaticamente" && servicioData.status !== "cerrado_con_calificacion") {
+        throw new functions.https.HttpsError("failed-precondition", `Solo puedes calificar servicios que el usuario haya confirmado o estén cerrados. Estado actual: ${servicioData.status}`);
+      }
+      if (servicioData.calificacionPrestador) {
+        throw new functions.https.HttpsError("already-exists", "Ya has calificado a este usuario para este servicio.");
+      }
 
-            const now = admin.firestore.Timestamp.now();
-            const nuevaCalificacion: CalificacionDetallada = {
-                estrellas,
-                fecha: now,
-                ...(comentario && { comentario }),
-            };
+      const now = admin.firestore.Timestamp.now();
+      const nuevaCalificacion: CalificacionDetallada = {
+        estrellas,
+        fecha: now,
+        ...(comentario && {comentario}),
+      };
 
-            const updates: Partial<ServiceRequest> & { updatedAt: admin.firestore.Timestamp } = {
-                calificacionPrestador: nuevaCalificacion,
-                updatedAt: now,
-            };
+      const updates: Partial<ServiceRequest> & { updatedAt: admin.firestore.Timestamp } = {
+        calificacionPrestador: nuevaCalificacion,
+        updatedAt: now,
+      };
 
-            const hasMutualRating = !!servicioData.calificacionUsuario;
-            if (hasMutualRating) {
-                updates.mutualRatingCompleted = true;
-                if (servicioData.status !== "en_disputa") {
-                    updates.status = "cerrado_con_calificacion";
-                }
-            }
-            
-            transaction.update(servicioRef, updates);
-
-            return {
-                mutualRatingCompleted: hasMutualRating,
-                usuarioId: servicioData.usuarioId,
-                prestadorId: servicioData.prestadorId,
-                titulo: servicioData.titulo || "un servicio",
-            };
-        });
-
-        if (result && result.mutualRatingCompleted) {
-            const notifTitle = "¡Tu servicio fue calificado exitosamente!";
-            const notifBody = `Tanto tú como el usuario han calificado el servicio "${result.titulo}". El pago ha sido procesado.`;
-            await sendNotification(result.usuarioId, "usuario", notifTitle, notifBody);
-            await sendNotification(result.prestadorId, "prestador", notifTitle, notifBody);
+      const hasMutualRating = !!servicioData.calificacionUsuario;
+      if (hasMutualRating) {
+        updates.mutualRatingCompleted = true;
+        if (servicioData.status !== "en_disputa") {
+          updates.status = "cerrado_con_calificacion";
         }
+      }
 
-        return { success: true, message: "Calificación de usuario registrada exitosamente." };
+      transaction.update(servicioRef, updates);
 
-    } catch (error: any) {
-        functions.logger.error(`Error al calificar usuario para servicio ${servicioId} por proveedor ${providerId}:`, error);
-        if (error instanceof functions.https.HttpsError) throw error;
-        throw new functions.https.HttpsError("internal", "Error al procesar la calificación.", error.message);
+      return {
+        mutualRatingCompleted: hasMutualRating,
+        usuarioId: servicioData.usuarioId,
+        prestadorId: servicioData.prestadorId,
+        titulo: servicioData.titulo || "un servicio",
+      };
+    });
+
+    if (result && result.mutualRatingCompleted) {
+      const notifTitle = "¡Tu servicio fue calificado exitosamente!";
+      const notifBody = `Tanto tú como el usuario han calificado el servicio "${result.titulo}". El pago ha sido procesado.`;
+      await sendNotification(result.usuarioId, "usuario", notifTitle, notifBody);
+      await sendNotification(result.prestadorId, "prestador", notifTitle, notifBody);
     }
+
+    return {success: true, message: "Calificación de usuario registrada exitosamente."};
+  } catch (error: any) {
+    functions.logger.error(`Error al calificar usuario para servicio ${servicioId} por proveedor ${providerId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar la calificación.", error.message);
+  }
 });
 
 export const buscarPrestadoresInteligente = functions.https.onCall(async (data, context) => {
@@ -2095,7 +2103,7 @@ export const buscarPrestadoresInteligente = functions.https.onCall(async (data, 
           distanciaKm: parseFloat(distanciaKm.toFixed(1)),
           calificacion: provider.rating || 0,
           avatarUrl: provider.avatarUrl,
-          categoriaPrincipal: provider.services?.[0]?.category ? (SERVICE_CATEGORIES.find(c=>c.id === provider.services?.[0]?.category)?.name || provider.services?.[0]?.category) : "General",
+          categoriaPrincipal: provider.services?.[0]?.category ? (SERVICE_CATEGORIES.find((c)=>c.id === provider.services?.[0]?.category)?.name || provider.services?.[0]?.category) : "General",
         });
       }
     }
@@ -2121,7 +2129,7 @@ export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, c
   if (!context.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
   }
-  const { categoriaId } = data;
+  const {categoriaId} = data;
 
   if (!categoriaId || typeof categoriaId !== "string") {
     throw new functions.https.HttpsError("invalid-argument", "Se requiere 'categoriaId'.");
@@ -2151,17 +2159,17 @@ export const buscarPrestadoresPorFiltros = functions.https.onCall(async (data, c
         empresa: provider.empresa,
         calificacion: provider.rating || 0,
         avatarUrl: provider.avatarUrl,
-        categoriaPrincipal: SERVICE_CATEGORIES.find(c => c.id === (provider.categoryIds?.[0]))?.name || "General",
+        categoriaPrincipal: SERVICE_CATEGORIES.find((c) => c.id === (provider.categoryIds?.[0]))?.name || "General",
       });
     }
 
-    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó trabajos virtuales por categoría: "${categoriaId}". Resultados: ${resultados.length}.`, undefined, { categoriaId });
+    await logActivity(context.auth.uid, "usuario", "BUSQUEDA_PRESTADORES", `Usuario buscó trabajos virtuales por categoría: "${categoriaId}". Resultados: ${resultados.length}.`, undefined, {categoriaId});
 
     return resultados;
   } catch (error: any) {
     functions.logger.error("Error en buscarPrestadoresPorFiltros:", error);
-    if (error.code === 'failed-precondition') {
-        throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions (isAvailable, categoryIds, aceptaTrabajosVirtuales, rating).");
+    if (error.code === "failed-precondition") {
+      throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions (isAvailable, categoryIds, aceptaTrabajosVirtuales, rating).");
     }
     throw new functions.https.HttpsError("internal", "Error al buscar prestadores.", error.message);
   }
@@ -2205,15 +2213,15 @@ export const reportarProblemaServicio = functions.https.onCall(async (data, cont
         throw new functions.https.HttpsError("not-found", `Servicio con ID ${idServicio} no encontrado.`);
       }
       const servicioData = servicioDoc.data() as ServiceRequest;
-      
+
       const userDoc = await db.collection("usuarios").doc(idUsuarioReportante).get();
       if (userDoc.data()?.isBlocked) {
-          throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes reportar problemas.");
+        throw new functions.https.HttpsError("failed-precondition", "Tu cuenta está bloqueada y no puedes reportar problemas.");
       }
 
 
       const [idReportado, rolReportado] = rol === "usuario" ? [servicioData.prestadorId, "prestador"] : [servicioData.usuarioId, "usuario"];
-      
+
       if (idUsuarioReportante !== servicioData.usuarioId && idUsuarioReportante !== servicioData.prestadorId) throw new functions.https.HttpsError("permission-denied", "No participaste en este servicio.");
       if (rol === "usuario" && idUsuarioReportante !== servicioData.usuarioId) throw new functions.https.HttpsError("permission-denied", "Tu rol no coincide con tu participación en este servicio.");
       if (rol === "prestador" && idUsuarioReportante !== servicioData.prestadorId) throw new functions.https.HttpsError("permission-denied", "Tu rol no coincide con tu participación en este servicio.");
@@ -2338,27 +2346,27 @@ export const reactivarServicioRecurrente = functions.https.onCall(async (data, c
     const prestadorId = servicioAnteriorData.prestadorId;
 
     const [usuarioDoc, prestadorDoc] = await Promise.all([
-        db.collection("usuarios").doc(usuarioId).get(),
-        db.collection("prestadores").doc(prestadorId).get()
+      db.collection("usuarios").doc(usuarioId).get(),
+      db.collection("prestadores").doc(prestadorId).get(),
     ]);
 
     if (usuarioDoc.data()?.isBlocked) {
-        throw new functions.https.HttpsError("failed-precondition", "La cuenta del usuario está bloqueada y no puede reactivar servicios.");
+      throw new functions.https.HttpsError("failed-precondition", "La cuenta del usuario está bloqueada y no puede reactivar servicios.");
     }
     if (prestadorDoc.data()?.isBlocked) {
-        throw new functions.https.HttpsError("failed-precondition", "El proveedor no está disponible para ser contratado en este momento.");
+      throw new functions.https.HttpsError("failed-precondition", "El proveedor no está disponible para ser contratado en este momento.");
     }
 
     const userBlocksProviderQuery = db.collection("bloqueos").where("bloqueadorRef", "==", usuarioId).where("bloqueadoRef", "==", prestadorId).limit(1);
     const userBlocksProviderSnap = await userBlocksProviderQuery.get();
     if (!userBlocksProviderSnap.empty) {
-        throw new functions.https.HttpsError("permission-denied", "No puedes reactivar servicios con este proveedor porque lo has bloqueado.");
+      throw new functions.https.HttpsError("permission-denied", "No puedes reactivar servicios con este proveedor porque lo has bloqueado.");
     }
 
     const providerBlocksUserQuery = db.collection("bloqueos").where("bloqueadorRef", "==", prestadorId).where("bloqueadoRef", "==", usuarioId).limit(1);
     const providerBlocksUserSnap = await providerBlocksUserQuery.get();
     if (!providerBlocksUserSnap.empty) {
-        throw new functions.https.HttpsError("permission-denied", "No puedes reactivar servicios con este proveedor en este momento.");
+      throw new functions.https.HttpsError("permission-denied", "No puedes reactivar servicios con este proveedor en este momento.");
     }
 
     const now = admin.firestore.Timestamp.now();
@@ -2883,7 +2891,7 @@ export const manageCommunityNotice = functions.https.onCall(async (data, context
       let logMessage = "";
 
       if (noticeData.activo === true) {
-        let activeNoticesQuery = avisosComunidadRef.where("activo", "==", true);
+        const activeNoticesQuery = avisosComunidadRef.where("activo", "==", true);
         const activeNoticesSnapshot = await transaction.get(activeNoticesQuery);
         let activeNotices = activeNoticesSnapshot.docs.map((doc) => ({id: doc.id, ...doc.data()} as AvisoComunidadDataFirestore & {id: string}));
 
@@ -2896,7 +2904,7 @@ export const manageCommunityNotice = functions.https.onCall(async (data, context
               isBecomingActive = true;
             }
             if (currentNoticeData.activo === true) {
-              activeNotices = activeNotices.filter(n => n.id !== noticeId);
+              activeNotices = activeNotices.filter((n) => n.id !== noticeId);
             }
           }
         }
@@ -3141,7 +3149,7 @@ export const cancelarCitaConfirmadaPorCliente = functions.https.onCall(async (da
       let penalizacionTotalCalculada = 0;
       let montoParaPlataforma = 0;
       let montoParaPrestador = 0;
-      let reglaAplicada: '>2h' | '<=2h';
+      let reglaAplicada: ">2h" | "<=2h";
 
       if (horasRestantes > 2) {
         reglaAplicada = ">2h";
@@ -3236,10 +3244,10 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
       functions.logger.log(`[onCitaActualizada ${citaId}] No hay datos antes o después, saliendo.`);
       return null;
     }
-    
+
     // Solo actuar si el estado ha cambiado
     if (beforeData.estado === afterData.estado) {
-        return null;
+      return null;
     }
 
     const usuarioId = afterData.usuarioId;
@@ -3304,7 +3312,7 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
         {tipo: "cita", id: citaId},
         {timestampActivacionSeguimiento}
       );
-      
+
       // Notificar al proveedor si la cita es pronto
       const ahoraMillis = Date.now();
       if (timestampActivacionSeguimiento - ahoraMillis < TREINTA_MINUTOS_EN_MS && // Si la ventana de seguimiento empieza en menos de 30 min
@@ -3318,10 +3326,9 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
         updatePayload.notificadoParaEstarEnLinea = true;
         await logActivity("sistema", "sistema", "CITA_PROVEEDOR_NOTIFICADO_ONLINE", `Proveedor ${prestadorId} notificado para estar en línea para cita ${citaId}.`, {tipo: "cita", id: citaId});
       }
-      
+
       await change.after.ref.update(updatePayload);
       functions.logger.info(`[onCitaActualizada ${citaId}] Campos de seguimiento actualizados en la cita.`);
-
     } else if (afterData.estado === "rechazada_prestador" && beforeData.estado !== "rechazada_prestador") {
       functions.logger.info(`[onCitaActualizada ${citaId}] Cita rechazada por prestador. Notificando al cliente.`);
       await sendNotification(
@@ -3338,117 +3345,117 @@ export const onCitaActualizadaNotificarYProcesar = functions.firestore
   });
 
 export const registerProviderProfile = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrarte como proveedor.");
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrarte como proveedor.");
+  }
+  const providerId = context.auth.uid;
+  const {name, specialties, selectedCategoryIds, newCategoryName, codigoInvitacion} = data;
+
+  if (!name || typeof name !== "string" || name.length < 3) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre válido (mínimo 3 caracteres).");
+  }
+  if (!Array.isArray(specialties) || !Array.isArray(selectedCategoryIds)) {
+    throw new functions.https.HttpsError("invalid-argument", "Especialidades y categorías deben ser un arreglo.");
+  }
+
+  const providerRef = db.collection("prestadores").doc(providerId);
+
+  try {
+    const providerDoc = await providerRef.get();
+    if (providerDoc.exists) {
+      throw new functions.https.HttpsError("already-exists", "Ya existe un perfil de proveedor para este usuario.");
     }
-    const providerId = context.auth.uid;
-    const {name, specialties, selectedCategoryIds, newCategoryName, codigoInvitacion} = data;
 
-    if (!name || typeof name !== "string" || name.length < 3) {
-        throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre válido (mínimo 3 caracteres).");
+    const now = admin.firestore.Timestamp.now();
+    const batch = db.batch();
+
+    const newProviderData: Partial<ProviderData> = {
+      nombre: name,
+      specialties: specialties,
+      categoryIds: selectedCategoryIds,
+      isAvailable: false, // Por defecto no disponible hasta que lo activen
+      rating: 0,
+      avatarUrl: `https://placehold.co/100x100/7F7F7F/FFFFFF.png?text=${name.charAt(0)}`,
+    };
+
+    if (codigoInvitacion && typeof codigoInvitacion === "string") {
+      const referrerQuery = db.collection("usuarios").where("codigoPropio", "==", codigoInvitacion).limit(1);
+      const referrerSnapshot = await referrerQuery.get();
+
+      if (!referrerSnapshot.empty) {
+        const referrerDoc = referrerSnapshot.docs[0];
+        const referrerData = referrerDoc.data() as UserData;
+        const referrerUID = referrerDoc.id;
+
+        if (referrerData.isBlocked) {
+          functions.logger.warn(`Intento de registro con código de embajador bloqueado. Embajador UID: ${referrerUID}, Código: ${codigoInvitacion}.`);
+          await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Intento de registro con código de invitación bloqueado (${codigoInvitacion}).`, {tipo: "prestador", id: providerId});
+        } else {
+          newProviderData.referidoPor = referrerUID;
+
+          const bonificacionesRef = db.collection("bonificaciones");
+          const updatesReferrer: Partial<UserData> = {
+            referidos: admin.firestore.FieldValue.arrayUnion(providerId) as any,
+            balanceBonos: admin.firestore.FieldValue.increment(BONO_POR_AFILIACION) as any,
+          };
+          batch.update(referrerDoc.ref, updatesReferrer);
+
+          const nuevaBonificacionData: Omit<BonificacionData, "id"> = {
+            usuarioId: referrerUID,
+            monto: BONO_POR_AFILIACION,
+            motivo: "afiliacion_exitosa",
+            fecha: now,
+            origen: "sistema",
+            detalles: {
+              origenTexto: "Bonificación por referir a un nuevo usuario",
+              afiliadoId: providerId,
+            },
+          };
+          const nuevaBonificacionRef = bonificacionesRef.doc();
+          batch.set(nuevaBonificacionRef, nuevaBonificacionData);
+
+          await logActivity(
+            "sistema",
+            "sistema",
+            "EMBAJADOR_BONO_ASIGNADO",
+            `Bono de $${BONO_POR_AFILIACION} asignado a embajador ${referrerUID} por nueva afiliación de ${providerId}.`,
+            {tipo: "usuario", id: referrerUID},
+            {monto: BONO_POR_AFILIACION, afiliadoId: providerId, bonificacionId: nuevaBonificacionRef.id}
+          );
+        }
+      } else {
+        functions.logger.warn(`Código de invitación "${codigoInvitacion}" no encontrado. Registrando proveedor sin referencia.`);
+      }
     }
-    if (!Array.isArray(specialties) || !Array.isArray(selectedCategoryIds)) {
-        throw new functions.https.HttpsError("invalid-argument", "Especialidades y categorías deben ser un arreglo.");
+
+    batch.set(providerRef, newProviderData, {merge: true});
+    if (!newProviderData.referidoPor) {
+      await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Usuario ${providerId} se registró como proveedor: ${name}.`, {tipo: "prestador", id: providerId});
     }
 
-    const providerRef = db.collection("prestadores").doc(providerId);
-
-    try {
-        const providerDoc = await providerRef.get();
-        if (providerDoc.exists) {
-            throw new functions.https.HttpsError("already-exists", "Ya existe un perfil de proveedor para este usuario.");
-        }
-
-        const now = admin.firestore.Timestamp.now();
-        const batch = db.batch();
-
-        const newProviderData: Partial<ProviderData> = {
-            nombre: name,
-            specialties: specialties,
-            categoryIds: selectedCategoryIds,
-            isAvailable: false, // Por defecto no disponible hasta que lo activen
-            rating: 0,
-            avatarUrl: `https://placehold.co/100x100/7F7F7F/FFFFFF.png?text=${name.charAt(0)}`,
-        };
-
-        if (codigoInvitacion && typeof codigoInvitacion === "string") {
-            const referrerQuery = db.collection("usuarios").where("codigoPropio", "==", codigoInvitacion).limit(1);
-            const referrerSnapshot = await referrerQuery.get();
-
-            if (!referrerSnapshot.empty) {
-                const referrerDoc = referrerSnapshot.docs[0];
-                const referrerData = referrerDoc.data() as UserData;
-                const referrerUID = referrerDoc.id;
-
-                if (referrerData.isBlocked) {
-                    functions.logger.warn(`Intento de registro con código de embajador bloqueado. Embajador UID: ${referrerUID}, Código: ${codigoInvitacion}.`);
-                    await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Intento de registro con código de invitación bloqueado (${codigoInvitacion}).`, {tipo: "prestador", id: providerId});
-                } else {
-                    newProviderData.referidoPor = referrerUID;
-                    
-                    const bonificacionesRef = db.collection("bonificaciones");
-                    const updatesReferrer: Partial<UserData> = {
-                        referidos: admin.firestore.FieldValue.arrayUnion(providerId) as any,
-                        balanceBonos: admin.firestore.FieldValue.increment(BONO_POR_AFILIACION) as any,
-                    };
-                    batch.update(referrerDoc.ref, updatesReferrer);
-
-                    const nuevaBonificacionData: Omit<BonificacionData, "id"> = {
-                        usuarioId: referrerUID,
-                        monto: BONO_POR_AFILIACION,
-                        motivo: 'afiliacion_exitosa',
-                        fecha: now,
-                        origen: 'sistema',
-                        detalles: {
-                            origenTexto: "Bonificación por referir a un nuevo usuario",
-                            afiliadoId: providerId,
-                        },
-                    };
-                    const nuevaBonificacionRef = bonificacionesRef.doc();
-                    batch.set(nuevaBonificacionRef, nuevaBonificacionData);
-                    
-                    await logActivity(
-                        "sistema",
-                        "sistema",
-                        "EMBAJADOR_BONO_ASIGNADO",
-                        `Bono de $${BONO_POR_AFILIACION} asignado a embajador ${referrerUID} por nueva afiliación de ${providerId}.`,
-                        { tipo: "usuario", id: referrerUID },
-                        { monto: BONO_POR_AFILIACION, afiliadoId: providerId, bonificacionId: nuevaBonificacionRef.id }
-                    );
-                }
-            } else {
-                functions.logger.warn(`Código de invitación "${codigoInvitacion}" no encontrado. Registrando proveedor sin referencia.`);
-            }
-        }
-
-        batch.set(providerRef, newProviderData, {merge: true});
-        if (!newProviderData.referidoPor) {
-           await logActivity(providerId, "usuario", "PROVEEDOR_REGISTRADO", `Usuario ${providerId} se registró como proveedor: ${name}.`, {tipo: "prestador", id: providerId});
-        }
-        
-        if (newCategoryName && typeof newCategoryName === "string" && newCategoryName.trim().length > 2) {
-            const proposalRef = db.collection("propuestas_categorias").doc();
-            const proposalData: CategoriaPropuestaData = {
-                providerId: providerId,
-                nombrePropuesto: newCategoryName.trim(),
-                estado: "pendiente",
-                fechaCreacion: now,
-            };
-            batch.set(proposalRef, proposalData);
-            await logActivity(providerId, "usuario", "CATEGORIA_PROPUESTA", `Proveedor ${providerId} propuso nueva categoría: "${newCategoryName.trim()}".`, {tipo: "categoria_propuesta", id: proposalRef.id});
-        }
-
-        await batch.commit();
-
-        return {success: true, message: "¡Felicidades! Tu perfil de proveedor ha sido creado.", providerId: providerId};
-    } catch (error: any) {
-        functions.logger.error(`Error registrando proveedor ${providerId}:`, error);
-        if (error instanceof functions.https.HttpsError) throw error;
-        throw new functions.https.HttpsError("internal", "Error al crear el perfil de proveedor.", error.message);
+    if (newCategoryName && typeof newCategoryName === "string" && newCategoryName.trim().length > 2) {
+      const proposalRef = db.collection("propuestas_categorias").doc();
+      const proposalData: CategoriaPropuestaData = {
+        providerId: providerId,
+        nombrePropuesto: newCategoryName.trim(),
+        estado: "pendiente",
+        fechaCreacion: now,
+      };
+      batch.set(proposalRef, proposalData);
+      await logActivity(providerId, "usuario", "CATEGORIA_PROPUESTA", `Proveedor ${providerId} propuso nueva categoría: "${newCategoryName.trim()}".`, {tipo: "categoria_propuesta", id: proposalRef.id});
     }
+
+    await batch.commit();
+
+    return {success: true, message: "¡Felicidades! Tu perfil de proveedor ha sido creado.", providerId: providerId};
+  } catch (error: any) {
+    functions.logger.error(`Error registrando proveedor ${providerId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al crear el perfil de proveedor.", error.message);
+  }
 });
 
-    
+
 export const onCategoryProposalUpdate = functions.firestore
   .document("propuestas_categorias/{proposalId}")
   .onUpdate(async (change, context) => {
@@ -3530,13 +3537,13 @@ export const generarRecomendacionesDeRecontratacion = functions.pubsub
     const thirtyDaysAgoTimestamp = admin.firestore.Timestamp.fromDate(thirtyDaysAgo);
 
     const relacionesQuery = db.collection("relacionesUsuarioPrestador")
-        .where("ultimoServicioFecha", "<", thirtyDaysAgoTimestamp);
+      .where("ultimoServicioFecha", "<", thirtyDaysAgoTimestamp);
 
     const snapshot = await relacionesQuery.get();
 
     if (snapshot.empty) {
-        functions.logger.log("No hay relaciones de más de 30 días para procesar.");
-        return null;
+      functions.logger.log("No hay relaciones de más de 30 días para procesar.");
+      return null;
     }
 
     const batch = db.batch();
@@ -3545,294 +3552,293 @@ export const generarRecomendacionesDeRecontratacion = functions.pubsub
     let recommendationsCreated = 0;
 
     for (const doc of snapshot.docs) {
-        const relacion = doc.data() as RelacionUsuarioPrestadorData;
-        const categoriasRelacion = relacion.categoriasServicios || [];
+      const relacion = doc.data() as RelacionUsuarioPrestadorData;
+      const categoriasRelacion = relacion.categoriasServicios || [];
 
-        const periodicCategory = categoriasRelacion.find((catId) =>
-            SERVICE_CATEGORIES.find((sc) => sc.id === catId)?.isPeriodic
+      const periodicCategory = categoriasRelacion.find((catId) =>
+        SERVICE_CATEGORIES.find((sc) => sc.id === catId)?.isPeriodic
+      );
+
+      if (periodicCategory) {
+        const categoriaInfo = SERVICE_CATEGORIES.find((sc) => sc.id === periodicCategory);
+        if (!categoriaInfo) continue;
+
+        const providerDoc = await db.collection("prestadores").doc(relacion.prestadorId).get();
+        if (!providerDoc.exists) continue;
+
+        const providerName = (providerDoc.data() as ProviderData)?.nombre || "un prestador";
+        const message = `¿Necesitas ayuda de nuevo con ${categoriaInfo.name}? Podrías volver a contratar a ${providerName}.`;
+
+        const recomendacionData: Omit<RecomendacionData, "id"> = {
+          type: "re-hire-suggestion",
+          suggestionSource: "sistema",
+          usuarioId: relacion.usuarioId,
+          prestadorId: relacion.prestadorId,
+          categoria: periodicCategory,
+          mensaje: message,
+          estado: "pendiente",
+          fechaCreacion: admin.firestore.Timestamp.now(),
+        };
+
+        const newRecomendacionRef = recomendacionesRef.doc();
+        batch.set(newRecomendacionRef, recomendacionData);
+        recommendationsCreated++;
+
+        await logActivity(
+          "sistema",
+          "sistema",
+          "RECOMENDACION_RECONTRATACION_CREADA",
+          `Recomendación creada para usuario ${relacion.usuarioId} de recontratar a prestador ${relacion.prestadorId} para ${periodicCategory}.`,
+          {tipo: "recomendacion", id: newRecomendacionRef.id},
+          {usuarioId: relacion.usuarioId, prestadorId: relacion.prestadorId, categoria: periodicCategory}
         );
 
-        if (periodicCategory) {
-            const categoriaInfo = SERVICE_CATEGORIES.find((sc) => sc.id === periodicCategory);
-            if (!categoriaInfo) continue;
-
-            const providerDoc = await db.collection("prestadores").doc(relacion.prestadorId).get();
-            if (!providerDoc.exists) continue;
-
-            const providerName = (providerDoc.data() as ProviderData)?.nombre || "un prestador";
-            const message = `¿Necesitas ayuda de nuevo con ${categoriaInfo.name}? Podrías volver a contratar a ${providerName}.`;
-
-            const recomendacionData: Omit<RecomendacionData, "id"> = {
-                type: 're-hire-suggestion',
-                suggestionSource: 'sistema',
-                usuarioId: relacion.usuarioId,
-                prestadorId: relacion.prestadorId,
-                categoria: periodicCategory,
-                mensaje: message,
-                estado: "pendiente",
-                fechaCreacion: admin.firestore.Timestamp.now(),
-            };
-
-            const newRecomendacionRef = recomendacionesRef.doc();
-            batch.set(newRecomendacionRef, recomendacionData);
-            recommendationsCreated++;
-
-            await logActivity(
-                "sistema",
-                "sistema",
-                "RECOMENDACION_RECONTRATACION_CREADA",
-                `Recomendación creada para usuario ${relacion.usuarioId} de recontratar a prestador ${relacion.prestadorId} para ${periodicCategory}.`,
-                { tipo: "recomendacion", id: newRecomendacionRef.id },
-                { usuarioId: relacion.usuarioId, prestadorId: relacion.prestadorId, categoria: periodicCategory }
-            );
-
-            await sendNotification(
-                relacion.usuarioId,
-                "usuario",
-                `¿Necesitas ayuda de nuevo con ${categoriaInfo.name}?`,
-                `Notamos que ha pasado un tiempo. ¡${providerName} está disponible para ayudarte de nuevo!`,
-                { recomendacionId: newRecomendacionRef.id }
-            );
-        }
+        await sendNotification(
+          relacion.usuarioId,
+          "usuario",
+          `¿Necesitas ayuda de nuevo con ${categoriaInfo.name}?`,
+          `Notamos que ha pasado un tiempo. ¡${providerName} está disponible para ayudarte de nuevo!`,
+          {recomendacionId: newRecomendacionRef.id}
+        );
+      }
     }
 
     if (recommendationsCreated > 0) {
-        await batch.commit();
-        functions.logger.info(`Se crearon ${recommendationsCreated} recomendaciones de recontratación.`);
+      await batch.commit();
+      functions.logger.info(`Se crearon ${recommendationsCreated} recomendaciones de recontratación.`);
     } else {
-        functions.logger.log("No se generaron nuevas recomendaciones en esta ejecución.");
+      functions.logger.log("No se generaron nuevas recomendaciones en esta ejecución.");
     }
 
     return null;
   });
 
 export const enviarRecordatorioRecontratacion = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar un recordatorio (prestador).");
-    }
-    const prestadorId = context.auth.uid;
-    const { usuarioId, categoriaId, mensajePersonalizado } = data;
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar un recordatorio (prestador).");
+  }
+  const prestadorId = context.auth.uid;
+  const {usuarioId, categoriaId, mensajePersonalizado} = data;
 
-    if (!usuarioId || typeof usuarioId !== 'string' || !categoriaId || typeof categoriaId !== 'string') {
-        throw new functions.https.HttpsError("invalid-argument", "Se requieren 'usuarioId' y 'categoriaId' válidos.");
-    }
-    
-    const now = admin.firestore.Timestamp.now();
-    const prestadorRef = db.collection("prestadores").doc(prestadorId);
-    const relacionId = `${usuarioId}_${prestadorId}`;
-    const relacionRef = db.collection("relacionesUsuarioPrestador").doc(relacionId);
+  if (!usuarioId || typeof usuarioId !== "string" || !categoriaId || typeof categoriaId !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'usuarioId' y 'categoriaId' válidos.");
+  }
 
-    try {
-        return await db.runTransaction(async (transaction) => {
-            const prestadorDoc = await transaction.get(prestadorRef);
-            if (!prestadorDoc.exists) {
-                throw new functions.https.HttpsError("not-found", "No se encontró tu perfil de prestador.");
-            }
-            const prestadorData = prestadorDoc.data() as ProviderData;
-            
-            const relacionDoc = await transaction.get(relacionRef);
-            if (!relacionDoc.exists) {
-                 throw new functions.https.HttpsError("not-found", "No se encontró una relación de servicio previa con este usuario.");
-            }
-            const relacionData = relacionDoc.data() as RelacionUsuarioPrestadorData;
-            
-            // Lógica de límite de envíos para no-premium
-            if (!prestadorData.isPremium) {
-                if (relacionData.lastReminderSent) {
-                    const sixtyDaysInMillis = 60 * 24 * 60 * 60 * 1000;
-                    const lastSentDate = relacionData.lastReminderSent.toMillis();
-                    if (now.toMillis() - lastSentDate < sixtyDaysInMillis) {
-                        throw new functions.https.HttpsError("failed-precondition", "Ya has enviado un recordatorio a este cliente recientemente. Por favor, espera 60 días para enviar otro.");
-                    }
-                }
-            }
-            
-            const prestadorNombre = prestadorData.nombre || 'Tu prestador de confianza';
-            const categoria = SERVICE_CATEGORIES.find(c => c.id === categoriaId);
-            const nombreCategoria = categoria?.name || 'un servicio';
-            const mensaje = mensajePersonalizado || `${prestadorNombre} te invita a agendar de nuevo un servicio de ${nombreCategoria}.`;
-            
-            const recomendacionData: Omit<RecomendacionData, "id"> = {
-                usuarioId: usuarioId,
-                prestadorId: prestadorId,
-                categoria: categoriaId,
-                mensaje: mensaje,
-                estado: 'pendiente',
-                fechaCreacion: now,
-                type: 're-hire-suggestion',
-                suggestionSource: 'invita-prestador',
-            };
-            const recomendacionRef = db.collection("recomendaciones").doc();
-            transaction.set(recomendacionRef, recomendacionData);
-            
-            // Actualizar la fecha del último recordatorio enviado en la relación
-            transaction.update(relacionRef, { lastReminderSent: now });
+  const now = admin.firestore.Timestamp.now();
+  const prestadorRef = db.collection("prestadores").doc(prestadorId);
+  const relacionId = `${usuarioId}_${prestadorId}`;
+  const relacionRef = db.collection("relacionesUsuarioPrestador").doc(relacionId);
 
-            await logActivity(
-                prestadorId, "prestador", "RECONTRATACION_RECORDATORIO_ENVIADO",
-                `Prestador ${prestadorId} envió recordatorio a usuario ${usuarioId} para categoría ${categoriaId}.`,
-                { tipo: "recomendacion", id: recomendacionRef.id },
-                { prestadorId, categoriaId, usuarioId }
-            );
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const prestadorDoc = await transaction.get(prestadorRef);
+      if (!prestadorDoc.exists) {
+        throw new functions.https.HttpsError("not-found", "No se encontró tu perfil de prestador.");
+      }
+      const prestadorData = prestadorDoc.data() as ProviderData;
 
-            const notifTitle = `Un recordatorio de ${prestadorNombre}`;
-            const notifBody = mensaje;
+      const relacionDoc = await transaction.get(relacionRef);
+      if (!relacionDoc.exists) {
+        throw new functions.https.HttpsError("not-found", "No se encontró una relación de servicio previa con este usuario.");
+      }
+      const relacionData = relacionDoc.data() as RelacionUsuarioPrestadorData;
 
-            await sendNotification(usuarioId, "usuario", notifTitle, notifBody, {
-                type: 'REHIRE_REMINDER',
-                providerId: prestadorId,
-                categoryId: categoriaId,
-                recommendationId: recomendacionRef.id,
-            });
+      // Lógica de límite de envíos para no-premium
+      if (!prestadorData.isPremium) {
+        if (relacionData.lastReminderSent) {
+          const sixtyDaysInMillis = 60 * 24 * 60 * 60 * 1000;
+          const lastSentDate = relacionData.lastReminderSent.toMillis();
+          if (now.toMillis() - lastSentDate < sixtyDaysInMillis) {
+            throw new functions.https.HttpsError("failed-precondition", "Ya has enviado un recordatorio a este cliente recientemente. Por favor, espera 60 días para enviar otro.");
+          }
+        }
+      }
 
-            return { success: true, message: `Recordatorio enviado a usuario ${usuarioId}.`, recomendacionId: recomendacionRef.id };
-        });
-    } catch (error: any) {
-        functions.logger.error(`Error al enviar recordatorio de ${prestadorId} a ${usuarioId}:`, error);
-        if (error instanceof functions.https.HttpsError) throw error;
-        throw new functions.https.HttpsError("internal", "Error al procesar el envío del recordatorio.", error.message);
-    }
+      const prestadorNombre = prestadorData.nombre || "Tu prestador de confianza";
+      const categoria = SERVICE_CATEGORIES.find((c) => c.id === categoriaId);
+      const nombreCategoria = categoria?.name || "un servicio";
+      const mensaje = mensajePersonalizado || `${prestadorNombre} te invita a agendar de nuevo un servicio de ${nombreCategoria}.`;
+
+      const recomendacionData: Omit<RecomendacionData, "id"> = {
+        usuarioId: usuarioId,
+        prestadorId: prestadorId,
+        categoria: categoriaId,
+        mensaje: mensaje,
+        estado: "pendiente",
+        fechaCreacion: now,
+        type: "re-hire-suggestion",
+        suggestionSource: "invita-prestador",
+      };
+      const recomendacionRef = db.collection("recomendaciones").doc();
+      transaction.set(recomendacionRef, recomendacionData);
+
+      // Actualizar la fecha del último recordatorio enviado en la relación
+      transaction.update(relacionRef, {lastReminderSent: now});
+
+      await logActivity(
+        prestadorId, "prestador", "RECONTRATACION_RECORDATORIO_ENVIADO",
+        `Prestador ${prestadorId} envió recordatorio a usuario ${usuarioId} para categoría ${categoriaId}.`,
+        {tipo: "recomendacion", id: recomendacionRef.id},
+        {prestadorId, categoriaId, usuarioId}
+      );
+
+      const notifTitle = `Un recordatorio de ${prestadorNombre}`;
+      const notifBody = mensaje;
+
+      await sendNotification(usuarioId, "usuario", notifTitle, notifBody, {
+        type: "REHIRE_REMINDER",
+        providerId: prestadorId,
+        categoryId: categoriaId,
+        recommendationId: recomendacionRef.id,
+      });
+
+      return {success: true, message: `Recordatorio enviado a usuario ${usuarioId}.`, recomendacionId: recomendacionRef.id};
+    });
+  } catch (error: any) {
+    functions.logger.error(`Error al enviar recordatorio de ${prestadorId} a ${usuarioId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar el envío del recordatorio.", error.message);
+  }
 });
 
 export const getPastClientsForProvider = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para ver tus clientes pasados (proveedor).");
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para ver tus clientes pasados (proveedor).");
+  }
+  const providerId = context.auth.uid;
+  await logActivity(providerId, "prestador", "PROVIDER_GET_PAST_CLIENTS", `Proveedor ${providerId} solicitó su lista de clientes pasados.`);
+
+  try {
+    const relationsQuery = db.collection("relacionesUsuarioPrestador")
+      .where("prestadorId", "==", providerId)
+      .orderBy("ultimoServicioFecha", "desc");
+
+    const snapshot = await relationsQuery.get();
+    if (snapshot.empty) {
+      return [];
     }
-    const providerId = context.auth.uid;
-    await logActivity(providerId, "prestador", "PROVIDER_GET_PAST_CLIENTS", `Proveedor ${providerId} solicitó su lista de clientes pasados.`);
 
-    try {
-        const relationsQuery = db.collection("relacionesUsuarioPrestador")
-            .where("prestadorId", "==", providerId)
-            .orderBy("ultimoServicioFecha", "desc");
-        
-        const snapshot = await relationsQuery.get();
-        if (snapshot.empty) {
-            return [];
-        }
+    const pastClientsPromises = snapshot.docs.map(async (doc) => {
+      const relacion = doc.data() as RelacionUsuarioPrestadorData;
+      const userDoc = await db.collection("usuarios").doc(relacion.usuarioId).get();
+      const userData = userDoc.exists() ? userDoc.data() as UserData : null;
+      const lastCategory = SERVICE_CATEGORIES.find((c) => c.id === relacion.categoriasServicios[relacion.categoriasServicios.length - 1]);
 
-        const pastClientsPromises = snapshot.docs.map(async (doc) => {
-            const relacion = doc.data() as RelacionUsuarioPrestadorData;
-            const userDoc = await db.collection("usuarios").doc(relacion.usuarioId).get();
-            const userData = userDoc.exists() ? userDoc.data() as UserData : null;
-            const lastCategory = SERVICE_CATEGORIES.find(c => c.id === relacion.categoriasServicios[relacion.categoriasServicios.length - 1]);
+      return {
+        usuarioId: relacion.usuarioId,
+        nombreUsuario: userData?.nombre || "Usuario Desconocido",
+        avatarUrl: "https://placehold.co/100x100.png", // UserData doesn't have avatarUrl yet, so using a placeholder.
+        ultimoServicioFecha: (relacion.ultimoServicioFecha as admin.firestore.Timestamp).toMillis(),
+        ultimaCategoriaId: lastCategory?.id || "general",
+        ultimaCategoriaNombre: lastCategory?.name || "Servicio General",
+        serviciosContratados: relacion.serviciosContratados,
+      };
+    });
 
-            return {
-                usuarioId: relacion.usuarioId,
-                nombreUsuario: userData?.nombre || 'Usuario Desconocido',
-                avatarUrl: "https://placehold.co/100x100.png", // UserData doesn't have avatarUrl yet, so using a placeholder.
-                ultimoServicioFecha: (relacion.ultimoServicioFecha as admin.firestore.Timestamp).toMillis(),
-                ultimaCategoriaId: lastCategory?.id || 'general',
-                ultimaCategoriaNombre: lastCategory?.name || 'Servicio General',
-                serviciosContratados: relacion.serviciosContratados,
-            };
-        });
-
-        const pastClients = await Promise.all(pastClientsPromises);
-        return pastClients;
-
-    } catch (error: any) {
-        functions.logger.error(`Error al obtener clientes pasados para proveedor ${providerId}:`, error);
-        if (error.code === 'failed-precondition') {
-             throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener clientes pasados requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
-        }
-        throw new functions.https.HttpsError("internal", "Error al obtener la lista de clientes.", error.message);
+    const pastClients = await Promise.all(pastClientsPromises);
+    return pastClients;
+  } catch (error: any) {
+    functions.logger.error(`Error al obtener clientes pasados para proveedor ${providerId}:`, error);
+    if (error.code === "failed-precondition") {
+      throw new functions.https.HttpsError("failed-precondition", "La consulta para obtener clientes pasados requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
     }
+    throw new functions.https.HttpsError("internal", "Error al obtener la lista de clientes.", error.message);
+  }
 });
 
 export const getBlockedUsers = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
-    }
-    const adminId = context.auth.uid;
-    await logActivity(adminId, "admin", "ADMIN_GET_BLOCKED_USERS", `Admin ${adminId} solicitó la lista de usuarios bloqueados.`);
-    
-    try {
-        const blockedUsersQuery = db.collection("usuarios").where("isBlocked", "==", true);
-        const blockedProvidersQuery = db.collection("prestadores").where("isBlocked", "==", true);
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
+  }
+  const adminId = context.auth.uid;
+  await logActivity(adminId, "admin", "ADMIN_GET_BLOCKED_USERS", `Admin ${adminId} solicitó la lista de usuarios bloqueados.`);
 
-        const [usersSnapshot, providersSnapshot] = await Promise.all([
-            blockedUsersQuery.get(),
-            blockedProvidersQuery.get(),
-        ]);
+  try {
+    const blockedUsersQuery = db.collection("usuarios").where("isBlocked", "==", true);
+    const blockedProvidersQuery = db.collection("prestadores").where("isBlocked", "==", true);
 
-        const blockedUsers = usersSnapshot.docs.map((doc) => {
-            const data = doc.data() as UserData;
-            return {
-                id: doc.id,
-                type: 'usuario',
-                name: data.nombre,
-                // email: data.email, // Assuming email is stored
-                isBlocked: data.isBlocked,
-                blockReason: data.blockReason,
-                blockDate: data.blockDate?.toMillis(),
-            };
-        });
+    const [usersSnapshot, providersSnapshot] = await Promise.all([
+      blockedUsersQuery.get(),
+      blockedProvidersQuery.get(),
+    ]);
 
-        const blockedProviders = providersSnapshot.docs.map((doc) => {
-            const data = doc.data() as ProviderData;
-            return {
-                id: doc.id,
-                type: 'prestador',
-                name: data.nombre,
-                // email: data.email, // Assuming email is stored
-                isBlocked: data.isBlocked,
-                blockReason: data.blockReason,
-                blockDate: data.blockDate?.toMillis(),
-            };
-        });
+    const blockedUsers = usersSnapshot.docs.map((doc) => {
+      const userData = doc.data() as UserData;
+      return {
+        id: doc.id,
+        type: "usuario",
+        name: userData.nombre,
+        // email: data.email, // Assuming email is stored
+        isBlocked: userData.isBlocked,
+        blockReason: userData.blockReason,
+        blockDate: userData.blockDate?.toMillis(),
+      };
+    });
 
-        return [...blockedUsers, ...blockedProviders];
-    } catch (error: any) {
-        functions.logger.error("Error fetching blocked users:", error);
-        throw new functions.https.HttpsError("internal", "Failed to fetch blocked users.", error.message);
-    }
+    const blockedProviders = providersSnapshot.docs.map((doc) => {
+      const data = doc.data() as ProviderData;
+      return {
+        id: doc.id,
+        type: "prestador",
+        name: data.nombre,
+        // email: data.email, // Assuming email is stored
+        isBlocked: data.isBlocked,
+        blockReason: data.blockReason,
+        blockDate: data.blockDate?.toMillis(),
+      };
+    });
+
+    return [...blockedUsers, ...blockedProviders];
+  } catch (error: any) {
+    functions.logger.error("Error fetching blocked users:", error);
+    throw new functions.https.HttpsError("internal", "Failed to fetch blocked users.", error.message);
+  }
 });
 
 export const updateUserBlockStatus = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Authentication is required.");
+  }
+  const adminId = context.auth.uid;
+  // Add admin role check here
+
+  const {userId, userType, blockStatus, reason} = data;
+
+  if (!userId || !userType || typeof blockStatus !== "boolean") {
+    throw new functions.https.HttpsError("invalid-argument", "Missing required parameters: userId, userType, blockStatus.");
+  }
+  if (userType !== "usuario" && userType !== "prestador") {
+    throw new functions.https.HttpsError("invalid-argument", "userType must be 'usuario' or 'prestador'.");
+  }
+
+  const collectionName = userType === "usuario" ? "usuarios" : "prestadores";
+  const userRef = db.collection(collectionName).doc(userId);
+
+  try {
+    const updatePayload: { isBlocked: boolean; blockDate?: admin.firestore.FieldValue; blockReason?: admin.firestore.FieldValue | string } = {
+      isBlocked: blockStatus,
+    };
+
+    if (blockStatus) {
+      updatePayload.blockDate = admin.firestore.FieldValue.serverTimestamp();
+      updatePayload.blockReason = reason || "No reason specified.";
+    } else {
+      // When unblocking, clear the reason and date
+      updatePayload.blockReason = admin.firestore.FieldValue.delete();
+      updatePayload.blockDate = admin.firestore.FieldValue.delete();
     }
-    const adminId = context.auth.uid;
-    // Add admin role check here
 
-    const { userId, userType, blockStatus, reason } = data;
+    await userRef.update(updatePayload);
 
-    if (!userId || !userType || typeof blockStatus !== 'boolean') {
-        throw new functions.https.HttpsError("invalid-argument", "Missing required parameters: userId, userType, blockStatus.");
-    }
-    if (userType !== 'usuario' && userType !== 'prestador') {
-        throw new functions.https.HttpsError("invalid-argument", "userType must be 'usuario' or 'prestador'.");
-    }
+    const logAction = blockStatus ? "ADMIN_BLOCK_USER" : "ADMIN_UNBLOCK_USER";
+    const logDescription = `Admin ${adminId} ${blockStatus ? "blocked" : "unblocked"} ${userType} ${userId}. Reason: ${reason || "N/A"}`;
+    await logActivity(adminId, "admin", logAction, logDescription, {type: userType, id: userId}, {reason});
 
-    const collectionName = userType === 'usuario' ? 'usuarios' : 'prestadores';
-    const userRef = db.collection(collectionName).doc(userId);
-
-    try {
-        const updatePayload: { isBlocked: boolean; blockDate?: admin.firestore.FieldValue; blockReason?: admin.firestore.FieldValue | string } = {
-            isBlocked: blockStatus,
-        };
-
-        if (blockStatus) {
-            updatePayload.blockDate = admin.firestore.FieldValue.serverTimestamp();
-            updatePayload.blockReason = reason || "No reason specified.";
-        } else {
-            // When unblocking, clear the reason and date
-            updatePayload.blockReason = admin.firestore.FieldValue.delete();
-            updatePayload.blockDate = admin.firestore.FieldValue.delete();
-        }
-
-        await userRef.update(updatePayload);
-        
-        const logAction = blockStatus ? "ADMIN_BLOCK_USER" : "ADMIN_UNBLOCK_USER";
-        const logDescription = `Admin ${adminId} ${blockStatus ? 'blocked' : 'unblocked'} ${userType} ${userId}. Reason: ${reason || 'N/A'}`;
-        await logActivity(adminId, "admin", logAction, logDescription, { type: userType, id: userId }, { reason });
-
-        return { success: true, message: `User ${userId} status updated to ${blockStatus ? 'blocked' : 'unblocked'}.` };
-    } catch (error: any) {
-        functions.logger.error(`Error updating block status for ${userType} ${userId}:`, error);
-        throw new functions.https.HttpsError("internal", "Failed to update user block status.", error.message);
-    }
+    return {success: true, message: `User ${userId} status updated to ${blockStatus ? "blocked" : "unblocked"}.`};
+  } catch (error: any) {
+    functions.logger.error(`Error updating block status for ${userType} ${userId}:`, error);
+    throw new functions.https.HttpsError("internal", "Failed to update user block status.", error.message);
+  }
 });
 
 
@@ -3847,12 +3853,12 @@ export const getProvidersForValidation = functions.https.onCall(async (data, con
     const providersSnapshot = await db.collection("prestadores")
       .where("documentosValidos", "==", false)
       .get();
-      
+
     if (providersSnapshot.empty) {
       return [];
     }
 
-    const providersToValidate = providersSnapshot.docs.map(doc => {
+    const providersToValidate = providersSnapshot.docs.map((doc) => {
       const providerData = doc.data() as ProviderData;
       return {
         id: doc.id,
@@ -3866,8 +3872,8 @@ export const getProvidersForValidation = functions.https.onCall(async (data, con
     return providersToValidate;
   } catch (error: any) {
     console.error("Error fetching providers for validation:", error);
-    if (error.code === 'failed-precondition') {
-        throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
+    if (error.code === "failed-precondition") {
+      throw new functions.https.HttpsError("failed-precondition", "La consulta requiere un índice compuesto en Firestore. Por favor, crea uno desde el enlace en el log de Firebase Functions.");
     }
     throw new functions.https.HttpsError("internal", "Error al obtener proveedores para validación.");
   }
@@ -3890,12 +3896,11 @@ export const getPendingReports = functions.https.onCall(async (data, context) =>
     if (reportsSnapshot.empty) {
       return [];
     }
-    
-    return reportsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
+    return reportsSnapshot.docs.map((doc) => ({id: doc.id, ...doc.data()}));
   } catch (error: any) {
     console.error("Error fetching pending reports:", error);
-    if (error.code === 'failed-precondition') {
+    if (error.code === "failed-precondition") {
       throw new functions.https.HttpsError("failed-precondition", "La consulta de reportes pendientes requiere un índice compuesto. Por favor, créalo desde el enlace en los logs de Firebase Functions.");
     }
     throw new functions.https.HttpsError("internal", "Error al obtener los reportes pendientes.");
@@ -3908,7 +3913,7 @@ export const resolveReport = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
   }
   const adminId = context.auth.uid;
-  const { reporteId, decision, comentarioAdmin } = data;
+  const {reporteId, decision, comentarioAdmin} = data;
 
   if (!reporteId || !decision || !comentarioAdmin) {
     throw new functions.https.HttpsError("invalid-argument", "Faltan parámetros: reporteId, decision, comentarioAdmin.");
@@ -3930,7 +3935,7 @@ export const resolveReport = functions.https.onCall(async (data, context) => {
       fechaResolucion: now,
       resueltaPorAdminId: adminId,
     });
-    
+
     // Actualizar también el servicio relacionado
     const servicioRef = db.collection("solicitudes_servicio").doc(reporteData.idServicio);
     transaction.update(servicioRef, {
@@ -3938,16 +3943,16 @@ export const resolveReport = functions.https.onCall(async (data, context) => {
       status: "cerrado_con_disputa_resuelta",
       updatedAt: now,
       // Si la decisión es compensar, el pago podría ser reembolsado.
-      ...(decision === 'resuelto_compensacion' && { paymentStatus: 'reembolsado_parcial' })
+      ...(decision === "resuelto_compensacion" && {paymentStatus: "reembolsado_parcial"}),
     });
 
-    await logActivity(adminId, "admin", "REPORTE_PROBLEMA_RESUELTO", `Admin resolvió reporte ${reporteId} con decisión: ${decision}.`, { tipo: "reporte_servicio", id: reporteId }, { comentario: comentarioAdmin });
-    
+    await logActivity(adminId, "admin", "REPORTE_PROBLEMA_RESUELTO", `Admin resolvió reporte ${reporteId} con decisión: ${decision}.`, {tipo: "reporte_servicio", id: reporteId}, {comentario: comentarioAdmin});
+
     // Notificar a las partes
-    await sendNotification(reporteData.idUsuarioReportante, reporteData.rolReportante, "Tu Reporte Ha Sido Resuelto", `Un administrador ha resuelto tu reporte para el servicio #${reporteData.idServicio.substring(0,6)}. Decisión: ${decision}.`);
-    await sendNotification(reporteData.idReportado, reporteData.rolReportado, "Un Reporte Sobre Tu Servicio Ha Sido Resuelto", `Un administrador ha resuelto un reporte sobre el servicio #${reporteData.idServicio.substring(0,6)}. Decisión: ${decision}.`);
-    
-    return { success: true, message: "Reporte resuelto exitosamente." };
+    await sendNotification(reporteData.idUsuarioReportante, reporteData.rolReportante, "Tu Reporte Ha Sido Resuelto", `Un administrador ha resuelto tu reporte para el servicio #${reporteData.idServicio.substring(0, 6)}. Decisión: ${decision}.`);
+    await sendNotification(reporteData.idReportado, reporteData.rolReportado, "Un Reporte Sobre Tu Servicio Ha Sido Resuelto", `Un administrador ha resuelto un reporte sobre el servicio #${reporteData.idServicio.substring(0, 6)}. Decisión: ${decision}.`);
+
+    return {success: true, message: "Reporte resuelto exitosamente."};
   });
 });
 
@@ -3973,9 +3978,9 @@ export const getActiveServices = functions.https.onCall(async (data, context) =>
       return {
         id: doc.id,
         status: serviceData.status,
-        userName: userDoc.exists() ? userDoc.data()?.nombre : 'Usuario Desconocido',
-        providerName: providerDoc.exists() ? providerDoc.data()?.nombre : 'Proveedor Desconocido',
-        serviceTitle: serviceData.titulo || 'Servicio sin título',
+        userName: userDoc.exists() ? userDoc.data()?.nombre : "Usuario Desconocido",
+        providerName: providerDoc.exists() ? providerDoc.data()?.nombre : "Proveedor Desconocido",
+        serviceTitle: serviceData.titulo || "Servicio sin título",
         scheduledDate: (serviceData.serviceDate && serviceData.serviceTime) ? new Date(`${serviceData.serviceDate}T${serviceData.serviceTime}`).getTime() : (serviceData.createdAt as admin.firestore.Timestamp).toMillis(),
         createdAt: (serviceData.createdAt as admin.firestore.Timestamp).toMillis(),
       };
@@ -3984,7 +3989,7 @@ export const getActiveServices = functions.https.onCall(async (data, context) =>
     return services;
   } catch (error: any) {
     console.error("Error fetching active services:", error);
-    if (error.code === 'failed-precondition') {
+    if (error.code === "failed-precondition") {
       throw new functions.https.HttpsError("failed-precondition", "La consulta de servicios activos requiere un índice compuesto. Por favor, créalo desde el enlace en los logs de Firebase Functions.");
     }
     throw new functions.https.HttpsError("internal", "Error al obtener los servicios activos.");
@@ -3993,219 +3998,217 @@ export const getActiveServices = functions.https.onCall(async (data, context) =>
 
 
 export const adminCancelService = functions.https.onCall(async (data, context) => {
-    if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-    const adminId = context.auth.uid;
-    const { serviceId, reason } = data;
+  if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
+  const adminId = context.auth.uid;
+  const {serviceId, reason} = data;
 
-    if (!serviceId || !reason) throw new functions.https.HttpsError("invalid-argument", "Faltan 'serviceId' o 'reason'.");
+  if (!serviceId || !reason) throw new functions.https.HttpsError("invalid-argument", "Faltan 'serviceId' o 'reason'.");
 
-    const serviceRef = db.collection("solicitudes_servicio").doc(serviceId);
-    
-    return db.runTransaction(async transaction => {
-        const serviceDoc = await transaction.get(serviceRef);
-        if (!serviceDoc.exists) throw new functions.https.HttpsError("not-found", "Servicio no encontrado.");
+  const serviceRef = db.collection("solicitudes_servicio").doc(serviceId);
 
-        transaction.update(serviceRef, {
-            status: 'cancelada_admin',
-            paymentStatus: 'reembolsado_total', // Asumir reembolso completo en cancelación de admin
-            actorDelCambioId: adminId,
-            actorDelCambioRol: 'admin',
-            updatedAt: admin.firestore.Timestamp.now(),
-            notes: admin.firestore.FieldValue.arrayUnion(`Cancelado por admin: ${reason}`)
-        });
+  return db.runTransaction(async (transaction) => {
+    const serviceDoc = await transaction.get(serviceRef);
+    if (!serviceDoc.exists) throw new functions.https.HttpsError("not-found", "Servicio no encontrado.");
 
-        await logActivity(adminId, "admin", "ADMIN_CANCEL_SERVICE", `Admin canceló servicio ${serviceId}. Razón: ${reason}`, { tipo: "solicitud_servicio", id: serviceId }, { reason });
-
-        const serviceData = serviceDoc.data() as ServiceRequest;
-        await sendNotification(serviceData.usuarioId, "usuario", "Servicio Cancelado", `Tu servicio "${serviceData.titulo}" ha sido cancelado por un administrador. Razón: ${reason}`);
-        await sendNotification(serviceData.prestadorId, "prestador", "Servicio Cancelado", `El servicio "${serviceData.titulo}" ha sido cancelado por un administrador. Razón: ${reason}`);
-        
-        return { success: true };
+    transaction.update(serviceRef, {
+      status: "cancelada_admin",
+      paymentStatus: "reembolsado_total", // Asumir reembolso completo en cancelación de admin
+      actorDelCambioId: adminId,
+      actorDelCambioRol: "admin",
+      updatedAt: admin.firestore.Timestamp.now(),
+      notes: admin.firestore.FieldValue.arrayUnion(`Cancelado por admin: ${reason}`),
     });
+
+    await logActivity(adminId, "admin", "ADMIN_CANCEL_SERVICE", `Admin canceló servicio ${serviceId}. Razón: ${reason}`, {tipo: "solicitud_servicio", id: serviceId}, {reason});
+
+    const serviceData = serviceDoc.data() as ServiceRequest;
+    await sendNotification(serviceData.usuarioId, "usuario", "Servicio Cancelado", `Tu servicio "${serviceData.titulo}" ha sido cancelado por un administrador. Razón: ${reason}`);
+    await sendNotification(serviceData.prestadorId, "prestador", "Servicio Cancelado", `El servicio "${serviceData.titulo}" ha sido cancelado por un administrador. Razón: ${reason}`);
+
+    return {success: true};
+  });
 });
 
 export const adminForceCompleteService = functions.https.onCall(async (data, context) => {
-    if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-    const adminId = context.auth.uid;
-    const { serviceId, reason } = data;
+  if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
+  const adminId = context.auth.uid;
+  const {serviceId, reason} = data;
 
-    if (!serviceId || !reason) throw new functions.https.HttpsError("invalid-argument", "Faltan 'serviceId' o 'reason'.");
+  if (!serviceId || !reason) throw new functions.https.HttpsError("invalid-argument", "Faltan 'serviceId' o 'reason'.");
 
-    const serviceRef = db.collection("solicitudes_servicio").doc(serviceId);
-    
-    return db.runTransaction(async transaction => {
-        const serviceDoc = await transaction.get(serviceRef);
-        if (!serviceDoc.exists) throw new functions.https.HttpsError("not-found", "Servicio no encontrado.");
+  const serviceRef = db.collection("solicitudes_servicio").doc(serviceId);
 
-        transaction.update(serviceRef, {
-            status: 'cerrado_forzado_admin',
-            paymentStatus: 'liberado_al_proveedor', // Asumir que se libera el pago
-            actorDelCambioId: adminId,
-            actorDelCambioRol: 'admin',
-            updatedAt: admin.firestore.Timestamp.now(),
-            notes: admin.firestore.FieldValue.arrayUnion(`Completado forzosamente por admin: ${reason}`)
-        });
+  return db.runTransaction(async (transaction) => {
+    const serviceDoc = await transaction.get(serviceRef);
+    if (!serviceDoc.exists) throw new functions.https.HttpsError("not-found", "Servicio no encontrado.");
 
-        await logActivity(adminId, "admin", "ADMIN_FORCE_COMPLETE_SERVICE", `Admin completó forzosamente el servicio ${serviceId}. Razón: ${reason}`, { tipo: "solicitud_servicio", id: serviceId }, { reason });
-
-        const serviceData = serviceDoc.data() as ServiceRequest;
-        await sendNotification(serviceData.usuarioId, "usuario", "Servicio Completado", `Tu servicio "${serviceData.titulo}" ha sido marcado como completado por un administrador.`);
-        await sendNotification(serviceData.prestadorId, "prestador", "Servicio Completado y Pago Liberado", `El servicio "${serviceData.titulo}" ha sido completado por un administrador y el pago ha sido liberado.`);
-        
-        return { success: true };
+    transaction.update(serviceRef, {
+      status: "cerrado_forzado_admin",
+      paymentStatus: "liberado_al_proveedor", // Asumir que se libera el pago
+      actorDelCambioId: adminId,
+      actorDelCambioRol: "admin",
+      updatedAt: admin.firestore.Timestamp.now(),
+      notes: admin.firestore.FieldValue.arrayUnion(`Completado forzosamente por admin: ${reason}`),
     });
+
+    await logActivity(adminId, "admin", "ADMIN_FORCE_COMPLETE_SERVICE", `Admin completó forzosamente el servicio ${serviceId}. Razón: ${reason}`, {tipo: "solicitud_servicio", id: serviceId}, {reason});
+
+    const serviceData = serviceDoc.data() as ServiceRequest;
+    await sendNotification(serviceData.usuarioId, "usuario", "Servicio Completado", `Tu servicio "${serviceData.titulo}" ha sido marcado como completado por un administrador.`);
+    await sendNotification(serviceData.prestadorId, "prestador", "Servicio Completado y Pago Liberado", `El servicio "${serviceData.titulo}" ha sido completado por un administrador y el pago ha sido liberado.`);
+
+    return {success: true};
+  });
 });
 
 
 export const getPendingWarranties = functions.https.onCall(async (data, context) => {
-    if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-    const adminId = context.auth.uid;
-    await logActivity(adminId, "admin", "ADMIN_GET_PENDING_WARRANTIES", `Admin ${adminId} solicitó la lista de garantías pendientes.`);
-    try {
-        const snapshot = await db.collection("garantiasPendientes")
-            .where("estadoGarantia", "==", "pendiente_revision")
-            .orderBy("fechaSolicitudGarantia", "asc")
-            .get();
+  if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
+  const adminId = context.auth.uid;
+  await logActivity(adminId, "admin", "ADMIN_GET_PENDING_WARRANTIES", `Admin ${adminId} solicitó la lista de garantías pendientes.`);
+  try {
+    const snapshot = await db.collection("garantiasPendientes")
+      .where("estadoGarantia", "==", "pendiente_revision")
+      .orderBy("fechaSolicitudGarantia", "asc")
+      .get();
 
-        if (snapshot.empty) return [];
-        
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    if (snapshot.empty) return [];
 
-    } catch (error: any) {
-        if (error.code === 'failed-precondition') {
-            throw new functions.https.HttpsError("failed-precondition", "La consulta de garantías pendientes requiere un índice compuesto. Por favor, créalo.");
-        }
-        throw new functions.https.HttpsError("internal", "Error al obtener las garantías pendientes.");
+    return snapshot.docs.map((doc) => ({id: doc.id, ...doc.data()}));
+  } catch (error: any) {
+    if (error.code === "failed-precondition") {
+      throw new functions.https.HttpsError("failed-precondition", "La consulta de garantías pendientes requiere un índice compuesto. Por favor, créalo.");
     }
+    throw new functions.https.HttpsError("internal", "Error al obtener las garantías pendientes.");
+  }
 });
 
 
 export const resolveWarranty = functions.https.onCall(async (data, context) => {
-    if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
-    const adminId = context.auth.uid;
-    const { garantiaId, decision, notasAdmin } = data;
+  if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
+  const adminId = context.auth.uid;
+  const {garantiaId, decision, notasAdmin} = data;
 
-    if (!garantiaId || !decision || !notasAdmin) {
-        throw new functions.https.HttpsError("invalid-argument", "Faltan parámetros requeridos.");
-    }
+  if (!garantiaId || !decision || !notasAdmin) {
+    throw new functions.https.HttpsError("invalid-argument", "Faltan parámetros requeridos.");
+  }
 
-    const warrantyRef = db.collection("garantiasPendientes").doc(garantiaId);
-    
-    return db.runTransaction(async transaction => {
-        const warrantyDoc = await transaction.get(warrantyRef);
-        if (!warrantyDoc.exists) throw new functions.https.HttpsError("not-found", "Garantía no encontrada.");
-        
-        const warrantyData = warrantyDoc.data() as GarantiaPendienteData;
-        const serviceRef = db.collection("solicitudes_servicio").doc(warrantyData.idServicio);
-        
-        transaction.update(warrantyRef, {
-            estadoGarantia: decision,
-            notasResolucion: notasAdmin,
-            fechaResolucion: admin.firestore.Timestamp.now(),
-            resueltaPorAdminId: adminId
-        });
+  const warrantyRef = db.collection("garantiasPendientes").doc(garantiaId);
 
-        transaction.update(serviceRef, {
-            garantiaActiva: false, // La garantía ya fue procesada
-            paymentStatus: decision === 'aprobada_compensacion' ? 'reembolsado_parcial' : 'liberado_al_proveedor'
-        });
-        
-        const logAction = decision === 'aprobada_compensacion' ? "GARANTIA_APROBADA" : "GARANTIA_RECHAZADA";
-        await logActivity(adminId, "admin", logAction, `Admin resolvió garantía ${garantiaId} como ${decision}.`, { tipo: "garantia", id: garantiaId });
+  return db.runTransaction(async (transaction) => {
+    const warrantyDoc = await transaction.get(warrantyRef);
+    if (!warrantyDoc.exists) throw new functions.https.HttpsError("not-found", "Garantía no encontrada.");
 
-        await sendNotification(warrantyData.idUsuario, "usuario", "Resolución de Garantía", `Tu solicitud de garantía para el servicio #${warrantyData.idServicio.substring(0,6)} ha sido resuelta como: ${decision}.`);
-        
-        return { success: true };
+    const warrantyData = warrantyDoc.data() as GarantiaPendienteData;
+    const serviceRef = db.collection("solicitudes_servicio").doc(warrantyData.idServicio);
+
+    transaction.update(warrantyRef, {
+      estadoGarantia: decision,
+      notasResolucion: notasAdmin,
+      fechaResolucion: admin.firestore.Timestamp.now(),
+      resueltaPorAdminId: adminId,
     });
+
+    transaction.update(serviceRef, {
+      garantiaActiva: false, // La garantía ya fue procesada
+      paymentStatus: decision === "aprobada_compensacion" ? "reembolsado_parcial" : "liberado_al_proveedor",
+    });
+
+    const logAction = decision === "aprobada_compensacion" ? "GARANTIA_APROBADA" : "GARANTIA_RECHAZADA";
+    await logActivity(adminId, "admin", logAction, `Admin resolvió garantía ${garantiaId} como ${decision}.`, {tipo: "garantia", id: garantiaId});
+
+    await sendNotification(warrantyData.idUsuario, "usuario", "Resolución de Garantía", `Tu solicitud de garantía para el servicio #${warrantyData.idServicio.substring(0, 6)} ha sido resuelta como: ${decision}.`);
+
+    return {success: true};
+  });
 });
 
-export const getBanners = functions.https.onCall(async(data, context) => {
-    if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
+export const getBanners = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("permission-denied", "Acceso denegado.");
 
-    const { region, idioma, categoria } = data;
-    const now = admin.firestore.Timestamp.now();
-    const actorId = context.auth.uid;
-    await logActivity(actorId, "usuario", "USER_GET_BANNERS", `Usuario ${actorId} solicitó banners.`, undefined, { region, idioma, categoria });
-    
-    let query: admin.firestore.Query = db.collection("banners")
-      .where("activo", "==", true)
-      .where("fechaInicio", "<=", now);
-      // No podemos hacer dos < > en campos distintos, el de fechaFin se hará en código.
+  const {region, idioma, categoria} = data;
+  const now = admin.firestore.Timestamp.now();
+  const actorId = context.auth.uid;
+  await logActivity(actorId, "usuario", "USER_GET_BANNERS", `Usuario ${actorId} solicitó banners.`, undefined, {region, idioma, categoria});
 
-    // Filtros opcionales que sí se pueden aplicar en la query
-    if (idioma) query = query.where("idiomas", "array-contains", idioma);
-    if (region) query = query.where("regiones", "array-contains", region);
-    if (categoria) query = query.where("categorias", "array-contains", categoria);
+  let query: admin.firestore.Query = db.collection("banners")
+    .where("activo", "==", true)
+    .where("fechaInicio", "<=", now);
+  // No podemos hacer dos < > en campos distintos, el de fechaFin se hará en código.
 
-    try {
-        const snapshot = await query.orderBy("orden", "asc").get();
-        const banners = snapshot.docs
-            .map(doc => ({ id: doc.id, ...doc.data() } as BannerPublicitario))
-            .filter(banner => !banner.fechaFin || banner.fechaFin >= now); // Filtro final en código
+  // Filtros opcionales que sí se pueden aplicar en la query
+  if (idioma) query = query.where("idiomas", "array-contains", idioma);
+  if (region) query = query.where("regiones", "array-contains", region);
+  if (categoria) query = query.where("categorias", "array-contains", categoria);
 
-        return banners;
-    } catch(error: any) {
-        if (error.code === 'failed-precondition') {
-            throw new functions.https.HttpsError("failed-precondition", "La consulta de banners requiere uno o más índices compuestos. Por favor, créalos desde los logs de Firebase.");
-        }
-        throw new functions.https.HttpsError("internal", "Error al obtener banners.");
+  try {
+    const snapshot = await query.orderBy("orden", "asc").get();
+    const banners = snapshot.docs
+      .map((doc) => ({id: doc.id, ...doc.data()} as BannerPublicitario))
+      .filter((banner) => !banner.fechaFin || banner.fechaFin >= now); // Filtro final en código
+
+    return banners;
+  } catch (error: any) {
+    if (error.code === "failed-precondition") {
+      throw new functions.https.HttpsError("failed-precondition", "La consulta de banners requiere uno o más índices compuestos. Por favor, créalos desde los logs de Firebase.");
     }
+    throw new functions.https.HttpsError("internal", "Error al obtener banners.");
+  }
 });
 
 export const processSubscriptionPayment = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para procesar suscripciones.");
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para procesar suscripciones.");
+  }
+  const {providerId, planId} = data;
+
+  if (!providerId || !planId || !SUBSCRIPTION_PLANS[planId as keyof typeof SUBSCRIPTION_PLANS]) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requieren 'providerId' y 'planId' válidos.");
+  }
+
+  const plan = SUBSCRIPTION_PLANS[planId as keyof typeof SUBSCRIPTION_PLANS];
+  const now = admin.firestore.Timestamp.now();
+  const providerRef = db.collection("prestadores").doc(providerId);
+
+  try {
+    const providerDoc = await providerRef.get();
+    if (!providerDoc.exists) {
+      throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
     }
-    const { providerId, planId } = data;
+    const providerData = providerDoc.data() as ProviderData;
 
-    if (!providerId || !planId || !SUBSCRIPTION_PLANS[planId as keyof typeof SUBSCRIPTION_PLANS]) {
-        throw new functions.https.HttpsError("invalid-argument", "Se requieren 'providerId' y 'planId' válidos.");
+    if (providerData.referidoPor) {
+      const embajadorUID = providerData.referidoPor;
+      const commissionAmount = plan.price * plan.commissionRate;
+
+      if (commissionAmount > 0) {
+        const comisionesRef = db.collection("comisiones");
+        const providerNameForCommission = providerData.nombre || `prestador ${providerId.substring(0, 5)}`;
+
+        const comisionDataForCollection = {
+          idUsuarioGanador: embajadorUID,
+          tipo: "suscripcion",
+          monto: commissionAmount,
+          detalle: `Suscripción de @${providerNameForCommission}`,
+          fecha: now,
+          referenciaID: `sub_${providerId}_${now.toMillis()}`,
+        };
+        await comisionesRef.add(comisionDataForCollection);
+      }
     }
 
-    const plan = SUBSCRIPTION_PLANS[planId as keyof typeof SUBSCRIPTION_PLANS];
-    const now = admin.firestore.Timestamp.now();
-    const providerRef = db.collection("prestadores").doc(providerId);
+    const newExpirationDate = new Date(now.toDate().getTime() + plan.durationDays * 24 * 60 * 60 * 1000);
+    await providerRef.update({
+      isPremium: true,
+      membresiaExpira: admin.firestore.Timestamp.fromDate(newExpirationDate),
+    });
 
-    try {
-        const providerDoc = await providerRef.get();
-        if (!providerDoc.exists) {
-            throw new functions.https.HttpsError("not-found", `Proveedor con ID ${providerId} no encontrado.`);
-        }
-        const providerData = providerDoc.data() as ProviderData;
-
-        if (providerData.referidoPor) {
-            const embajadorUID = providerData.referidoPor;
-            const commissionAmount = plan.price * plan.commissionRate;
-
-            if (commissionAmount > 0) {
-                const comisionesRef = db.collection("comisiones");
-                const providerNameForCommission = providerData.nombre || `prestador ${providerId.substring(0, 5)}`;
-                
-                const comisionDataForCollection = {
-                    idUsuarioGanador: embajadorUID,
-                    tipo: "suscripcion",
-                    monto: commissionAmount,
-                    detalle: `Suscripción de @${providerNameForCommission}`,
-                    fecha: now,
-                    referenciaID: `sub_${providerId}_${now.toMillis()}`,
-                };
-                await comisionesRef.add(comisionDataForCollection);
-            }
-        }
-        
-        const newExpirationDate = new Date(now.toDate().getTime() + plan.durationDays * 24 * 60 * 60 * 1000);
-        await providerRef.update({
-            isPremium: true,
-            membresiaExpira: admin.firestore.Timestamp.fromDate(newExpirationDate)
-        });
-
-        return { success: true, message: `Suscripción '${planId}' procesada para ${providerData.nombre}.` };
-
-    } catch (error: any) {
-        functions.logger.error(`Error procesando suscripción para ${providerId}:`, error);
-        if (error instanceof functions.https.HttpsError) throw error;
-        throw new functions.https.HttpsError("internal", "Error al procesar la suscripción.", error.message);
-    }
+    return {success: true, message: `Suscripción '${planId}' procesada para ${providerData.nombre}.`};
+  } catch (error: any) {
+    functions.logger.error(`Error procesando suscripción para ${providerId}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar la suscripción.", error.message);
+  }
 });
 
 export const onCommissionCreated = functions.firestore
@@ -4217,7 +4220,7 @@ export const onCommissionCreated = functions.firestore
       return null;
     }
 
-    const { idUsuarioGanador, monto } = commissionData;
+    const {idUsuarioGanador, monto} = commissionData;
 
     if (!idUsuarioGanador || typeof monto !== "number" || monto <= 0) {
       functions.logger.error("Commission document is missing idUsuarioGanador or has invalid monto.", {commissionId: context.params.commissionId, data: commissionData});
@@ -4229,21 +4232,21 @@ export const onCommissionCreated = functions.firestore
     try {
       await userRef.set({
         gananciasTotales: admin.firestore.FieldValue.increment(monto),
-      }, { merge: true });
+      }, {merge: true});
       functions.logger.info(`Updated gananciasTotales for user ${idUsuarioGanador} by ${monto}.`);
-      
+
       await logActivity(
         "sistema",
         "sistema",
         "EMBAJADOR_COMISION_PAGADA",
         `$${monto.toFixed(2)} agregados a las ganancias totales del embajador ${idUsuarioGanador} desde la comisión ${context.params.commissionId}.`,
-        { tipo: "usuario", id: idUsuarioGanador },
-        { monto, commissionId: context.params.commissionId }
+        {tipo: "usuario", id: idUsuarioGanador},
+        {monto, commissionId: context.params.commissionId}
       );
 
       return null;
     } catch (error) {
-      functions.logger.error(`Failed to update gananciasTotales for user ${idUsuarioGanador}.`, { error: error });
+      functions.logger.error(`Failed to update gananciasTotales for user ${idUsuarioGanador}.`, {error: error});
       return null;
     }
   });
@@ -4254,12 +4257,12 @@ export const publicarPreguntaComunidad = functions.https.onCall(async (data, con
     throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida.");
   }
   const idUsuario = context.auth.uid;
-  const { pregunta, ubicacion } = data;
+  const {pregunta, ubicacion} = data;
 
   if (!pregunta || typeof pregunta !== "string" || pregunta.length < 10) {
     throw new functions.https.HttpsError("invalid-argument", "Se requiere una pregunta válida (mínimo 10 caracteres).");
   }
-  if (!ubicacion || typeof ubicacion.lat !== 'number' || typeof ubicacion.lng !== 'number') {
+  if (!ubicacion || typeof ubicacion.lat !== "number" || typeof ubicacion.lng !== "number") {
     throw new functions.https.HttpsError("invalid-argument", "Se requiere una ubicación válida.");
   }
 
@@ -4271,7 +4274,7 @@ export const publicarPreguntaComunidad = functions.https.onCall(async (data, con
     respuestas: [],
     // A future improvement could be to use AI to generate tags from the question
   };
-  
+
   try {
     const preguntaRef = await db.collection("preguntasComunidad").add(nuevaPregunta);
 
@@ -4280,11 +4283,11 @@ export const publicarPreguntaComunidad = functions.https.onCall(async (data, con
       "usuario",
       "COMUNIDAD_PREGUNTA_PUBLICADA",
       `Usuario ${idUsuario} publicó una nueva pregunta en la comunidad: "${pregunta.substring(0, 50)}..."`,
-      { tipo: "preguntaComunidad", id: preguntaRef.id },
-      { pregunta: pregunta }
+      {tipo: "preguntaComunidad", id: preguntaRef.id},
+      {pregunta: pregunta}
     );
-    
-    return { success: true, message: "Pregunta publicada exitosamente.", preguntaId: preguntaRef.id };
+
+    return {success: true, message: "Pregunta publicada exitosamente.", preguntaId: preguntaRef.id};
   } catch (error) {
     functions.logger.error("Error al publicar pregunta en comunidad:", error);
     throw new functions.https.HttpsError("internal", "No se pudo publicar tu pregunta.", error);
@@ -4302,11 +4305,11 @@ export const onNewCommunityResponse = functions.firestore
     }
 
     const preguntaRef = db.collection("preguntasComunidad").doc(respuestaData.preguntaRef);
-    
+
     try {
       await preguntaRef.update({
         respuestasRef: admin.firestore.FieldValue.arrayUnion(snapshot.ref),
-        respuestasCount: admin.firestore.FieldValue.increment(1)
+        respuestasCount: admin.firestore.FieldValue.increment(1),
       });
       functions.logger.info(`Referencia de respuesta ${snapshot.id} agregada a pregunta ${respuestaData.preguntaRef}.`);
 
@@ -4316,7 +4319,6 @@ export const onNewCommunityResponse = functions.firestore
       //   const preguntaData = preguntaDoc.data();
       //   await sendNotification(...)
       // }
-
     } catch (error) {
       functions.logger.error(`Error al actualizar pregunta ${respuestaData.preguntaRef} con nueva respuesta:`, error);
     }
@@ -4328,7 +4330,7 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
     throw new functions.https.HttpsError("unauthenticated", "Autenticación requerida para responder.");
   }
   const idUsuarioResponde = context.auth.uid;
-  const { preguntaId, textoRespuesta, prestadorRecomendadoId } = data;
+  const {preguntaId, textoRespuesta, prestadorRecomendadoId} = data;
 
   if (!preguntaId || typeof preguntaId !== "string") {
     throw new functions.https.HttpsError("invalid-argument", "Se requiere 'preguntaId'.");
@@ -4347,7 +4349,7 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
   try {
     const preguntaDoc = await preguntaRef.get();
     if (!preguntaDoc.exists) {
-        throw new functions.https.HttpsError("not-found", `Pregunta con ID ${preguntaId} no encontrada.`);
+      throw new functions.https.HttpsError("not-found", `Pregunta con ID ${preguntaId} no encontrada.`);
     }
     const preguntaData = preguntaDoc.data() as PreguntaComunidadData;
 
@@ -4355,8 +4357,7 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
       autorId: idUsuarioResponde,
       texto: textoRespuesta,
       fecha: admin.firestore.Timestamp.now(),
-      preguntaRef: preguntaId, // Referencia a la pregunta
-      ...(prestadorRecomendadoId && { prestadorRecomendadoId }),
+      ...(prestadorRecomendadoId && {prestadorRecomendadoId}),
     };
 
     await respuestaRef.set(nuevaRespuesta); // Guardar la nueva respuesta
@@ -4366,25 +4367,25 @@ export const responderPreguntaComunidad = functions.https.onCall(async (data, co
       "usuario",
       "COMUNIDAD_PREGUNTA_RESPUESTA",
       `Usuario ${idUsuarioResponde} respondió a la pregunta ${preguntaId}.`,
-      { tipo: "preguntaComunidad", id: preguntaId },
-      { texto: textoRespuesta, prestadorRecomendadoId, respuestaId: respuestaRef.id }
+      {tipo: "preguntaComunidad", id: preguntaId},
+      {texto: textoRespuesta, prestadorRecomendadoId, respuestaId: respuestaRef.id}
     );
-    
+
     // Notify the original poster
-    if(preguntaData.idUsuario && preguntaData.idUsuario !== idUsuarioResponde) {
+    if (preguntaData.idUsuario && preguntaData.idUsuario !== idUsuarioResponde) {
       const autorDoc = await db.collection("usuarios").doc(idUsuarioResponde).get();
-      const nombreAutorRespuesta = autorDoc.exists() ? (autorDoc.data() as UserData)?.nombre || `Usuario ${idUsuarioResponde.substring(0,5)}` : "Alguien";
+      const nombreAutorRespuesta = autorDoc.exists() ? (autorDoc.data() as UserData)?.nombre || `Usuario ${idUsuarioResponde.substring(0, 5)}` : "Alguien";
 
       await sendNotification(
-          preguntaData.idUsuario,
-          "usuario",
-          "Nueva respuesta a tu pregunta",
-          `${nombreAutorRespuesta} ha respondido a tu pregunta en la comunidad: "${preguntaData.pregunta.substring(0, 40)}..."`,
-          { preguntaId: preguntaId, tipo: "NUEVA_RESPUESTA_COMUNIDAD" }
+        preguntaData.idUsuario,
+        "usuario",
+        "Nueva respuesta a tu pregunta",
+        `${nombreAutorRespuesta} ha respondido a tu pregunta en la comunidad: "${preguntaData.pregunta.substring(0, 40)}..."`,
+        {preguntaId: preguntaId, tipo: "NUEVA_RESPUESTA_COMUNIDAD"}
       );
     }
 
-    return { success: true, message: "Respuesta publicada exitosamente." };
+    return {success: true, message: "Respuesta publicada exitosamente."};
   } catch (error: any) {
     functions.logger.error(`Error al responder pregunta ${preguntaId}:`, error);
     if (error instanceof functions.https.HttpsError) throw error;
@@ -4403,12 +4404,12 @@ export const onRecomendacionCreate = functions.firestore
       return null;
     }
 
-    if (recomendacionData.type !== 'endorsement') {
-        functions.logger.info(`[onRecomendacionCreate] Recommendation ${recomendacionId} is of type '${recomendacionData.type}', not 'endorsement'. No count increment needed.`);
-        return null;
+    if (recomendacionData.type !== "endorsement") {
+      functions.logger.info(`[onRecomendacionCreate] Recommendation ${recomendacionId} is of type '${recomendacionData.type}', not 'endorsement'. No count increment needed.`);
+      return null;
     }
 
-    const { prestadorId } = recomendacionData;
+    const {prestadorId} = recomendacionData;
 
     if (!prestadorId) {
       functions.logger.error(`[onRecomendacionCreate] New recommendation ${recomendacionId} is missing 'prestadorId'.`);
@@ -4420,54 +4421,54 @@ export const onRecomendacionCreate = functions.firestore
     try {
       await prestadorRef.set({ // Use set with merge to create the field if it doesn't exist
         recommendationCount: admin.firestore.FieldValue.increment(1),
-      }, { merge: true });
+      }, {merge: true});
       functions.logger.info(`[onRecomendacionCreate] Incremented recommendationCount for provider ${prestadorId} due to new recommendation ${recomendacionId}.`);
     } catch (error) {
-      functions.logger.error(`[onRecomendacionCreate] Failed to increment recommendationCount for provider ${prestadorId}.`, { error: error });
+      functions.logger.error(`[onRecomendacionCreate] Failed to increment recommendationCount for provider ${prestadorId}.`, {error: error});
     }
-    
+
     return null;
   });
 
 export const recomendarNegocio = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para recomendar un negocio.");
-    }
-    const idUsuario = context.auth.uid;
-    const { idNegocio, comentarioOpcional } = data;
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para recomendar un negocio.");
+  }
+  const idUsuario = context.auth.uid;
+  const {idNegocio, comentarioOpcional} = data;
 
-    if (!idNegocio || typeof idNegocio !== 'string') {
-        throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idNegocio'.");
-    }
+  if (!idNegocio || typeof idNegocio !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'idNegocio'.");
+  }
 
-    const recomendacionRef = db.collection("recomendaciones").doc();
+  const recomendacionRef = db.collection("recomendaciones").doc();
 
-    try {
-        const nuevaRecomendacion: Omit<RecomendacionData, "id"> = {
-            type: 'endorsement',
-            usuarioId: idUsuario,
-            prestadorId: idNegocio,
-            fechaCreacion: admin.firestore.Timestamp.now(),
-            ...(comentarioOpcional && { mensaje: comentarioOpcional }),
-        };
-        
-        await recomendacionRef.set(nuevaRecomendacion);
+  try {
+    const nuevaRecomendacion: Omit<RecomendacionData, "id"> = {
+      type: "endorsement",
+      usuarioId: idUsuario,
+      prestadorId: idNegocio,
+      fechaCreacion: admin.firestore.Timestamp.now(),
+      ...(comentarioOpcional && {mensaje: comentarioOpcional}),
+    };
 
-        await logActivity(
-            idUsuario,
-            "usuario",
-            "NEGOCIO_RECOMENDADO",
-            `Usuario ${idUsuario} recomendó al negocio ${idNegocio}.`,
-            { tipo: "recomendacion", id: recomendacionRef.id },
-            { idNegocio, comentario: comentarioOpcional || "Sin comentario" }
-        );
+    await recomendacionRef.set(nuevaRecomendacion);
 
-        return { success: true, message: "¡Gracias por tu recomendación!", recomendacionId: recomendacionRef.id };
-    } catch (error: any) {
-        functions.logger.error(`Error al recomendar negocio ${idNegocio} por usuario ${idUsuario}:`, error);
-        if (error instanceof functions.https.HttpsError) throw error;
-        throw new functions.https.HttpsError("internal", "Error al procesar la recomendación.", error.message);
-    }
+    await logActivity(
+      idUsuario,
+      "usuario",
+      "NEGOCIO_RECOMENDADO",
+      `Usuario ${idUsuario} recomendó al negocio ${idNegocio}.`,
+      {tipo: "recomendacion", id: recomendacionRef.id},
+      {idNegocio, comentario: comentarioOpcional || "Sin comentario"}
+    );
+
+    return {success: true, message: "¡Gracias por tu recomendación!", recomendacionId: recomendacionRef.id};
+  } catch (error: any) {
+    functions.logger.error(`Error al recomendar negocio ${idNegocio} por usuario ${idUsuario}:`, error);
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError("internal", "Error al procesar la recomendación.", error.message);
+  }
 });
 
 export const onTransactionCreate = functions.firestore
@@ -4481,7 +4482,7 @@ export const onTransactionCreate = functions.firestore
       return null;
     }
 
-    const { usuarioId, monto } = transactionData;
+    const {usuarioId, monto} = transactionData;
     if (typeof monto !== "number" || monto <= 0) {
       functions.logger.info(`[onTransactionCreate] Transacción ${transactionId} tiene un monto inválido o cero. Saliendo.`);
       return null;
@@ -4528,12 +4529,11 @@ export const onTransactionCreate = functions.firestore
         "sistema",
         "EMBAJADOR_COMISION_AFILIADO",
         `Comisión de $${commissionAmount.toFixed(2)} generada para embajador ${referrerId} por transacción de afiliado ${usuarioId}.`,
-        { tipo: "comision", id: newCommissionRef.id },
-        { monto: commissionAmount, transactionId: transactionId, referidoId: usuarioId }
+        {tipo: "comision", id: newCommissionRef.id},
+        {monto: commissionAmount, transactionId: transactionId, referidoId: usuarioId}
       );
 
       return null;
-
     } catch (error) {
       functions.logger.error(`[onTransactionCreate] Error procesando la transacción ${transactionId}:`, error);
       return null;
@@ -4541,343 +4541,339 @@ export const onTransactionCreate = functions.firestore
   });
 
 export const cerrarServiciosAntiguos = functions.pubsub.schedule("every 24 hours").onRun(async (context) => {
-    const now = admin.firestore.Timestamp.now();
-    const plazoMillis = PLAZO_REPORTE_DIAS * 24 * 60 * 60 * 1000;
-    const limiteTimestamp = now.toMillis() - plazoMillis;
+  const now = admin.firestore.Timestamp.now();
+  const plazoMillis = PLAZO_REPORTE_DIAS * 24 * 60 * 60 * 1000;
+  const limiteTimestamp = now.toMillis() - plazoMillis;
 
-    const serviciosQuery = db.collection("solicitudes_servicio")
-        .where("status", "==", "completado_por_usuario")
-        .where("userConfirmedCompletionAt", "<=", limiteTimestamp);
+  const serviciosQuery = db.collection("solicitudes_servicio")
+    .where("status", "==", "completado_por_usuario")
+    .where("userConfirmedCompletionAt", "<=", limiteTimestamp);
 
-    const snapshot = await serviciosQuery.get();
+  const snapshot = await serviciosQuery.get();
 
-    if (snapshot.empty) {
-        functions.logger.log("[CerrarServicios] No hay servicios antiguos para cerrar.");
-        return null;
-    }
-
-    const batch = db.batch();
-    let processedCount = 0;
-
-    for (const doc of snapshot.docs) {
-        const servicio = doc.data() as ServiceRequest;
-        if (servicio.calificacionUsuario) {
-            // Si por alguna razón fue calificado pero el estado no se actualizó, lo ignoramos.
-            continue;
-        }
-
-        await logActivity(
-            "sistema",
-            "sistema",
-            "CAMBIO_ESTADO_SOLICITUD", // Reusing an existing action type
-            `Servicio ${doc.id} cerrado automáticamente por falta de calificación tras ${PLAZO_REPORTE_DIAS} días.`,
-            {tipo: "solicitud_servicio", id: doc.id},
-            {estadoAnterior: servicio.status, estadoNuevo: "cerrado_automaticamente"}
-        );
-
-        batch.update(doc.ref, {
-            status: "cerrado_automaticamente",
-            updatedAt: now,
-            actorDelCambioId: "sistema",
-            actorDelCambioRol: "sistema"
-        });
-        processedCount++;
-    }
-
-    if (processedCount > 0) {
-        await batch.commit();
-        functions.logger.info(`[CerrarServicios] Se cerraron automáticamente ${processedCount} servicios.`);
-    }
-
+  if (snapshot.empty) {
+    functions.logger.log("[CerrarServicios] No hay servicios antiguos para cerrar.");
     return null;
+  }
+
+  const batch = db.batch();
+  let processedCount = 0;
+
+  for (const doc of snapshot.docs) {
+    const servicio = doc.data() as ServiceRequest;
+    if (servicio.calificacionUsuario) {
+      // Si por alguna razón fue calificado pero el estado no se actualizó, lo ignoramos.
+      continue;
+    }
+
+    await logActivity(
+      "sistema",
+      "sistema",
+      "CAMBIO_ESTADO_SOLICITUD", // Reusing an existing action type
+      `Servicio ${doc.id} cerrado automáticamente por falta de calificación tras ${PLAZO_REPORTE_DIAS} días.`,
+      {tipo: "solicitud_servicio", id: doc.id},
+      {estadoAnterior: servicio.status, estadoNuevo: "cerrado_automaticamente"}
+    );
+
+    batch.update(doc.ref, {
+      status: "cerrado_automaticamente",
+      updatedAt: now,
+      actorDelCambioId: "sistema",
+      actorDelCambioRol: "sistema",
+    });
+    processedCount++;
+  }
+
+  if (processedCount > 0) {
+    await batch.commit();
+    functions.logger.info(`[CerrarServicios] Se cerraron automáticamente ${processedCount} servicios.`);
+  }
+
+  return null;
 });
 
 export const getLatestVisibleAppVersion = functions.https.onCall(async (data, context) => {
-    try {
-        const versionsQuery = db.collection("versionApp")
-            .where("visible", "==", true)
-            .orderBy("fechaLanzamiento", "desc")
-            .limit(1);
+  try {
+    const versionsQuery = db.collection("versionApp")
+      .where("visible", "==", true)
+      .orderBy("fechaLanzamiento", "desc")
+      .limit(1);
 
-        const snapshot = await versionsQuery.get();
+    const snapshot = await versionsQuery.get();
 
-        if (snapshot.empty) {
-            functions.logger.warn("[getLatestVisibleAppVersion] No visible app version found in the database.");
-            throw new functions.https.HttpsError("not-found", "No hay ninguna versión de la aplicación visible disponible en este momento.");
-        }
-
-        const latestVersionDoc = snapshot.docs[0];
-        const versionData = latestVersionDoc.data() as AppVersionData;
-
-        await logActivity(
-            context.auth?.uid || "sistema_anonimo",
-            context.auth?.uid ? "usuario" : "sistema",
-            "GET_LATEST_APP_VERSION",
-            `Se consultó la última versión visible de la app. Versión devuelta: ${versionData.numeroVersion}.`,
-            { tipo: "versionApp", id: latestVersionDoc.id }
-        );
-
-        return {
-            numeroVersion: versionData.numeroVersion,
-            descripcion: versionData.descripcion,
-            obligatoria: versionData.obligatoria,
-            fechaLanzamiento: versionData.fechaLanzamiento.toMillis(), // Convert to millis for easier client-side handling
-        };
-
-    } catch (error: any) {
-        functions.logger.error("[getLatestVisibleAppVersion] Error fetching latest app version:", error);
-        if (error instanceof functions.https.HttpsError) {
-            throw error;
-        }
-        throw new functions.https.HttpsError("internal", "No se pudo obtener la información de la versión de la aplicación.", error.message);
+    if (snapshot.empty) {
+      functions.logger.warn("[getLatestVisibleAppVersion] No visible app version found in the database.");
+      throw new functions.https.HttpsError("not-found", "No hay ninguna versión de la aplicación visible disponible en este momento.");
     }
+
+    const latestVersionDoc = snapshot.docs[0];
+    const versionData = latestVersionDoc.data() as AppVersionData;
+
+    await logActivity(
+      context.auth?.uid || "sistema_anonimo",
+      context.auth?.uid ? "usuario" : "sistema",
+      "GET_LATEST_APP_VERSION",
+      `Se consultó la última versión visible de la app. Versión devuelta: ${versionData.numeroVersion}.`,
+      {tipo: "versionApp", id: latestVersionDoc.id}
+    );
+
+    return {
+      numeroVersion: versionData.numeroVersion,
+      descripcion: versionData.descripcion,
+      obligatoria: versionData.obligatoria,
+      fechaLanzamiento: versionData.fechaLanzamiento.toMillis(), // Convert to millis for easier client-side handling
+    };
+  } catch (error: any) {
+    functions.logger.error("[getLatestVisibleAppVersion] Error fetching latest app version:", error);
+    if (error instanceof functions.https.HttpsError) {
+      throw error;
+    }
+    throw new functions.https.HttpsError("internal", "No se pudo obtener la información de la versión de la aplicación.", error.message);
+  }
 });
 
 export const enviarSugerenciaUsuario = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar una sugerencia.");
-    }
-    const usuarioId = context.auth.uid;
-    const { tipo, mensaje } = data;
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para enviar una sugerencia.");
+  }
+  const usuarioId = context.auth.uid;
+  const {tipo, mensaje} = data;
 
-    if (!tipo || typeof tipo !== 'string' || !['mejora', 'bug', 'otra'].includes(tipo)) {
-        throw new functions.https.HttpsError("invalid-argument", "Se requiere un 'tipo' de sugerencia válido ('mejora', 'bug', 'otra').");
-    }
-    if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length < 10) {
-        throw new functions.https.HttpsError("invalid-argument", "El mensaje de la sugerencia debe tener al menos 10 caracteres.");
-    }
+  if (!tipo || typeof tipo !== "string" || !["mejora", "bug", "otra"].includes(tipo)) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere un 'tipo' de sugerencia válido ('mejora', 'bug', 'otra').");
+  }
+  if (!mensaje || typeof mensaje !== "string" || mensaje.trim().length < 10) {
+    throw new functions.https.HttpsError("invalid-argument", "El mensaje de la sugerencia debe tener al menos 10 caracteres.");
+  }
 
-    const now = admin.firestore.Timestamp.now();
-    const sugerenciaRef = db.collection("sugerenciasUsuarios").doc();
+  const now = admin.firestore.Timestamp.now();
+  const sugerenciaRef = db.collection("sugerenciasUsuarios").doc();
 
-    const nuevaSugerencia: Omit<SugerenciaUsuarioData, 'id'> = {
-        usuarioId: usuarioId,
-        fechaEnvio: now,
-        tipo: tipo as "mejora" | "bug" | "otra",
-        mensaje: mensaje,
-        atendida: false,
-    };
+  const nuevaSugerencia: Omit<SugerenciaUsuarioData, "id"> = {
+    usuarioId: usuarioId,
+    fechaEnvio: now,
+    tipo: tipo as "mejora" | "bug" | "otra",
+    mensaje: mensaje,
+    atendida: false,
+  };
 
-    try {
-        await sugerenciaRef.set(nuevaSugerencia);
+  try {
+    await sugerenciaRef.set(nuevaSugerencia);
 
-        await logActivity(
-            usuarioId,
-            "usuario",
-            "SUGERENCIA_ENVIADA",
-            `Usuario ${usuarioId} envió una sugerencia de tipo '${tipo}'.`,
-            { tipo: "sugerenciaUsuario", id: sugerenciaRef.id },
-            { tipoSugerencia: tipo }
-        );
+    await logActivity(
+      usuarioId,
+      "usuario",
+      "SUGERENCIA_ENVIADA",
+      `Usuario ${usuarioId} envió una sugerencia de tipo '${tipo}'.`,
+      {tipo: "sugerenciaUsuario", id: sugerenciaRef.id},
+      {tipoSugerencia: tipo}
+    );
 
-        return { success: true, message: "¡Gracias por tu sugerencia! La hemos recibido correctamente." };
-    } catch (error: any) {
-        functions.logger.error(`Error al guardar sugerencia para usuario ${usuarioId}:`, error);
-        throw new functions.https.HttpsError("internal", "No se pudo guardar tu sugerencia en este momento.", error.message);
-    }
+    return {success: true, message: "¡Gracias por tu sugerencia! La hemos recibido correctamente."};
+  } catch (error: any) {
+    functions.logger.error(`Error al guardar sugerencia para usuario ${usuarioId}:`, error);
+    throw new functions.https.HttpsError("internal", "No se pudo guardar tu sugerencia en este momento.", error.message);
+  }
 });
 
 
 export const registrarArchivoSoporte = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar un archivo.");
-    }
-    const usuarioId = context.auth.uid;
-    const { archivoURL, tipoArchivo, descripcion } = data;
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar un archivo.");
+  }
+  const usuarioId = context.auth.uid;
+  const {archivoURL, tipoArchivo, descripcion} = data;
 
-    if (!archivoURL || typeof archivoURL !== 'string') {
-        throw new functions.https.HttpsError("invalid-argument", "Se requiere la URL del archivo ('archivoURL').");
-    }
-    if (!tipoArchivo || typeof tipoArchivo !== 'string') {
-        throw new functions.https.HttpsError("invalid-argument", "Se requiere el tipo de archivo ('tipoArchivo').");
-    }
+  if (!archivoURL || typeof archivoURL !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere la URL del archivo ('archivoURL').");
+  }
+  if (!tipoArchivo || typeof tipoArchivo !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere el tipo de archivo ('tipoArchivo').");
+  }
 
-    const ahora = admin.firestore.Timestamp.now();
-    const archivoRef = db.collection("archivosSoporte").doc();
+  const ahora = admin.firestore.Timestamp.now();
+  const archivoRef = db.collection("archivosSoporte").doc();
 
-    const nuevoArchivoData: Omit<ArchivoSoporteData, 'id'> = {
-        archivoURL,
-        tipoArchivo,
-        subidoPorRef: usuarioId,
-        fechaSubida: ahora,
-        ...(descripcion && { descripcion }),
-    };
+  const nuevoArchivoData: Omit<ArchivoSoporteData, "id"> = {
+    archivoURL,
+    tipoArchivo,
+    subidoPorRef: usuarioId,
+    fechaSubida: ahora,
+    ...(descripcion && {descripcion}),
+  };
 
-    try {
-        await archivoRef.set(nuevoArchivoData);
+  try {
+    await archivoRef.set(nuevoArchivoData);
 
-        await logActivity(
-            usuarioId,
-            "usuario",
-            "ARCHIVO_SOPORTE_REGISTRADO",
-            `Usuario ${usuarioId} registró un nuevo archivo de soporte: ${tipoArchivo}.`,
-            { tipo: "archivoSoporte", id: archivoRef.id },
-            { url: archivoURL }
-        );
+    await logActivity(
+      usuarioId,
+      "usuario",
+      "ARCHIVO_SOPORTE_REGISTRADO",
+      `Usuario ${usuarioId} registró un nuevo archivo de soporte: ${tipoArchivo}.`,
+      {tipo: "archivoSoporte", id: archivoRef.id},
+      {url: archivoURL}
+    );
 
-        return { success: true, message: "Archivo registrado exitosamente.", archivoId: archivoRef.id };
-    } catch (error: any) {
-        functions.logger.error(`Error al registrar archivo de soporte para usuario ${usuarioId}:`, error);
-        throw new functions.https.HttpsError("internal", "No se pudo registrar tu archivo.", error.message);
-    }
+    return {success: true, message: "Archivo registrado exitosamente.", archivoId: archivoRef.id};
+  } catch (error: any) {
+    functions.logger.error(`Error al registrar archivo de soporte para usuario ${usuarioId}:`, error);
+    throw new functions.https.HttpsError("internal", "No se pudo registrar tu archivo.", error.message);
+  }
 });
 
 export const logSoporteAction = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar una acción de soporte.");
-    }
-    
-    // Verificar si el usuario tiene rol de admin o soporte
-    const isAdmin = context.auth.token.admin === true;
-    const isSoporte = context.auth.token.soporte === true;
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar una acción de soporte.");
+  }
 
-    if (!isAdmin && !isSoporte) {
-        throw new functions.https.HttpsError("permission-denied", "No tienes los privilegios necesarios para realizar esta acción.");
-    }
+  // Verificar si el usuario tiene rol de admin o soporte
+  const isAdmin = context.auth.token.admin === true;
+  const isSoporte = context.auth.token.soporte === true;
 
-    const soporteId = context.auth.uid;
-    const { accion, detalle, entidadAfectada } = data;
+  if (!isAdmin && !isSoporte) {
+    throw new functions.https.HttpsError("permission-denied", "No tienes los privilegios necesarios para realizar esta acción.");
+  }
 
-    if (!accion || typeof accion !== 'string' || accion.trim().length === 0) {
-        throw new functions.https.HttpsError("invalid-argument", "Se requiere el campo 'accion' y no puede estar vacío.");
-    }
-    if (!detalle || typeof detalle !== 'string' || detalle.trim().length === 0) {
-        throw new functions.https.HttpsError("invalid-argument", "Se requiere el campo 'detalle' y no puede estar vacío.");
-    }
+  const soporteId = context.auth.uid;
+  const {accion, detalle, entidadAfectada} = data;
 
-    const ahora = admin.firestore.Timestamp.now();
-    const bitacoraRef = db.collection("bitacoraSoporte").doc();
+  if (!accion || typeof accion !== "string" || accion.trim().length === 0) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere el campo 'accion' y no puede estar vacío.");
+  }
+  if (!detalle || typeof detalle !== "string" || detalle.trim().length === 0) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere el campo 'detalle' y no puede estar vacío.");
+  }
 
-    const nuevaBitacora: Omit<BitacoraSoporteData, 'id'> = {
-        soporteRef: soporteId,
-        fechaRegistro: ahora,
-        accion: accion,
-        detalle: detalle,
-        ...(entidadAfectada && { entidadAfectada }),
-    };
+  const ahora = admin.firestore.Timestamp.now();
+  const bitacoraRef = db.collection("bitacoraSoporte").doc();
 
-    try {
-        await bitacoraRef.set(nuevaBitacora);
+  const nuevaBitacora: Omit<BitacoraSoporteData, "id"> = {
+    soporteRef: soporteId,
+    fechaRegistro: ahora,
+    accion: accion,
+    detalle: detalle,
+    ...(entidadAfectada && {entidadAfectada}),
+  };
 
-        await logActivity(
-            soporteId,
-            isAdmin ? "admin" : "soporte" as any, // Asumiendo que el rol en logActivity acepta 'soporte'
-            "SOPORTE_LOG_MANUAL",
-            `[Soporte] ${accion}: ${detalle}`,
-            entidadAfectada,
-            { accionOriginal: accion }
-        );
+  try {
+    await bitacoraRef.set(nuevaBitacora);
 
-        return { success: true, message: "Acción de soporte registrada en la bitácora.", logId: bitacoraRef.id };
-    } catch (error: any) {
-        functions.logger.error(`Error al registrar acción de soporte por ${soporteId}:`, error);
-        throw new functions.https.HttpsError("internal", "No se pudo registrar la acción en la bitácora.", error.message);
-    }
+    await logActivity(
+      soporteId,
+      isAdmin ? "admin" : "soporte" as any, // Asumiendo que el rol en logActivity acepta 'soporte'
+      "SOPORTE_LOG_MANUAL",
+      `[Soporte] ${accion}: ${detalle}`,
+      entidadAfectada,
+      {accionOriginal: accion}
+    );
+
+    return {success: true, message: "Acción de soporte registrada en la bitácora.", logId: bitacoraRef.id};
+  } catch (error: any) {
+    functions.logger.error(`Error al registrar acción de soporte por ${soporteId}:`, error);
+    throw new functions.https.HttpsError("internal", "No se pudo registrar la acción en la bitácora.", error.message);
+  }
 });
 
 export const logMetric = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar una métrica.");
-    }
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para registrar una métrica.");
+  }
 
-    const usuarioId = context.auth.uid;
-    const { evento, detalle } = data;
+  const usuarioId = context.auth.uid;
+  const {evento, detalle} = data;
 
-    if (!evento || typeof evento !== 'string' || evento.trim().length === 0) {
-        throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre de 'evento' válido y no puede estar vacío.");
-    }
+  if (!evento || typeof evento !== "string" || evento.trim().length === 0) {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere un nombre de 'evento' válido y no puede estar vacío.");
+  }
 
-    const detalleFinal = (typeof detalle === 'string') ? detalle : '';
+  const detalleFinal = (typeof detalle === "string") ? detalle : "";
 
-    const metricaRef = db.collection("metricas").doc();
+  const metricaRef = db.collection("metricas").doc();
 
-    const nuevaMetrica: Omit<MetricaData, 'id'> = {
-        evento,
-        usuarioRef: usuarioId,
-        fecha: admin.firestore.Timestamp.now(),
-        detalle: detalleFinal,
-    };
+  const nuevaMetrica: Omit<MetricaData, "id"> = {
+    evento,
+    usuarioRef: usuarioId,
+    fecha: admin.firestore.Timestamp.now(),
+    detalle: detalleFinal,
+  };
 
-    try {
-        await metricaRef.set(nuevaMetrica);
-        functions.logger.info(`[Metrica] Evento '${evento}' registrado para usuario ${usuarioId}. ID: ${metricaRef.id}`);
-        return { success: true, message: "Métrica registrada exitosamente.", metricId: metricaRef.id };
-    } catch (error: any) {
-        functions.logger.error(`Error al registrar métrica para usuario ${usuarioId}:`, error);
-        throw new functions.https.HttpsError("internal", "No se pudo registrar la métrica.", error.message);
-    }
+  try {
+    await metricaRef.set(nuevaMetrica);
+    functions.logger.info(`[Metrica] Evento '${evento}' registrado para usuario ${usuarioId}. ID: ${metricaRef.id}`);
+    return {success: true, message: "Métrica registrada exitosamente.", metricId: metricaRef.id};
+  } catch (error: any) {
+    functions.logger.error(`Error al registrar métrica para usuario ${usuarioId}:`, error);
+    throw new functions.https.HttpsError("internal", "No se pudo registrar la métrica.", error.message);
+  }
 });
 
 export const manageAdminSettings = functions.https.onCall(async (data, context) => {
-    if (!context.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para gestionar la configuración.");
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Debes estar autenticado para gestionar la configuración.");
+  }
+  const {nombreOpcion, valor} = data; // valor can be boolean or undefined
+
+  if (!nombreOpcion || typeof nombreOpcion !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", "Se requiere 'nombreOpcion'.");
+  }
+
+  const settingRef = db.collection("adminPanelSettings").doc(nombreOpcion);
+  const actorId = context.auth.uid;
+  const isAdmin = context.auth.token.admin === true;
+
+  // WRITE operation
+  if (typeof valor === "boolean") {
+    if (!isAdmin) {
+      throw new functions.https.HttpsError("permission-denied", "No tienes permisos para modificar esta configuración.");
     }
-    const { nombreOpcion, valor } = data; // valor can be boolean or undefined
 
-    if (!nombreOpcion || typeof nombreOpcion !== 'string') {
-        throw new functions.https.HttpsError("invalid-argument", "Se requiere 'nombreOpcion'.");
+    try {
+      await settingRef.update({
+        valor: valor,
+        fechaUltimoCambio: admin.firestore.Timestamp.now(),
+      });
+
+      await logActivity(
+        actorId,
+        "admin",
+        "ADMIN_SETTING_UPDATED",
+        `Admin ${actorId} actualizó la configuración '${nombreOpcion}' a '${valor}'.`,
+        {tipo: "adminPanelSetting", id: nombreOpcion},
+        {nuevoValor: valor}
+      );
+
+      return {success: true, message: `Configuración '${nombreOpcion}' actualizada.`};
+    } catch (error: any) {
+      functions.logger.error(`Error al actualizar configuración '${nombreOpcion}':`, error);
+      if (error.code === 5) { // NOT_FOUND error code
+        throw new functions.https.HttpsError("not-found", `La configuración '${nombreOpcion}' no existe.`);
+      }
+      throw new functions.https.HttpsError("internal", "Error al actualizar la configuración.", error.message);
     }
+  } else { // READ operation
+    try {
+      const doc = await settingRef.get();
+      if (!doc.exists) {
+        throw new functions.https.HttpsError("not-found", `La configuración '${nombreOpcion}' no existe.`);
+      }
+      const settingData = doc.data() as AdminPanelSettingData;
 
-    const settingRef = db.collection("adminPanelSettings").doc(nombreOpcion);
-    const actorId = context.auth.uid;
-    const isAdmin = context.auth.token.admin === true;
+      // Log read access for admins for auditing purposes
+      if (isAdmin) {
+        await logActivity(
+          actorId,
+          "admin",
+          "ADMIN_SETTING_READ",
+          `Admin ${actorId} consultó la configuración '${nombreOpcion}'.`,
+          {tipo: "adminPanelSetting", id: nombreOpcion}
+        );
+      }
 
-    // WRITE operation
-    if (typeof valor === 'boolean') {
-        if (!isAdmin) {
-            throw new functions.https.HttpsError("permission-denied", "No tienes permisos para modificar esta configuración.");
-        }
-
-        try {
-            await settingRef.update({
-                valor: valor,
-                fechaUltimoCambio: admin.firestore.Timestamp.now(),
-            });
-
-            await logActivity(
-                actorId,
-                "admin",
-                "ADMIN_SETTING_UPDATED",
-                `Admin ${actorId} actualizó la configuración '${nombreOpcion}' a '${valor}'.`,
-                { tipo: "adminPanelSetting", id: nombreOpcion },
-                { nuevoValor: valor }
-            );
-
-            return { success: true, message: `Configuración '${nombreOpcion}' actualizada.` };
-        } catch (error: any) {
-            functions.logger.error(`Error al actualizar configuración '${nombreOpcion}':`, error);
-            if (error.code === 5) { // NOT_FOUND error code
-                 throw new functions.https.HttpsError("not-found", `La configuración '${nombreOpcion}' no existe.`);
-            }
-            throw new functions.https.HttpsError("internal", "Error al actualizar la configuración.", error.message);
-        }
-    } 
-    // READ operation
-    else {
-        try {
-            const doc = await settingRef.get();
-            if (!doc.exists) {
-                throw new functions.https.HttpsError("not-found", `La configuración '${nombreOpcion}' no existe.`);
-            }
-            const settingData = doc.data() as AdminPanelSettingData;
-            
-            // Log read access for admins for auditing purposes
-            if (isAdmin) {
-                 await logActivity(
-                    actorId,
-                    "admin",
-                    "ADMIN_SETTING_READ",
-                    `Admin ${actorId} consultó la configuración '${nombreOpcion}'.`,
-                    { tipo: "adminPanelSetting", id: nombreOpcion }
-                );
-            }
-            
-            return { success: true, valor: settingData.valor };
-        } catch (error: any) {
-             functions.logger.error(`Error al leer configuración '${nombreOpcion}':`, error);
-             if (error instanceof functions.https.HttpsError) throw error;
-             throw new functions.https.HttpsError("internal", "Error al consultar la configuración.", error.message);
-        }
+      return {success: true, valor: settingData.valor};
+    } catch (error: any) {
+      functions.logger.error(`Error al leer configuración '${nombreOpcion}':`, error);
+      if (error instanceof functions.https.HttpsError) throw error;
+      throw new functions.https.HttpsError("internal", "Error al consultar la configuración.", error.message);
     }
+  }
 });
-    
