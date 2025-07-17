@@ -609,14 +609,13 @@ export interface AdminPanelSettingData {
   fechaUltimoCambio: admin.firestore.Timestamp;
 }
 
-
 /**
  * Helper para enviar notificaciones push a un usuario o prestador.
  * @param {string} userId - El UID del destinatario.
  * @param {"usuario" | "prestador"} userType - El tipo de destinatario.
  * @param {string} title - El título de la notificación.
  * @param {string} body - El cuerpo del mensaje de la notificación.
- * @param {Object<string, string>} [data] - Datos adicionales para el payload.
+ * @param {Record<string, string>} [data] - Datos adicionales para el payload.
  * @return {Promise<void>} Una promesa que se resuelve cuando se completa.
  */
 async function sendNotification(
@@ -640,17 +639,17 @@ async function sendNotification(
     const payload = {notification: {title, body}, data};
     try {
       await admin.messaging().sendToDevice(tokens, payload);
-      const logMessage = `[NotificationHelper] Notificación enviada a ` +
+      const logMessage = "[NotificationHelper] Notificación enviada a " +
         `${userType} ${userId}.`;
       functions.logger.info(logMessage);
     } catch (error) {
-      const errorMessage = `[NotificationHelper] Error enviando ` +
+      const errorMessage = "[NotificationHelper] Error enviando " +
         `notificación a ${userType} ${userId}:`;
       functions.logger.error(errorMessage, error);
     }
   } else {
     const logMessage = `[NotificationHelper] ${userType} ${userId} ` +
-      `no tiene tokens FCM.`;
+      "no tiene tokens FCM.";
     functions.logger.log(logMessage);
   }
 }
@@ -661,7 +660,7 @@ async function sendNotification(
  * @param {("usuario" | "prestador" | "sistema" | "admin")} actorRol Rol.
  * @param {ActivityLogAction} accion El tipo de acción realizada.
  * @param {string} descripcion Descripción legible de la acción.
- * @param {{tipo: string; id: string}} [entidadAfectada] Entidad afectada.
+ * @param {({tipo: string; id: string}) | undefined} entidadAfectada Entidad.
  * @param {Record<string, unknown>} [detallesAdicionales] Datos extra.
  * @return {Promise<void>} Una promesa que se resuelve al completar el registro.
  */
@@ -993,7 +992,7 @@ export const onServiceStatusChangeSendNotification = functions.firestore
               const nombrePrestador =
                 prestadorDoc.exists ? providerData?.nombre ||
                 "El prestador" : "El prestador";
-              const reminderMsg = `Recordatorio: Tu servicio ` +
+              const reminderMsg = "Recordatorio: Tu servicio " +
                 `"${serviceTitle}" con ${nombrePrestador} es mañana ` +
                 `a las ${newValue.serviceTime}.`;
               const reminderData: Omit<Recordatorio, "id"> = {
@@ -1019,7 +1018,7 @@ export const onServiceStatusChangeSendNotification = functions.firestore
                 {tipo: "recordatorio", id: reminderRef.id});
             }
           } catch (e) {
-            functions.logger.error(`Error al parsear fecha/hora para ` +
+            functions.logger.error("Error al parsear fecha/hora para " +
               `servicio ${solicitudId}`, e);
           }
         }
@@ -1038,8 +1037,8 @@ export const onServiceStatusChangeSendNotification = functions.firestore
       case "cancelada_usuario":
         targetUserId = prestadorId; targetUserType = "prestador";
         tituloNotif = "Cita Cancelada por Usuario";
-        cuerpoNotif = `La cita para "${serviceTitle}" ha sido ` +
-          `cancelada por el usuario.`;
+        cuerpoNotif = "La cita para " + `"${serviceTitle}"` + " ha sido " +
+          "cancelada por el usuario.";
         break;
       case "en_camino_proveedor":
         targetUserId = usuarioId; targetUserType = "usuario";
@@ -1055,12 +1054,12 @@ export const onServiceStatusChangeSendNotification = functions.firestore
         targetUserId = usuarioId; targetUserType = "usuario";
         tituloNotif = "Servicio Completado por Prestador";
         cuerpoNotif = `El prestador ha marcado "${serviceTitle}" como ` +
-          `completado. Por favor, confirma y califica.`;
+          "completado. Por favor, confirma y califica.";
         break;
       case "completado_por_usuario":
         targetUserId = prestadorId; targetUserType = "prestador";
         tituloNotif = "¡Servicio Confirmado por Usuario!";
-        cuerpoNotif = `El usuario ha confirmado la finalización de ` +
+        cuerpoNotif = "El usuario ha confirmado la finalización de " +
           `"${serviceTitle}". ¡Ya puedes calificarlo!`;
         break;
       }
@@ -1076,8 +1075,8 @@ export const onServiceStatusChangeSendNotification = functions.firestore
       const montoMontoCobrado = (newValue.montoCobrado || newValue.precio || 0);
       const montoParaMensaje =
         montoLiberado?.toFixed(2) || montoMontoCobrado.toFixed(2);
-      cuerpoNotif = `El pago para el servicio "${serviceTitle}" ha sido ` +
-        `liberado. Monto: $${montoParaMensaje}.`;
+      cuerpoNotif = "El pago para el servicio " + `"${serviceTitle}"` +
+        ` ha sido liberado. Monto: $${montoParaMensaje}.`;
       sendStdNotification = true;
     }
 
@@ -1102,7 +1101,7 @@ export const logSolicitudServicioChanges = functions.firestore
 
     if (!beforeData || !afterData) {
       const logMsg = `[LogTrigger ${solicitudId}] Datos antes o después ` +
-        `no disponibles.`;
+        "no disponibles.";
       functions.logger.warn(logMsg);
       return null;
     }
@@ -1161,7 +1160,7 @@ export const logSolicitudServicioChanges = functions.firestore
     if (!beforeData.calificacionUsuario && afterData.calificacionUsuario) {
       const descLog = `Usuario ${afterData.usuarioId} calificó servicio ` +
         `${solicitudId} con ${afterData.calificacionUsuario.estrellas} ` +
-        `estrellas.`;
+        "estrellas.";
       await logActivity(afterData.usuarioId, "usuario", "CALIFICACION_USUARIO",
         descLog, {tipo: "solicitud_servicio", id: solicitudId}, {
           estrellas: afterData.calificacionUsuario.estrellas,
@@ -1170,7 +1169,7 @@ export const logSolicitudServicioChanges = functions.firestore
     }
 
     if (!beforeData.calificacionPrestador && afterData.calificacionPrestador) {
-      const descLog = `Prestador ${afterData.prestadorId} calificó a ` +
+      const descLog = "Prestador " + `${afterData.prestadorId}` + " calificó a " +
         `usuario ${afterData.usuarioId} en servicio ${solicitudId}.`;
       await logActivity(
         afterData.prestadorId, "prestador", "CALIFICACION_PRESTADOR", descLog,
@@ -1220,14 +1219,14 @@ export const logSolicitudServicioChanges = functions.firestore
               });
             }
           });
-          const logDesc = `Relación entre ${afterData.usuarioId} y ` +
-            `${afterData.prestadorId} actualizada.`;
+          const logDesc = "Relación entre " + `${afterData.usuarioId}` +
+            ` y ${afterData.prestadorId} actualizada.`;
           const logDetails =
             {tipo: "relacionUsuarioPrestador", id: relationshipId};
           await logActivity("sistema", "sistema",
             "RELACION_USUARIO_PRESTADOR_ACTUALIZADA", logDesc, logDetails);
         } catch (e) {
-          functions.logger.error(`Error actualizando relación ` +
+          functions.logger.error("Error actualizando relación " +
             `para ${relationshipId}:`, e);
         }
       }
@@ -1285,7 +1284,7 @@ export const logSolicitudServicioChanges = functions.firestore
           const userHistoryEntry: HistorialPuntoUsuario = {
             servicioId: solicitudId, tipo: "ganados", puntos: pointsEarned,
             fecha: now,
-            descripcion: `Puntos por servicio: ` +
+            descripcion: "Puntos por servicio: " +
               `${afterData.titulo || solicitudId.substring(0, 6)}`,
           };
           const userDoc = await userRef.get();
@@ -1352,8 +1351,8 @@ export const logSolicitudServicioChanges = functions.firestore
             await fundRef.set(
               {totalAcumulado: aportefondo, registros: [fundHistoryEntry]});
           }
-          const desc = `Aporte de ${aportefondo.toFixed(2)} al fondo ` +
-            `de fidelidad por servicio ${solicitudId}.`;
+          const desc = "Aporte de " + `${aportefondo.toFixed(2)}` +
+            ` al fondo de fidelidad por servicio ${solicitudId}.`;
           await logActivity("sistema", "sistema", "FONDO_FIDELIDAD_APORTE",
             desc, {tipo: "fondo_fidelidad", id: "global"},
             {monto: aportefondo, servicioId});
@@ -1547,5 +1546,3 @@ export const acceptQuotationAndCreateServiceRequest = functions.https.onCall(
     }
   });
 
-
-    
