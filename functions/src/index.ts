@@ -1,3 +1,4 @@
+
 // src/functions/src/index.ts
 import * as admin from "firebase-admin";
 import {
@@ -6,9 +7,9 @@ import {
   CallableRequest,
   onRequest,
 } from "firebase-functions/v2/https";
-import { onDocumentUpdated } from "firebase-functions/v2/firestore";
-import { z } from "zod";
-import { ai } from "./genkit";
+import {onDocumentUpdated} from "firebase-functions/v2/firestore";
+import {z} from "zod";
+import {ai} from "./genkit";
 
 // Interfaces y Constantes
 import {
@@ -40,15 +41,27 @@ const db = admin.firestore();
 
 // --- START: Genkit Implementation of interpretarBusqueda ---
 const interpretarBusquedaInputSchema = z.object({
-  searchQuery: z.string().describe("El texto de búsqueda del usuario a analizar."),
+  searchQuery: z
+    .string()
+    .describe("El texto de búsqueda del usuario a analizar."),
 });
 
 const interpretarBusquedaOutputSchema = z.object({
-  tipo: z.enum(["prestador", "negocio_fijo"]).describe("El tipo de servicio. 'prestador' para servicios móviles/personas, " +
-    "'negocio_fijo' para locales físicos."),
-  categoria: z.string().describe("La categoría del servicio en español y minúsculas " +
-    "(ej: plomería, electricidad)."),
-  idiomaDetectado: z.string().describe("El código ISO 639-1 del idioma detectado (ej: es, en)."),
+  tipo: z
+    .enum(["prestador", "negocio_fijo"])
+    .describe(
+      "El tipo de servicio. 'prestador' para servicios móviles/personas, " +
+        "'negocio_fijo' para locales físicos.",
+    ),
+  categoria: z
+    .string()
+    .describe(
+      "La categoría del servicio en español y minúsculas " +
+        "(ej: plomería, electricidad).",
+    ),
+  idiomaDetectado: z
+    .string()
+    .describe("El código ISO 639-1 del idioma detectado (ej: es, en)."),
 });
 
 const interpretarBusquedaPrompt = ai.definePrompt({
@@ -77,7 +90,6 @@ const interpretarBusquedaFlow = ai.defineFlow(
     return output;
   },
 );
-
 
 export const interpretarBusqueda = onRequest(
   {cors: true},
@@ -109,7 +121,7 @@ export const interpretarBusqueda = onRequest(
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
  * @param {string} actorId - UID del actor que realiza la acción.
- * @param {("usuario"|"prestador"|"sistema"|"admin")} actorRol - Rol del actor.
+ * @param {"usuario"|"prestador"|"sistema"|"admin"} actorRol - Rol del actor.
  * @param {ActivityLogAction} accion - El tipo de acción realizada.
  * @param {string} descripcion - Descripción legible de la acción.
  * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad afectada.
@@ -121,7 +133,7 @@ async function sendNotification(
   userType: "usuario" | "prestador",
   title: string,
   body: string,
-  data?: { [key: string]: string },
+  data?: Record<string, string>,
 ): Promise<void> {
   const userCol = userType === "usuario" ? "usuarios" : "prestadores";
   try {
@@ -156,20 +168,20 @@ async function sendNotification(
 
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
- * @param {string} actorId - UID del actor que realiza la acción.
- * @param {("usuario"|"prestador"|"sistema"|"admin")} actorRol - Rol del actor.
- * @param {ActivityLogAction} accion - El tipo de acción realizada.
- * @param {string} descripcion - Descripción legible de la acción.
- * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad afectada.
- * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra.
- * @return {Promise<void>} Una promesa que se resuelve al completar el registro.
+ * @param actorId UID del actor que realiza la acción.
+ * @param actorRol Rol del actor.
+ * @param accion El tipo de acción realizada.
+ * @param descripcion Descripción legible de la acción.
+ * @param entidadAfectada Entidad afectada.
+ * @param detallesAdicionales Datos extra.
+ * @return Una promesa que se resuelve al completar el registro.
  */
 async function logActivity(
   actorId: string,
   actorRol: "usuario" | "prestador" | "sistema" | "admin",
   accion: ActivityLogAction,
   descripcion: string,
-  entidadAfectada?: { tipo: string; id: string },
+  entidadAfectada?: {tipo: string; id: string},
   detallesAdicionales?: Record<string, unknown>,
 ): Promise<void> {
   try {
@@ -293,7 +305,10 @@ export const createImmediateServiceRequest = onCall(
     }
 
     // Validation
-    const providerDoc = await db.collection("prestadores").doc(providerId as string).get();
+    const providerDoc = await db
+      .collection("prestadores")
+      .doc(providerId as string)
+      .get();
     if (!providerDoc.exists) {
       throw new HttpsError(
         "not-found",
@@ -320,7 +335,8 @@ export const createImmediateServiceRequest = onCall(
       .limit(1);
     const userBlocksProviderSnap = await userBlocksProviderQuery.get();
     if (!userBlocksProviderSnap.empty) {
-      const msg = "No puedes contratar a este proveedor porque lo has bloqueado.";
+      const msg =
+        "No puedes contratar a este proveedor porque lo has bloqueado.";
       throw new HttpsError("permission-denied", msg);
     }
     const providerBlocksUserQuery = db
@@ -341,13 +357,20 @@ export const createImmediateServiceRequest = onCall(
       status: "pagada",
       createdAt: now,
       updatedAt: now,
-      titulo: "Servicio inmediato: " +
-        `${(selectedServices as {title: string}[]).map((s: { title: string }) => s.title).join(", ")}`,
+      titulo:
+        "Servicio inmediato: " +
+        `${(selectedServices as {title: string}[])
+          .map((s: {title: string}) => s.title)
+          .join(", ")}`,
       serviceType: "fixed",
-      selectedFixedServices: selectedServices as { serviceId: string, title: string, price: number }[],
+      selectedFixedServices: selectedServices as {
+        serviceId: string;
+        title: string;
+        price: number;
+      }[],
       totalAmount: totalAmount as number,
       montoCobrado: montoFinal,
-      location: location as {lat: number, lng: number},
+      location: location as {lat: number; lng: number},
       metodoPago: metodoPago as "tarjeta" | "efectivo" | "transferencia" | "wallet",
       paymentStatus: "retenido_para_liberacion",
       actorDelCambioId: usuarioId,
@@ -375,7 +398,8 @@ export const createImmediateServiceRequest = onCall(
       {solicitudId: nuevaSolicitudRef.id},
     );
 
-    const successMsg = "Servicio solicitado exitosamente. " + `Total: $${montoFinal.toFixed(2)}.`;
+    const successMsg =
+      "Servicio solicitado exitosamente. " + `Total: $${montoFinal.toFixed(2)}.`;
 
     return {
       success: true,
@@ -392,7 +416,9 @@ export const onServiceStatusChangeSendNotification = onDocumentUpdated(
     const newValue = event.data?.after.data() as ServiceRequest;
     const previousValue = event.data?.before.data() as ServiceRequest;
 
-    if (!newValue || !previousValue) return;
+    if (!newValue || !previousValue) {
+      return;
+    }
 
     if (
       newValue.status === previousValue.status &&
@@ -415,145 +441,169 @@ export const onServiceStatusChangeSendNotification = onDocumentUpdated(
 
     if (newValue.status !== previousValue.status) {
       switch (newValue.status) {
-      case "agendado":
-        if (
-          newValue.isRecurringAttempt &&
-          newValue.reactivationOfferedBy === "usuario"
-        ) {
-          targetUserId = prestadorId;
-          targetUserType = "prestador";
-          tituloNotif = "Solicitud de Reactivación de Servicio";
-          cuerpoNotif =
+        case "agendado":
+          if (
+            newValue.isRecurringAttempt &&
+            newValue.reactivationOfferedBy === "usuario"
+          ) {
+            targetUserId = prestadorId;
+            targetUserType = "prestador";
+            tituloNotif = "Solicitud de Reactivación de Servicio";
+            cuerpoNotif =
               `El usuario ${usuarioId} quiere reactivar el ` +
               `servicio "${serviceTitle}".`;
-        } else if (
-          !newValue.isRecurringAttempt &&
-          previousValue.status !== "pendiente_confirmacion_usuario"
-        ) {
-          targetUserId = prestadorId;
-          targetUserType = "prestador";
-          tituloNotif = "Nueva Solicitud de Servicio";
-          cuerpoNotif = `Has recibido una nueva solicitud para "${serviceTitle}"`;
-        } else {
-          sendStdNotification = false;
-        }
-        break;
-      case "pendiente_confirmacion_usuario":
-        if (
-          newValue.isRecurringAttempt &&
-          newValue.reactivationOfferedBy === "prestador"
-        ) {
+          } else if (
+            !newValue.isRecurringAttempt &&
+            previousValue.status !== "pendiente_confirmacion_usuario"
+          ) {
+            targetUserId = prestadorId;
+            targetUserType = "prestador";
+            tituloNotif = "Nueva Solicitud de Servicio";
+            cuerpoNotif = `Has recibido una nueva solicitud para "${serviceTitle}"`;
+          } else {
+            sendStdNotification = false;
+          }
+          break;
+        case "pendiente_confirmacion_usuario":
+          if (
+            newValue.isRecurringAttempt &&
+            newValue.reactivationOfferedBy === "prestador"
+          ) {
+            targetUserId = usuarioId;
+            targetUserType = "usuario";
+            tituloNotif = "Oferta de Reactivación de Servicio";
+            const message = `El prestador ${prestadorId} te ofrece ` +
+              `reactivar el servicio "${serviceTitle}".`;
+            cuerpoNotif = message;
+          } else {
+            sendStdNotification = false;
+          }
+          break;
+        case "confirmada_prestador":
           targetUserId = usuarioId;
           targetUserType = "usuario";
-          tituloNotif = "Oferta de Reactivación de Servicio";
-          const message = `El prestador ${prestadorId} te ofrece ` +
-            `reactivar el servicio "${serviceTitle}".`;
-          cuerpoNotif = message;
-        } else {
-          sendStdNotification = false;
-        }
-        break;
-      case "confirmada_prestador":
-        targetUserId = usuarioId;
-        targetUserType = "usuario";
-        tituloNotif = "¡Cita Confirmada!";
-        cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido confirmada.`;
+          tituloNotif = "¡Cita Confirmada!";
+          cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido confirmada.`;
 
-        if (newValue.serviceDate && newValue.serviceTime) {
-          try {
-            const [year, month, day] = newValue.serviceDate
-              .split("-")
-              .map(Number);
-            const [hour, minute] = newValue.serviceTime
-              .split(":")
-              .map(Number);
-            const serviceDateTime = new Date(year, month - 1, day, hour, minute);
-            const reminderTime = new Date(
-              serviceDateTime.getTime() -
+          if (newValue.serviceDate && newValue.serviceTime) {
+            try {
+              const [year, month, day] = newValue.serviceDate
+                .split("-")
+                .map(Number);
+              const [hour, minute] = newValue.serviceTime.split(":").map(Number);
+              const serviceDateTime = new Date(
+                year,
+                month - 1,
+                day,
+                hour,
+                minute,
+              );
+              const reminderTime = new Date(
+                serviceDateTime.getTime() -
                   HORAS_ANTES_RECORDATORIO_SERVICIO * 60 * 60 * 1000,
-            );
+              );
 
-            if (reminderTime.getTime() > Date.now()) {
-              const prestadorDoc = await db
-                .collection("prestadores")
-                .doc(prestadorId)
-                .get();
-              const providerData = prestadorDoc.data() as ProviderData;
-              const nombrePrestador =
-                  prestadorDoc.exists ?
-                    providerData?.nombre || "El prestador" :
-                    "El prestador";
-              const reminderMsg = "Recordatorio: Tu servicio " + `"${serviceTitle}" con ${nombrePrestador} es mañana ` + `a las ${newValue.serviceTime}.`;
-              const reminderData: Omit<Recordatorio, "id"> = {
-                usuarioId,
-                servicioId: solicitudId,
-                tipo: "recordatorio_servicio",
-                mensaje: reminderMsg,
-                fechaProgramada:
+              if (reminderTime.getTime() > Date.now()) {
+                const prestadorDoc = await db
+                  .collection("prestadores")
+                  .doc(prestadorId)
+                  .get();
+                const providerData = prestadorDoc.data() as ProviderData;
+                const nombrePrestador = prestadorDoc.exists ?
+                  providerData?.nombre || "El prestador" :
+                  "El prestador";
+                const reminderMsg =
+                  "Recordatorio: Tu servicio " +
+                  `"${serviceTitle}" con ${nombrePrestador} es mañana ` +
+                  `a las ${newValue.serviceTime}.`;
+                const reminderData: Omit<Recordatorio, "id"> = {
+                  usuarioId,
+                  servicioId: solicitudId,
+                  tipo: "recordatorio_servicio",
+                  mensaje: reminderMsg,
+                  fechaProgramada:
                     admin.firestore.Timestamp.fromDate(reminderTime),
-                enviado: false,
-                datosAdicionales: {
-                  tituloServicio: serviceTitle,
-                  nombrePrestador,
-                  fechaHoraServicioIso: serviceDateTime.toISOString(),
-                },
-              };
-              const reminderRef = await db
-                .collection("recordatorios")
-                .add(reminderData);
-              const logDesc = `Recordatorio programado para servicio ${solicitudId}.`;
-              await logActivity(
-                "sistema",
-                "sistema",
-                "NOTIFICACION_RECORDATORIO_PROGRAMADA",
-                logDesc,
-                {tipo: "recordatorio", id: reminderRef.id},
+                  enviado: false,
+                  datosAdicionales: {
+                    tituloServicio: serviceTitle,
+                    nombrePrestador,
+                    fechaHoraServicioIso: serviceDateTime.toISOString(),
+                  },
+                };
+                const reminderRef = await db
+                  .collection("recordatorios")
+                  .add(reminderData);
+                const logDesc = `Recordatorio programado para servicio ${solicitudId}.`;
+                await logActivity(
+                  "sistema",
+                  "sistema",
+                  "NOTIFICACION_RECORDATORIO_PROGRAMADA",
+                  logDesc,
+                  {tipo: "recordatorio", id: reminderRef.id},
+                );
+              }
+            } catch (e) {
+              console.error(
+                "Error al parsear fecha/hora para " + `servicio ${solicitudId}`,
+                e,
               );
             }
-          } catch (e) {
-            console.error( "Error al parsear fecha/hora para " + `servicio ${solicitudId}`, e);
           }
+          break;
+        case "rechazada_prestador":
+        case "cancelada_prestador": {
+          const statusText =
+            newValue.status === "rechazada_prestador" ?
+              "rechazada" :
+              "cancelada";
+          targetUserId = usuarioId;
+          targetUserType = "usuario";
+          tituloNotif = `Cita ${
+            statusText.charAt(0).toUpperCase() + statusText.slice(1)
+          }`;
+          cuerpoNotif =
+            `Tu cita para "${serviceTitle}" ha sido ` +
+            `${statusText} por el prestador.`;
+          break;
         }
-        break;
-      case "rechazada_prestador":
-      case "cancelada_prestador": {
-        const statusText = newValue.status === "rechazada_prestador" ? "rechazada" : "cancelada";
-        targetUserId = usuarioId;
-        targetUserType = "usuario";
-        tituloNotif = `Cita ${statusText.charAt(0).toUpperCase() + statusText.slice(1)}`;
-        cuerpoNotif = `Tu cita para "${serviceTitle}" ha sido ` + `${statusText} por el prestador.`;
-        break;
-      }
-      case "cancelada_usuario":
-        targetUserId = prestadorId;
-        targetUserType = "prestador";
-        tituloNotif = "Cita Cancelada por Usuario";
-        cuerpoNotif = "La cita para " + `"${serviceTitle}"` + " ha sido " + "cancelada por el usuario.";
-        break;
-      case "en_camino_proveedor":
-        targetUserId = usuarioId;
-        targetUserType = "usuario";
-        tituloNotif = "¡Tu Proveedor está en Camino!";
-        cuerpoNotif = `El proveedor para "${serviceTitle}" está en camino.`;
-        break;
-      case "servicio_iniciado":
-        targetUserId = usuarioId;
-        targetUserType = "usuario";
-        tituloNotif = "Servicio Iniciado";
-        cuerpoNotif = `El proveedor ha iniciado el servicio "${serviceTitle}".`;
-        break;
-      case "completado_por_prestador":
-        targetUserId = usuarioId;
-        targetUserType = "usuario";
-        tituloNotif = "Servicio Completado por Prestador";
-        cuerpoNotif = `El prestador ha marcado "${serviceTitle}" como ` + "completado. Por favor, confirma y califica.";
-        break;
-      case "completado_por_usuario":
-        targetUserId = prestadorId;
-        targetUserType = "prestador";
-        tituloNotif = "¡Servicio Confirmado por Usuario!";
-        cuerpoNotif = "El usuario ha confirmado la finalización de " + `"${serviceTitle}". ¡Ya puedes calificarlo!`;
-        break;
+        case "cancelada_usuario":
+          targetUserId = prestadorId;
+          targetUserType = "prestador";
+          tituloNotif = "Cita Cancelada por Usuario";
+          cuerpoNotif =
+            "La cita para " +
+            `"${serviceTitle}"` +
+            " ha sido " +
+            "cancelada por el usuario.";
+          break;
+        case "en_camino_proveedor":
+          targetUserId = usuarioId;
+          targetUserType = "usuario";
+          tituloNotif = "¡Tu Proveedor está en Camino!";
+          cuerpoNotif = `El proveedor para "${serviceTitle}" está en camino.`;
+          break;
+        case "servicio_iniciado":
+          targetUserId = usuarioId;
+          targetUserType = "usuario";
+          tituloNotif = "Servicio Iniciado";
+          cuerpoNotif = `El proveedor ha iniciado el servicio "${serviceTitle}".`;
+          break;
+        case "completado_por_prestador":
+          targetUserId = usuarioId;
+          targetUserType = "usuario";
+          tituloNotif = "Servicio Completado por Prestador";
+          cuerpoNotif =
+            `El prestador ha marcado "${serviceTitle}" como ` +
+            "completado. Por favor, confirma y califica.";
+          break;
+        case "completado_por_usuario":
+          targetUserId = prestadorId;
+          targetUserType = "prestador";
+          tituloNotif = "¡Servicio Confirmado por Usuario!";
+          cuerpoNotif =
+            "El usuario ha confirmado la finalización de " +
+            `"${serviceTitle}". ¡Ya puedes calificarlo!`;
+          break;
       }
     }
 
@@ -570,7 +620,10 @@ export const onServiceStatusChangeSendNotification = onDocumentUpdated(
       const montoMontoCobrado = newValue.montoCobrado || newValue.precio || 0;
       const montoParaMensaje =
         montoLiberado?.toFixed(2) || montoMontoCobrado.toFixed(2);
-      cuerpoNotif = "El pago para el servicio " + `"${serviceTitle}"` + ` ha sido liberado. Monto: $${montoParaMensaje}.`;
+      cuerpoNotif =
+        "El pago para el servicio " +
+        `"${serviceTitle}"` +
+        ` ha sido liberado. Monto: $${montoParaMensaje}.`;
       sendStdNotification = true;
     }
 
@@ -581,11 +634,17 @@ export const onServiceStatusChangeSendNotification = onDocumentUpdated(
       tituloNotif &&
       cuerpoNotif
     ) {
-      await sendNotification(targetUserId, targetUserType, tituloNotif, cuerpoNotif, {
-        solicitudId,
-        nuevoEstado: newValue.status,
-        nuevoEstadoPago: newValue.paymentStatus || "N/A",
-      });
+      await sendNotification(
+        targetUserId,
+        targetUserType,
+        tituloNotif,
+        cuerpoNotif,
+        {
+          solicitudId,
+          nuevoEstado: newValue.status,
+          nuevoEstadoPago: newValue.paymentStatus || "N/A",
+        },
+      );
     }
   },
 );
@@ -766,7 +825,9 @@ export const logSolicitudServicioChanges = onDocumentUpdated(
       const montoTotalPagadoPorUsuario =
         afterData.montoCobrado || afterData.precio || 0;
       const detallesFinancierosNuevos: DetallesFinancieros = {
-        ...(afterData.detallesFinancieros as DetallesFinancieros | Record<string, never>),
+        ...(afterData.detallesFinancieros as
+          | DetallesFinancieros
+          | Record<string, never>),
       };
 
       if (
@@ -821,7 +882,9 @@ export const logSolicitudServicioChanges = onDocumentUpdated(
             tipo: "ganados",
             puntos: pointsEarned,
             fecha: now,
-            descripcion: "Puntos por servicio: " + `${afterData.titulo || solicitudId.substring(0, 6)}`,
+            descripcion:
+              "Puntos por servicio: " +
+              `${afterData.titulo || solicitudId.substring(0, 6)}`,
           };
           const userDoc = await userRef.get();
           if (userDoc.exists) {
@@ -899,7 +962,9 @@ export const logSolicitudServicioChanges = onDocumentUpdated(
               registros: [fundHistoryEntry],
             });
           }
-          const desc = `Aporte de ${aportefondo.toFixed(2)} al fondo de fidelidad por servicio ${solicitudId}.`;
+          const desc = `Aporte de ${aportefondo.toFixed(
+            2,
+          )} al fondo de fidelidad por servicio ${solicitudId}.`;
           await logActivity(
             "sistema",
             "sistema",
@@ -1004,21 +1069,28 @@ export const acceptQuotationAndCreateServiceRequest = onCall(
       return await db.runTransaction(async (transaction) => {
         const cotizacionDoc = await transaction.get(cotizacionRef);
         if (!cotizacionDoc.exists) {
-          throw new HttpsError( "not-found", `Cotización ${cotizacionId} no encontrada.`);
+          throw new HttpsError(
+            "not-found",
+            `Cotización ${cotizacionId} no encontrada.`,
+          );
         }
-        const cotizacionData = cotizacionDoc.data() as SolicitudCotizacionData;
+        const cotizacionData =
+          cotizacionDoc.data() as SolicitudCotizacionData;
 
         if (cotizacionData.usuarioId !== usuarioId) {
-          throw new HttpsError( "permission-denied", "No eres el propietario.");
+          throw new HttpsError("permission-denied", "No eres el propietario.");
         }
         if (cotizacionData.estado !== "precio_propuesto_al_usuario") {
-          throw new HttpsError( "failed-precondition", "Estado inválido.");
+          throw new HttpsError("failed-precondition", "Estado inválido.");
         }
         if (
           typeof cotizacionData.precioSugerido !== "number" ||
           cotizacionData.precioSugerido <= 0
         ) {
-          throw new HttpsError( "failed-precondition", "Precio sugerido inválido.");
+          throw new HttpsError(
+            "failed-precondition",
+            "Precio sugerido inválido.",
+          );
         }
 
         const {prestadorId} = cotizacionData;
@@ -1027,10 +1099,16 @@ export const acceptQuotationAndCreateServiceRequest = onCall(
           transaction.get(db.collection("usuarios").doc(usuarioId)),
         ]);
         if (!prestadorDoc.exists || prestadorDoc.data()?.isBlocked) {
-          throw new HttpsError( "failed-precondition", "Este proveedor no puede ser contratado.");
+          throw new HttpsError(
+            "failed-precondition",
+            "Este proveedor no puede ser contratado.",
+          );
         }
         if (usuarioDoc.data()?.isBlocked) {
-          throw new HttpsError("failed-precondition", "Tu cuenta está bloqueada.");
+          throw new HttpsError(
+            "failed-precondition",
+            "Tu cuenta está bloqueada.",
+          );
         }
 
         const userBlocksProviderQuery = db
@@ -1038,9 +1116,12 @@ export const acceptQuotationAndCreateServiceRequest = onCall(
           .where("bloqueadorRef", "==", usuarioId)
           .where("bloqueadoRef", "==", prestadorId)
           .limit(1);
-        const userBlocksProviderSnap = await transaction.get( userBlocksProviderQuery );
+        const userBlocksProviderSnap = await transaction.get(
+          userBlocksProviderQuery,
+        );
         if (!userBlocksProviderSnap.empty) {
-          const msg = "No puedes contratar a este proveedor porque lo has bloqueado.";
+          const msg =
+            "No puedes contratar a este proveedor porque lo has bloqueado.";
           throw new HttpsError("permission-denied", msg);
         }
         const providerBlocksUserQuery = db
@@ -1048,16 +1129,24 @@ export const acceptQuotationAndCreateServiceRequest = onCall(
           .where("bloqueadorRef", "==", prestadorId)
           .where("bloqueadoRef", "==", usuarioId)
           .limit(1);
-        const providerBlocksUserSnap = await transaction.get( providerBlocksUserQuery, );
+        const providerBlocksUserSnap = await transaction.get(
+          providerBlocksUserQuery,
+        );
         if (!providerBlocksUserSnap.empty) {
-          throw new HttpsError( "permission-denied", "No puedes contratar a este proveedor.");
+          throw new HttpsError(
+            "permission-denied",
+            "No puedes contratar a este proveedor.",
+          );
         }
 
         const nuevaSolicitudRef = db.collection("solicitudes_servicio").doc();
         const ahora = admin.firestore.Timestamp.now();
         const tomorrow = new Date(ahora.toDate());
         tomorrow.setDate(tomorrow.getDate() + 1);
-        const serviceDateStr = `${tomorrow.getFullYear()}-` + `${(tomorrow.getMonth() + 1).toString().padStart(2, "0")}-` + `${tomorrow.getDate().toString().padStart(2, "0")}`;
+        const serviceDateStr =
+          `${tomorrow.getFullYear()}-` +
+          `${(tomorrow.getMonth() + 1).toString().padStart(2, "0")}-` +
+          `${tomorrow.getDate().toString().padStart(2, "0")}`;
 
         const nuevaSolicitudData: Omit<ServiceRequest, "id"> = {
           usuarioId: usuarioId,
@@ -1091,7 +1180,8 @@ export const acceptQuotationAndCreateServiceRequest = onCall(
           {tipo: "solicitud_cotizacion", id: cotizacionId},
           {},
         );
-        const notifBody = "El usuario ha aceptado tu cotización y se ha generado una nueva solicitud de servicio.";
+        const notifBody =
+          "El usuario ha aceptado tu cotización y se ha generado una nueva solicitud de servicio.";
         await sendNotification(
           prestadorId,
           "prestador",
@@ -1111,7 +1201,9 @@ export const acceptQuotationAndCreateServiceRequest = onCall(
         `Error al aceptar cotización ${cotizacionId}:`,
         httpsError,
       );
-      if (httpsError.code) throw httpsError;
+      if (httpsError.code) {
+        throw httpsError;
+      }
       throw new HttpsError(
         "internal",
         "Error al procesar.",
