@@ -2,9 +2,13 @@
 import type {Metadata} from 'next';
 import { Montserrat } from 'next/font/google';
 import './globals.css';
-import { AppHeader } from '@/components/layout/AppHeader'; // Directly import AppHeader
+import dynamic from 'next/dynamic';
 import { Toaster } from "@/components/ui/toaster";
-import { cn } from '@/lib/utils'; // Import cn utility
+import { cn } from '@/lib/utils';
+
+// Dynamically import the AppHeader to optimize chunk loading
+const AppHeader = dynamic(() => import('@/components/layout/AppHeader').then(mod => mod.AppHeader), { ssr: false });
+
 
 const montserrat = Montserrat({
   subsets: ['latin'],
