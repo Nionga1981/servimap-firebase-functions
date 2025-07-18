@@ -1,5 +1,6 @@
 
 // src/functions/src/index.ts
+import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {
   onCall,
@@ -119,14 +120,13 @@ export const interpretarBusqueda = onRequest(
 // --- Helper Functions ---
 
 /**
- * Registra una acción importante en la bitácora de eventos del sistema.
- * @param {string} actorId - UID del actor que realiza la acción.
- * @param {"usuario"|"prestador"|"sistema"|"admin"} actorRol - Rol del actor.
- * @param {ActivityLogAction} accion - El tipo de acción realizada.
- * @param {string} descripcion - Descripción legible de la acción.
- * @param {{tipo: string; id: string}} [entidadAfectada] - Entidad afectada.
- * @param {Record<string, unknown>} [detallesAdicionales] - Datos extra.
- * @return {Promise<void>} Una promesa que se resuelve al completar el registro.
+ * Envía una notificación push a un usuario o prestador.
+ * @param {string} userId - El UID del destinatario.
+ * @param {"usuario" | "prestador"} userType - El tipo de destinatario.
+ * @param {string} title - El título de la notificación.
+ * @param {string} body - El cuerpo del mensaje de la notificación.
+ * @param {Record<string, string>} [data] - Datos adicionales para el payload.
+ * @return {Promise<void>} Una promesa que se resuelve cuando se completa.
  */
 async function sendNotification(
   userId: string,
@@ -168,13 +168,13 @@ async function sendNotification(
 
 /**
  * Registra una acción importante en la bitácora de eventos del sistema.
- * @param actorId UID del actor que realiza la acción.
- * @param actorRol Rol del actor.
- * @param accion El tipo de acción realizada.
- * @param descripcion Descripción legible de la acción.
- * @param entidadAfectada Entidad afectada.
- * @param detallesAdicionales Datos extra.
- * @return Una promesa que se resuelve al completar el registro.
+ * @param {string} actorId UID del actor que realiza la acción.
+ * @param {"usuario"|"prestador"|"sistema"|"admin"} actorRol Rol del actor.
+ * @param {ActivityLogAction} accion El tipo de acción realizada.
+ * @param {string} descripcion Descripción legible de la acción.
+ * @param {{tipo: string; id: string}} [entidadAfectada] Entidad afectada.
+ * @param {Record<string, unknown>} [detallesAdicionales] Datos extra.
+ * @return {Promise<void>} Una promesa que se resuelve al completar el registro.
  */
 async function logActivity(
   actorId: string,
@@ -203,6 +203,7 @@ async function logActivity(
     });
   }
 }
+
 
 // --- Cloud Functions ---
 
@@ -600,9 +601,9 @@ export const onServiceStatusChangeSendNotification = onDocumentUpdated(
           targetUserId = prestadorId;
           targetUserType = "prestador";
           tituloNotif = "¡Servicio Confirmado por Usuario!";
-          cuerpoNotif =
-            "El usuario ha confirmado la finalización de " +
+          const notifBody = "El usuario ha confirmado la finalización de " +
             `"${serviceTitle}". ¡Ya puedes calificarlo!`;
+          cuerpoNotif = notifBody;
           break;
       }
     }
@@ -620,10 +621,9 @@ export const onServiceStatusChangeSendNotification = onDocumentUpdated(
       const montoMontoCobrado = newValue.montoCobrado || newValue.precio || 0;
       const montoParaMensaje =
         montoLiberado?.toFixed(2) || montoMontoCobrado.toFixed(2);
-      cuerpoNotif =
-        "El pago para el servicio " +
-        `"${serviceTitle}"` +
+      const notifBody = "El pago para el servicio " + `"${serviceTitle}"` +
         ` ha sido liberado. Monto: $${montoParaMensaje}.`;
+      cuerpoNotif = notifBody;
       sendStdNotification = true;
     }
 
@@ -646,6 +646,7 @@ export const onServiceStatusChangeSendNotification = onDocumentUpdated(
         },
       );
     }
+    return null;
   },
 );
 
@@ -980,6 +981,7 @@ export const logSolicitudServicioChanges = onDocumentUpdated(
     if (Object.keys(updatesToServiceRequest).length > 1) {
       await event.data?.after.ref.update(updatesToServiceRequest);
     }
+    return null;
   },
 );
 
@@ -1045,6 +1047,7 @@ export const onQuotationResponseNotifyUser = onDocumentUpdated(
         {},
       );
     }
+    return null;
   },
 );
 
@@ -1195,7 +1198,7 @@ export const acceptQuotationAndCreateServiceRequest = onCall(
           servicioId: nuevaSolicitudRef.id,
         };
       });
-    } catch (error: unknown) {
+    } catch (error: any) {
       const httpsError = error as HttpsError;
       console.error(
         `Error al aceptar cotización ${cotizacionId}:`,
