@@ -1,6 +1,6 @@
 
 // src/lib/firebase.ts
-import { initializeApp, getApp, getApps } from 'firebase/app';
+import { initializeApp, getApp, getApps, FirebaseApp } from 'firebase/app';
 // Import other Firebase services as needed, e.g., getAuth, getFirestore
 // For FCM, you would also import getMessaging, getToken, onMessage from 'firebase/messaging'
 
@@ -15,7 +15,7 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-let app;
+let app: FirebaseApp;
 if (!getApps().length) {
   app = initializeApp(firebaseConfig);
 } else {

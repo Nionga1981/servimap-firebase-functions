@@ -149,7 +149,7 @@ const MapContentComponent = React.memo(({
         mapTypeControl: false,
         fullscreenControl: false,
         zoomControl: true,
-        zoomControlOptions: { position: (typeof window !== 'undefined' && window.google?.maps?.ControlPosition.RIGHT_BOTTOM) },
+        zoomControlOptions: { position: (typeof window !== 'undefined' && window.google?.maps?.ControlPosition.RIGHT_BOTTOM) || undefined },
         rotateControl: false,
         scaleControl: false,
         clickableIcons: false,
@@ -244,7 +244,7 @@ const MapContentComponent = React.memo(({
             title={provider.name}
             onClick={() => onMarkerClick(provider)}
             icon={markerIconConfig || { 
-              path: (typeof window !== 'undefined' && window.google?.maps?.SymbolPath.CIRCLE), // Fallback
+              path: (typeof window !== 'undefined' && window.google?.maps?.SymbolPath.CIRCLE) || 0, // Fallback to CIRCLE
               scale: 6,
               fillColor: "#008080",
               fillOpacity: 1,
@@ -596,11 +596,13 @@ export function MapDisplay() {
                     provider: providerInRoute,
                     status: isViewOnlyRoute ? "Visualizando ruta" : "En camino",
                     eta: "Ruta no disponible",
-                    currentLocation: providerInRoute.ubicacionExacta,
+                    currentLocation: providerInRoute.ubicacionExacta || providerInRoute.ubicacionAproximada,
                     isRouteViewOnly: isViewOnlyRoute,
                   });
                 setDisplayedProviders([providerInRoute]); 
-                setMapCenter(providerInRoute.ubicacionExacta);
+                if (providerInRoute.ubicacionExacta) {
+                  setMapCenter(providerInRoute.ubicacionExacta);
+                }
               }
             }
           );

@@ -400,6 +400,7 @@ export const mockPromocionesFidelidad: PromocionFidelidad[] = [
     tipoDescuento: 'porcentaje',
     valorDescuento: 10,
     activo: true,
+    codigoPromocional: 'PLUMBING10',
     serviciosAplicables: ['plumbing'],
   },
   {
@@ -409,6 +410,7 @@ export const mockPromocionesFidelidad: PromocionFidelidad[] = [
     tipoDescuento: 'monto_fijo',
     valorDescuento: 50,
     activo: true,
+    codigoPromocional: 'SAVE50',
   },
   {
     id: 'promo_sorteo_premium',
@@ -426,6 +428,7 @@ export const mockPromocionesFidelidad: PromocionFidelidad[] = [
     tipoDescuento: 'monto_fijo',
     valorDescuento: 5,
     activo: false,
+    codigoPromocional: 'INACTIVE',
   },
 ];
 
@@ -515,6 +518,7 @@ export const mockZonasPreferentes: ZonaPreferente[] = [
 export const mockRecomendaciones: Recomendacion[] = [
   {
     id: 'rec1',
+    type: 're-hire-suggestion',
     usuarioId: 'currentUserDemoId',
     prestadorId: 'gardener1',
     categoria: 'gardening',
@@ -524,6 +528,7 @@ export const mockRecomendaciones: Recomendacion[] = [
   },
   {
     id: 'rec2',
+    type: 're-hire-suggestion',
     usuarioId: 'currentUserDemoId',
     prestadorId: 'cleaner1',
     categoria: 'cleaning',
@@ -533,6 +538,7 @@ export const mockRecomendaciones: Recomendacion[] = [
   },
   {
     id: 'rec3', // For another user
+    type: 're-hire-suggestion',
     usuarioId: 'standardUserDemoId',
     prestadorId: 'plumber1',
     categoria: 'plumbing',

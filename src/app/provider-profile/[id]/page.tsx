@@ -22,6 +22,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Star, MapPin, Briefcase, DollarSign, Clock, CalendarDays, Mail, ChevronLeft, ShoppingBag, Image as ImageIcon, Video, BookOpen, CheckCircle, X, Tag, Heart, Loader2 } from 'lucide-react';
 import { createServiceRequest, createImmediateRequest } from '@/services/requestService'; 
 import { recomendarNegocio } from '@/services/recommendationService';
+import { PaymentForm } from '@/components/payment/PaymentForm';
+import { PaymentStatus, PaymentStatusType } from '@/components/payment/PaymentStatus';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
@@ -77,6 +79,12 @@ export default function ProviderProfilePage() {
   const [recommendationComment, setRecommendationComment] = useState('');
   const [isRecommending, setIsRecommending] = useState(false);
 
+  // Estados para pagos
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatusType | null>(null);
+  const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
+  const [serviceRequestId, setServiceRequestId] = useState<string | null>(null);
+
 
   console.log(`[ProviderProfilePage] Rendering for providerId: ${providerId}`);
 
@@ -86,8 +94,8 @@ export default function ProviderProfilePage() {
       setProvider(foundProvider);
       console.log('[ProviderProfilePage] Provider data in useEffect:', foundProvider);
 
-      if (foundProvider?.location && USER_FIXED_LOCATION) {
-        const dist = calculateDistance(USER_FIXED_LOCATION.lat, USER_FIXED_LOCATION.lng, foundProvider.location.lat, foundProvider.location.lng);
+      if (foundProvider?.ubicacionAproximada && USER_FIXED_LOCATION) {
+        const dist = calculateDistance(USER_FIXED_LOCATION.lat, USER_FIXED_LOCATION.lng, foundProvider.ubicacionAproximada.lat, foundProvider.ubicacionAproximada.lng);
         setDistanceFromUser(dist.toFixed(1));
       }
       setReviewCount(Math.floor(Math.random() * 200) + 10); // Simulación
@@ -132,6 +140,14 @@ export default function ProviderProfilePage() {
       toast({ title: "Ningún servicio seleccionado", description: "Por favor, selecciona al menos un servicio para contratar.", variant: "destructive" });
       return;
     }
+
+    // If payment method is card, show payment form
+    if (paymentMethod === 'tarjeta') {
+      setShowPaymentForm(true);
+      return;
+    }
+
+    // For non-card payments, proceed with original flow
     setIsSubmittingImmediate(true);
     toast({ title: "Procesando Solicitud...", description: "Enviando tu solicitud de servicio inmediato..." });
     
@@ -166,6 +182,63 @@ export default function ProviderProfilePage() {
     } finally {
          setIsSubmittingImmediate(false);
     }
+  };
+
+  // Payment handlers
+  const handlePaymentSuccess = async (paymentIntentId: string) => {
+    setPaymentIntentId(paymentIntentId);
+    setPaymentStatus('succeeded');
+    setShowPaymentForm(false);
+
+    // Create the service request after successful payment
+    if (!provider || selectedImmediateServicesDetails.length === 0) return;
+
+    try {
+      const payload = {
+        providerId: provider.id,
+        selectedServices: selectedImmediateServicesDetails.map(s => ({ serviceId: s.id, title: s.title, price: s.price })),
+        totalAmount: immediateServiceSubtotal,
+        location: USER_FIXED_LOCATION,
+        metodoPago: 'tarjeta' as const,
+        codigoPromocion: promoCode.trim() || undefined,
+        paymentIntentId, // Include payment information
+      };
+      
+      const result = await createImmediateRequest(payload);
+      setServiceRequestId(result.solicitudId);
+      
+      toast({
+        title: "¡Pago y Solicitud Exitosos!",
+        description: `Tu pago ha sido procesado y el servicio ha sido solicitado. ID: ${result.solicitudId}`,
+        duration: 7000,
+      });
+
+      // Clear the form state
+      setSelectedServices({});
+      setPromoCode('');
+
+    } catch (error: any) {
+      toast({
+        title: "Error Post-Pago",
+        description: error.message || "El pago fue exitoso pero hubo un problema creando la solicitud.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handlePaymentError = (error: string) => {
+    setPaymentStatus('failed');
+    setShowPaymentForm(false);
+    toast({
+      title: "Error en el Pago",
+      description: error,
+      variant: "destructive"
+    });
+  };
+
+  const handleRetryPayment = () => {
+    setPaymentStatus(null);
+    setShowPaymentForm(true);
   };
 
   const handleRequestAppointment = async () => {
@@ -229,7 +302,7 @@ export default function ProviderProfilePage() {
       userId: 'currentUserDemoId', // Simulado
       providerId: provider.id,
       serviceDate: hourlyServiceDate.toISOString().split('T')[0],
-      startTime: hourlyServiceStartTime,
+      serviceTime: hourlyServiceStartTime,
       durationHours: hourlyServiceDuration,
       hourlyRate: provider.hourlyRate,
       estimatedTotal: estimatedHourlyTotal,
@@ -703,6 +776,59 @@ export default function ProviderProfilePage() {
           </CardFooter>
         </CardContent>
       </Card>
+
+      {/* Payment Form Dialog */}
+      <Dialog open={showPaymentForm} onOpenChange={setShowPaymentForm}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Procesar Pago</DialogTitle>
+            <DialogDescription>
+              Total a pagar: ${immediateServiceSubtotal.toFixed(2)} MXN
+            </DialogDescription>
+          </DialogHeader>
+          <PaymentForm
+            amount={immediateServiceSubtotal}
+            currency="mxn"
+            serviceId={selectedImmediateServicesDetails.map(s => s.id).join(',')}
+            serviceTitle={selectedImmediateServicesDetails.map(s => s.title).join(', ')}
+            onSuccess={handlePaymentSuccess}
+            onError={handlePaymentError}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Payment Status Dialog */}
+      <Dialog open={paymentStatus !== null} onOpenChange={() => {
+        setPaymentStatus(null);
+        setPaymentIntentId(null);
+        setServiceRequestId(null);
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Estado del Pago</DialogTitle>
+          </DialogHeader>
+          {paymentStatus && (
+            <PaymentStatus
+              status={paymentStatus}
+              amount={immediateServiceSubtotal}
+              currency="mxn"
+              paymentIntentId={paymentIntentId || undefined}
+              serviceName={selectedImmediateServicesDetails.map(s => s.title).join(', ')}
+              onRetry={paymentStatus === 'failed' ? handleRetryPayment : undefined}
+            />
+          )}
+          <DialogFooter>
+            {paymentStatus === 'succeeded' && serviceRequestId && (
+              <Button onClick={() => router.push(`/?hiredProviderId=${provider?.id}`)}>
+                Ver Estado del Servicio
+              </Button>
+            )}
+            <DialogClose asChild>
+              <Button variant="outline">Cerrar</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

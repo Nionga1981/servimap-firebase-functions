@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from '@/components/ui/card';
-import { AlertCircle, Search, ListFilter, Loader2, MapIcon, Building2 } from 'lucide-react';
+import { AlertCircle, Search, ListFilter, Loader2, MapIcon, Building2, ChevronLeft } from 'lucide-react';
 import type { Service, Provider, Comunidad } from '@/types';
 import { mockProviders, mockComunidades, USER_FIXED_LOCATION } from '@/lib/mockData';
 import { SERVICE_CATEGORIES } from '@/lib/constants';

@@ -43,7 +43,7 @@ const logActivity = (
   actorRol: 'usuario' | 'prestador' | 'sistema' | 'admin',
   accion: ActivityLogAction,
   descripcion: string,
-  entidadAfectada?: { tipo: ActivityLog['entidadAfectada']['tipo'], id: string },
+  entidadAfectada?: { tipo: 'solicitud_servicio' | 'cita' | 'usuario' | 'prestador' | 'pago' | 'solicitud_cotizacion' | 'chat' | 'promocion_fidelidad' | 'fondo_fidelidad' | 'idioma' | 'recordatorio' | 'zona_preferente' | 'ticket_soporte' | 'reporte_servicio' | 'garantia' | 'cancelacion' | 'comunidad' | 'aviso_comunidad' | 'categoria_propuesta' | 'relacionUsuarioPrestador' | 'recomendacion' | 'preguntaComunidad' | 'recomendacionNegocio' | 'respuestaComunidad', id: string },
   detallesAdicionales?: Record<string, any>
 ) => {
   const newLog: ActivityLog = {
@@ -134,6 +134,7 @@ interface ImmediateRequestPayload {
     location: ProviderLocation | { customAddress: string };
     metodoPago: 'tarjeta' | 'efectivo' | 'transferencia' | 'wallet';
     codigoPromocion?: string;
+    paymentIntentId?: string; // For Stripe payment tracking
 }
 
 export const createImmediateRequest = async (payload: ImmediateRequestPayload) => {

@@ -4,11 +4,31 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
+    // === FUNCIONES HELPER ===
+    
+    // Verificar si el usuario está autenticado
     function isAuthenticated() {
       return request.auth != null;
     }
-
+    
+    // Verificar si es el dueño del documento
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Verificar si es admin
+    function isAdmin() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    // Verificar si el usuario existe como usuario o prestador
+    function userExists(userId) {
+      return exists(/databases/$(database)/documents/usuarios/$(userId)) ||
+             exists(/databases/$(database)/documents/prestadores/$(userId));
+    }
+    
+    // Helper functions legacy para compatibilidad
     function isCliente(docData) {
       return isAuthenticated() && request.auth.uid == docData.clienteUid;
     }
@@ -18,7 +38,6 @@ service cloud.firestore {
     }
 
     // Helper function to check if only allowed keys were changed during an update.
-    // dataAfter is request.resource.data, dataBefore is resource.data
     function changedKeysOnly(dataAfter, dataBefore, allowedToChange) {
       let changedKeys = dataAfter.diff(dataBefore).affectedKeys();
       return changedKeys.hasOnly(allowedToChange);
@@ -130,40 +149,152 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // --- Default Deny & Placeholders for other collections ---
-    // It's good practice to have default deny for paths not explicitly matched.
-    // Add rules for other collections (usuarios, prestadores, comunidades, etc.) here.
-    // Example:
-    // match /usuarios/{userId} {
-    //   allow read: if isAuthenticated();
-    //   allow write: if isAuthenticated() && request.auth.uid == userId;
-    // }
-    // match /prestadores/{providerId} {
-    //  allow read: if true; // Public profiles
-    //  allow write: if isAuthenticated() && request.auth.uid == providerId;
-    // }
-    // match /comunidades/{communityId} {
-    //  allow read: if true;
-    //  // Example: Only ambassador can update basic community details
-    //  allow update: if isAuthenticated() && resource.data.embajador_uid == request.auth.uid &&
-    //                   request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nombre', 'descripcion', 'tipo', 'ubicacion', 'bannerComunitario', 'tags', 'reglasComunidad', 'updatedAt', 'lastActivity']);
-    //  // Create/delete rules would be more complex, likely handled by Cloud Functions or specific admin roles.
-    // }
-    // match /comunidades/{communityId}/avisos/{avisoId} {
-    //  allow read: if true;
-    //  // Only ambassador can write to their community's notices
-    //  allow write: if isAuthenticated() && get(/databases/$(database)/documents/comunidades/$(communityId)).data.embajador_uid == request.auth.uid;
-    // }
-    // match /comunidades/{communityId}/recomendaciones/{recomendacionId} {
-    //  allow read: if true; // Or if member of community
-    //  allow create: if isAuthenticated(); // And member of community (would require checking parent doc)
-    //  // Update/delete rules would be more specific (e.g., author can edit/delete their post/response)
-    // }
-
-    // Fallback rule to deny access to any path not explicitly matched above
-     match /{document=**} {
-       allow read, write: if false;
-     }
+    // === COLECCIONES PRINCIPALES ===
+    
+    // Usuarios - Lectura propia y de admins, escritura propia limitada
+    match /usuarios/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) && 
+                      // No pueden modificar campos críticos
+                      !('referidoPor' in request.resource.data.diff(resource.data).changedKeys()) &&
+                      !('membershipLevel' in request.resource.data.diff(resource.data).changedKeys());
+      allow create: if isAuthenticated();
+    }
+    
+    // Prestadores - Similar a usuarios
+    match /prestadores/{providerId} {
+      allow read: if isOwner(providerId) || isAdmin();
+      allow write: if isOwner(providerId) &&
+                      !('referidoPor' in request.resource.data.diff(resource.data).changedKeys()) &&
+                      !('rating' in request.resource.data.diff(resource.data).changedKeys());
+      allow create: if isAuthenticated();
+    }
+    
+    // === SISTEMA DE WALLET ===
+    
+    // Wallets - Solo lectura propia, escritura solo por Cloud Functions
+    match /wallets/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if false; // Solo Cloud Functions pueden modificar
+    }
+    
+    // Transacciones de Wallet - Solo lectura propia, escritura solo por CF
+    match /wallet_transactions/{transactionId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow write: if false; // Solo Cloud Functions
+    }
+    
+    // === SISTEMA DE COMISIONES ===
+    
+    // Comisiones Unificadas - Lectura para embajadores, escritura solo por CF
+    match /commissions/{commissionId} {
+      allow read: if isOwner(resource.data.ambassadorId) || isAdmin();
+      allow write: if false; // Solo Cloud Functions
+    }
+    
+    // Bonos de Lealtad - Solo lectura propia y escritura por CF
+    match /loyalty_bonuses/{bonusId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow write: if false; // Solo Cloud Functions
+    }
+    
+    // Retiros - Lectura propia, escritura solo por CF
+    match /withdrawals/{withdrawalId} {
+      allow read: if isOwner(resource.data.userId) || isAdmin();
+      allow write: if false; // Solo Cloud Functions
+    }
+    
+    // === SERVICIOS Y COTIZACIONES ===
+    
+    // Solicitudes de Servicio - Lectura para involucrados
+    match /service_requests/{serviceId} {
+      allow read: if isOwner(resource.data.usuarioId) || 
+                     isOwner(resource.data.prestadorId) || 
+                     isAdmin();
+      allow write: if (isOwner(resource.data.usuarioId) || 
+                      isOwner(resource.data.prestadorId)) &&
+                      // Campos que solo pueden ser modificados por CF
+                      !('comisionesCalculadas' in request.resource.data.diff(resource.data).changedKeys()) &&
+                      !('detallesFinancieros' in request.resource.data.diff(resource.data).changedKeys()) &&
+                      !('paymentStatus' in request.resource.data.diff(resource.data).changedKeys());
+    }
+    
+    // Cotizaciones - Lectura para involucrados
+    match /solicitudes_cotizacion/{quotationId} {
+      allow read: if isOwner(resource.data.usuarioId) || 
+                     isOwner(resource.data.prestadorId) || 
+                     isAdmin();
+      allow write: if isOwner(resource.data.usuarioId) || 
+                      isOwner(resource.data.prestadorId);
+    }
+    
+    // === LOGS Y AUDITORÍA ===
+    
+    // Activity Logs - Solo lectura para admins
+    match /activity_logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false; // Solo Cloud Functions
+    }
+    
+    // === CONFIGURACIÓN Y METADATA ===
+    
+    // Administradores - Solo lectura para verificación de permisos
+    match /admins/{adminId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Solo configuración manual
+    }
+    
+    // Categorías - Lectura pública
+    match /categorias/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Promociones de Fidelidad - Lectura pública, escritura admin
+    match /promociones_fidelidad/{promoId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Fondo de Fidelidad - Solo lectura admin
+    match /fondoFidelidad/{fundId} {
+      allow read: if isAdmin();
+      allow write: if false; // Solo Cloud Functions
+    }
+    
+    // === NOTIFICACIONES Y RECORDATORIOS ===
+    
+    // Recordatorios - Solo lectura propia
+    match /recordatorios/{recordatorioId} {
+      allow read: if isOwner(resource.data.usuarioId) || isAdmin();
+      allow write: if false; // Solo Cloud Functions
+    }
+    
+    // === SUBCOLECCIONES ===
+    
+    // Historial de puntos de usuario
+    match /usuarios/{userId}/historial_puntos/{entryId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if false; // Solo Cloud Functions
+    }
+    
+    // FCM Tokens (subcolección)
+    match /usuarios/{userId}/fcm_tokens/{tokenId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId);
+    }
+    
+    match /prestadores/{providerId}/fcm_tokens/{tokenId} {
+      allow read: if isOwner(providerId);
+      allow write: if isOwner(providerId);
+    }
+    
+    // === REGLAS POR DEFECTO ===
+    
+    // Denegar todo lo que no esté explícitamente permitido
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }
 
