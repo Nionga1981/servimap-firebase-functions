@@ -10,6 +10,29 @@ import {
 import { defineSecret } from "firebase-functions/params";
 import {onDocumentUpdated} from "firebase-functions/v2/firestore";
 import Stripe from "stripe";
+
+// Import Premium Functions
+export { 
+  checkPremiumStatus,
+  validateFreeUserRestrictions,
+  convertTimezone,
+  setupAutomaticReminders,
+  handleLastMinuteConfirmation,
+  getPremiumRecommendations
+} from './premiumFunctions';
+
+export { 
+  TimezoneManager,
+  MEXICO_TIMEZONES,
+  formatMexicanDateTime
+} from './timezoneUtils';
+
+export { 
+  setupServiceReminders,
+  handleReminderResponse,
+  processScheduledReminders as processReminders,
+  detectProviderDelays as detectDelays
+} from './reminderSystem';
 // import {z} from "zod";
 // Interfaces y Constantes
 import {
@@ -1728,7 +1751,7 @@ export const processServiceCommissions = onCall(
             ambassadorId: commissionCalc.embajadorPrestador,
             amount: commissionCalc.comisionEmbajadorPrestador,
             type: "provider_ambassador",
-            transactionId: creditResult.transactionId
+            transactionId: `commission-${serviceRequestId}-provider-amb`
           });
 
           // Verificar bonus de lealtad para embajador del prestador
@@ -1798,7 +1821,7 @@ export const processServiceCommissions = onCall(
             ambassadorId: commissionCalc.embajadorUsuario,
             amount: commissionCalc.comisionEmbajadorUsuario,
             type: "user_ambassador",
-            transactionId: creditResult.transactionId
+            transactionId: `commission-${serviceRequestId}-provider-amb`
           });
 
           // Verificar bonus de lealtad para embajador del usuario
@@ -5802,7 +5825,7 @@ export const createCustomQuotation = onCall<{
 
       // 7. Enviar notificación al usuario
       try {
-        const userDoc = await db.collection("users").doc(chatData.userId).get();
+        const userDoc = await db.collection("users").doc(actualUserId || "").get();
         if (userDoc.exists) {
           const userData = userDoc.data() as UserData;
           if (userData.fcmTokens && userData.fcmTokens.length > 0) {
@@ -5833,10 +5856,10 @@ export const createCustomQuotation = onCall<{
         "prestador",
         "QUOTATION_CREATED" as ActivityLogAction,
         `📋 Cotización creada por $${totalAmount.toFixed(2)}`,
-        { tipo: "quotation_creation", quotationId: result.quotationId },
+        { tipo: "quotation_creation", id: result.quotationId },
         {
           chatId,
-          userId: chatData.userId,
+          userId: actualUserId,
           totalAmount,
           itemCount: quotationItems.length,
           breakdown
@@ -5969,7 +5992,7 @@ export const acceptRejectQuotation = onCall<{
             message: `✅ Cotización aceptada. Servicio programado.`,
             messageType: "system",
             createdAt: now,
-            readBy: {},
+            readBy: [],
             metadata: {
               quotationId,
               serviceRequestId: serviceRequestRef.id
@@ -6015,7 +6038,7 @@ export const acceptRejectQuotation = onCall<{
             message: `❌ Cotización rechazada. El chat está disponible para nueva cotización.`,
             messageType: "system",
             createdAt: now,
-            readBy: {}
+            readBy: []
           };
 
           transaction.set(messageRef, systemMessage);
@@ -6047,9 +6070,7 @@ export const acceptRejectQuotation = onCall<{
             message: `💬 Contraoferta: $${counterOffer.toFixed(2)}${userMessage ? `\n${userMessage}` : ''}`,
             messageType: "text",
             createdAt: now,
-            readBy: {
-              user: now
-            }
+            readBy: [userId || ""]
           };
 
           transaction.set(messageRef, negotiationMessage);
@@ -6113,7 +6134,7 @@ export const acceptRejectQuotation = onCall<{
         "usuario",
         activityAction as ActivityLogAction,
         `${action === 'accept' ? '✅' : action === 'reject' ? '❌' : '💬'} Cotización ${action} por $${quotationData.totalAmount.toFixed(2)}`,
-        { tipo: `quotation_${action}`, quotationId },
+        { tipo: `quotation_${action}`, id: quotationId },
         {
           chatId: quotationData.chatId,
           providerId: quotationData.providerId,
@@ -6205,10 +6226,7 @@ export const handleAsyncQuotation = onCall<{
           status: "active",
           createdAt: now,
           updatedAt: now,
-          unreadCount: {
-            user: 0,
-            provider: 1 // Notificación pendiente para prestador
-          },
+          // unreadCount removed - not part of ChatData interface
           metadata: {
             urgency,
             preferredTime,
@@ -6312,7 +6330,7 @@ export const handleAsyncQuotation = onCall<{
             userId,
             serviceType,
             urgency,
-            scheduledFor: admin.firestore.Timestamp.fromMillis(now.toMillis() + (30 * 60 * 1000)), // 30 minutos
+            scheduledFor: admin.firestore.Timestamp.fromMillis(now.toMillis() + (60 * 60 * 1000)), // 1 hora después
             sent: false,
             createdAt: now
           };
@@ -6404,3 +6422,12 @@ export * from "./communityFunctions";
 
 // Export Schedule and Premium Functions
 export * from "./scheduleAndPremiumFunctions";
+
+// Emergency Functions - Discrecional para prestadores
+export {
+  getEmergencyProviders,
+  updateEmergencyConfig,
+  toggleEmergencyAvailability,
+  requestEmergencyService,
+  respondToEmergencyRequest
+} from "./emergencyFunctions";

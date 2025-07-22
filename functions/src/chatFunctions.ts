@@ -307,7 +307,7 @@ export const moderateChatWithAI = onCall<{
           detectedViolations,
           reason: actionResult.reason,
           warningMessage: actionResult.warningMessage,
-          action: actionResult.action,
+          action: actionResult.action as "allow" | "allow_with_warning" | "temporary_block" | "suspension",
           severityScore,
           violationDetails
         };
@@ -661,7 +661,7 @@ export const sendChatMessage = onCall<{
       // 1. Validaciones de seguridad
       // Importar funciones de seguridad
       const { validateChatPermissions, checkRateLimit, encryptSensitiveMessage } = 
-        await import("./securityFunctions");
+        await import("./securityFunctions.js");
 
       // Validar permisos
       const permissionCheck = await validateChatPermissions(chatId, senderId, 'write');
@@ -698,7 +698,7 @@ export const sendChatMessage = onCall<{
       
       if (messageType === 'text') {
         try {
-          const moderateChatWithAI = (await import("./chatFunctions")).moderateChatWithAI;
+          const moderateChatWithAI = (await import("./chatFunctions.js")).moderateChatWithAI;
           const moderationRequest = await moderateChatWithAI.run({
             data: {
               chatId,
@@ -745,9 +745,7 @@ export const sendChatMessage = onCall<{
         message: encryptionResult.encrypted ? '[MENSAJE_ENCRIPTADO]' : message,
         mediaUrl,
         // Campos de seguridad
-        encrypted: encryptionResult.encrypted || false,
-        encryptedContent: encryptionResult.encryptedContent,
-        encryptionMethod: encryptionResult.encryptionMethod,
+        // Remove encrypted fields as they're not part of ChatMessage interface
         moderationScore: moderationResult.severityScore || 0,
         rateLimitRemaining: rateLimitCheck.remaining
       };

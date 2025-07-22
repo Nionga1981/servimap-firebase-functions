@@ -17,8 +17,8 @@ const montserrat = Montserrat({
 });
 
 export const metadata: Metadata = {
-  title: 'ConectaPro',
-  description: 'Conecta con profesionales calificados en tiempo real.',
+  title: 'ServiMap',
+  description: 'Conecta con prestadores de servicios verificados en tiempo real.',
 };
 
 export default function RootLayout({

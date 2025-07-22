@@ -1,6 +1,6 @@
 // src/app/client/page.tsx
 
-import { MapDisplay } from '@/components/client/MapDisplay';
+import { MapDisplay } from '@/components/map/MapDisplay';
 import { RehireRecommendations } from '@/components/client/RehireRecommendations';
 import { Separator } from '@/components/ui/separator';
 

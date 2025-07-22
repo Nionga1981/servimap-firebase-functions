@@ -55,6 +55,17 @@ export const createCommunity = onCall<{
     console.log(`🏘️ Creando comunidad: ${name} por usuario ${creatorId}`);
 
     try {
+      // Verificar que el usuario sea Premium
+      const userDoc = await db.collection("users").doc(creatorId).get();
+      const userData = userDoc.data();
+
+      if (!userData?.isPremium) {
+        throw new HttpsError(
+          "permission-denied", 
+          "La creación de comunidades está disponible solo para usuarios Premium"
+        );
+      }
+
       const now = admin.firestore.Timestamp.now();
 
       // 1. Validaciones
@@ -1412,7 +1423,7 @@ export const addBusinessToCommunity = onCall<{
       // 6. Crear actividad en el feed
       await createFeedActivity(communityId, "business_verified", businessId, {
         businessName: businessDoc.data()?.businessName || "Negocio",
-        consumeLocalPoints,
+        consumeLocalPoints: consumeLocalProgram.pointsPerPurchase || 0,
         offersDiscount: consumeLocalProgram.discountForMembers > 0
       });
 
@@ -1478,13 +1489,13 @@ export const searchLocalProviders = onCall<{
 
       const allProviders = (await Promise.all(providerPromises))
         .filter(provider => provider !== null)
-        .sort((a, b) => b.combinedScore - a.combinedScore)
+        .sort((a, b) => (b?.combinedScore || 0) - (a?.combinedScore || 0))
         .slice(0, limit);
 
       return {
         success: true,
         providers: allProviders,
-        localProvidersCount: allProviders.filter(p => p.localVerification.isLocalResident).length
+        localProvidersCount: allProviders.filter(p => p && (p as any).localVerification?.isLocalResident).length
       };
 
     } catch (error) {
@@ -1665,10 +1676,10 @@ export const moderateContent = onCall<{
       });
 
       // 5. Log de acción de moderación
-      await logModerationAction(reportData.communityId, {
+      await logModerationAction(reportData?.communityId || "", {
         actionType: action,
-        targetId: reportData.contentId,
-        targetType: reportData.contentType,
+        targetId: reportData?.contentId || "",
+        targetType: reportData?.contentType || "",
         moderatorId,
         reason: reason || `Acción automática: ${action}`,
         duration,

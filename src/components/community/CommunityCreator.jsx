@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { functions, auth } from '../../lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { functions, auth, db } from '../../lib/firebase';
 
 const CommunityCreator = ({ onCommunityCreated }) => {
   const [formData, setFormData] = useState({
@@ -41,7 +43,17 @@ const CommunityCreator = ({ onCommunityCreated }) => {
 
   useEffect(() => {
     getCurrentLocation();
-    checkPremiumStatus();
+    
+    // Monitor authentication state changes
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        checkPremiumStatus();
+      } else {
+        setIsPremium(false);
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const getCurrentLocation = () => {
@@ -70,9 +82,25 @@ const CommunityCreator = ({ onCommunityCreated }) => {
   };
 
   const checkPremiumStatus = async () => {
-    // TODO: Implementar verificación de membresía premium
-    // Por ahora simulamos que es premium
-    setIsPremium(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        setIsPremium(false);
+        return;
+      }
+
+      // Obtener datos del usuario desde Firestore
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        setIsPremium(userData.isPremium || false);
+      } else {
+        setIsPremium(false);
+      }
+    } catch (error) {
+      console.error('Error checking premium status:', error);
+      setIsPremium(false);
+    }
   };
 
   const handleInputChange = (e) => {

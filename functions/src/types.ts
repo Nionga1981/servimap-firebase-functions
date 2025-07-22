@@ -1341,6 +1341,101 @@ export interface CommunityActivityLog {
 }
 
 // Community Search and Discovery
+// Provider Schedules - Estructura detallada de horarios
+export interface ProviderSchedule {
+  id?: string;
+  providerId: string;
+  workingHours: {
+    monday: { start: string; end: string; isAvailable: boolean };
+    tuesday: { start: string; end: string; isAvailable: boolean };
+    wednesday: { start: string; end: string; isAvailable: boolean };
+    thursday: { start: string; end: string; isAvailable: boolean };
+    friday: { start: string; end: string; isAvailable: boolean };
+    saturday: { start: string; end: string; isAvailable: boolean };
+    sunday: { start: string; end: string; isAvailable: boolean };
+  };
+  timeSlots: Array<{
+    datetime: admin.firestore.Timestamp;
+    duration: number; // minutos
+    isBooked: boolean;
+    serviceRequestId?: string;
+    price: number;
+    isEmergencySlot: boolean;
+  }>;
+  emergencyAvailable: boolean;
+  maxDailyServices: number;
+  bufferTime: number; // minutos entre servicios
+  timezone: string;
+  lastUpdated: admin.firestore.Timestamp;
+}
+
+// Scheduled Services - Servicios programados con seguimiento completo
+export interface ScheduledService {
+  id?: string;
+  userId: string;
+  providerId: string;
+  serviceType: string;
+  scheduledDateTime: admin.firestore.Timestamp;
+  estimatedDuration: number;
+  status: 'pending_confirmation' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
+  isRecurring: boolean;
+  recurringServiceId?: string;
+  isEmergency: boolean;
+  location: admin.firestore.GeoPoint;
+  notes?: string;
+  reminders: {
+    sent24h: boolean;
+    sent2h: boolean;
+    sent30min: boolean;
+  };
+  createdAt: admin.firestore.Timestamp;
+  confirmedAt?: admin.firestore.Timestamp;
+}
+
+// Premium Analytics - Analytics avanzados con predicciones
+export interface PremiumAnalyticsData {
+  id?: string;
+  userId: string;
+  lastAnalysis: admin.firestore.Timestamp;
+  spendingData: {
+    totalLifetimeSpent: number;
+    monthlyAverage: number;
+    favoriteCategories: string[];
+    peakUsageMonths: string[];
+  };
+  predictions: {
+    nextServicePrediction: {
+      serviceType: string;
+      estimatedDate: admin.firestore.Timestamp;
+      confidence: number;
+    };
+    budgetForecast: {
+      nextMonth: number;
+      nextQuarter: number;
+      yearEnd: number;
+    };
+  };
+  recommendations: {
+    costSavings: Array<{
+      tip: string;
+      potentialSavings: number;
+      actionType: string;
+    }>;
+    recurringOpportunities: Array<{
+      serviceType: string;
+      frequency: string;
+      estimatedSavings: number;
+    }>;
+    providerRecommendations: Array<{
+      providerId: string;
+      name: string;
+      reason: string;
+      rating: number;
+    }>;
+  };
+  generatedAt: admin.firestore.Timestamp;
+}
+
 export interface CommunitySearchIndex {
   id?: string;
   communityId: string;
@@ -1756,8 +1851,162 @@ export const PREMIUM_LIMITS = {
   }
 } as const;
 
-export const EMERGENCY_RESPONSE_TIMES = {
-  HIGH: 60, // 1 hour
-  CRITICAL: 30, // 30 minutes
-  LIFE_THREATENING: 15 // 15 minutes
+// EMERGENCY_RESPONSE_TIMES constant removed - no guaranteed response times for emergency services
+
+// ============================================
+// SISTEMA DE EMERGENCIAS DISCRECIONALES
+// ============================================
+
+// Configuración de emergencias por prestador (voluntaria)
+export interface EmergencyConfig {
+  id?: string;
+  providerId: string;
+  
+  // Estado principal
+  enabled: boolean; // Si ofrece servicios de emergencia
+  availableNow: boolean; // Toggle inmediato de disponibilidad
+  
+  // Configuración personalizada
+  customSurcharge: number; // Sobrecargo personalizado (20%-200%)
+  emergencyTypes: string[]; // Tipos de emergencia que atiende
+  responseTime: string; // Tiempo de respuesta comprometido en minutos
+  maxDistance: number; // Distancia máxima que cubre
+  description?: string; // Descripción adicional
+  
+  // Metadata
+  lastUpdated: admin.firestore.Timestamp;
+  lastToggle?: admin.firestore.Timestamp;
+  createdAt: admin.firestore.Timestamp;
+}
+
+// Solicitud de emergencia de usuario
+export interface EmergencyRequest {
+  id?: string;
+  userId: string;
+  providerId: string;
+  
+  // Detalles del servicio
+  serviceType: string;
+  urgencyLevel: 'high' | 'critical';
+  userLocation: admin.firestore.GeoPoint;
+  description?: string;
+  
+  // Estado y tiempos
+  status: 'pending_response' | 'accepted' | 'rejected' | 'completed' | 'cancelled';
+  requestedAt: admin.firestore.Timestamp;
+  responseDeadline: admin.firestore.Timestamp;
+  acceptedAt?: admin.firestore.Timestamp;
+  rejectedAt?: admin.firestore.Timestamp;
+  
+  // Precios y confirmaciones
+  totalPrice: number;
+  customSurcharge: number;
+  acknowledgedSurcharge: boolean; // Usuario aceptó el sobrecargo
+  estimatedResponseTime: string;
+  
+  // Respuesta del prestador
+  estimatedArrival?: string;
+  rejectionReason?: string;
+  
+  createdAt: admin.firestore.Timestamp;
+  updatedAt: admin.firestore.Timestamp;
+}
+
+// Prestador disponible para emergencias (resultado de búsqueda)
+export interface EmergencyProvider {
+  providerId: string;
+  name: string;
+  
+  // Ubicación y distancia
+  distance: number;
+  location: { lat: number; lng: number };
+  
+  // Precios
+  basePrice: number;
+  customSurcharge: number;
+  emergencyPrice: number;
+  
+  // Disponibilidad
+  isAvailableNow: boolean;
+  estimatedResponseTime: string;
+  emergencyTypes: string[];
+  description: string;
+  
+  // Calificaciones
+  rating: number;
+  reviewCount: number;
+  
+  // Contacto
+  phone?: string;
+}
+
+// Historial de configuraciones de emergencia (auditoría)
+export interface EmergencyConfigHistory {
+  id?: string;
+  providerId: string;
+  action: 'enabled' | 'disabled' | 'updated';
+  previousConfig?: EmergencyConfig;
+  newConfig: EmergencyConfig;
+  timestamp: admin.firestore.Timestamp;
+}
+
+// Log de disponibilidad para analytics
+export interface EmergencyAvailabilityLog {
+  id?: string;
+  providerId: string;
+  availableNow: boolean;
+  timestamp: admin.firestore.Timestamp;
+  source: 'manual_toggle' | 'system_update' | 'schedule_change';
+}
+
+// Tipos de emergencia disponibles
+export type EmergencyType = 
+  | 'plumbing'      // Plomería
+  | 'electrical'    // Electricidad  
+  | 'locksmith'     // Cerrajería
+  | 'appliance'     // Electrodomésticos
+  | 'hvac'          // Aire acondicionado/calefacción
+  | 'cleaning'      // Limpieza de emergencia
+  | 'security'      // Seguridad
+  | 'glass'         // Vidrios
+  | 'general';      // General
+
+// Estados posibles de solicitud de emergencia
+export type EmergencyRequestStatus = 
+  | 'pending_response'  // Esperando respuesta del prestador
+  | 'accepted'          // Aceptada por el prestador
+  | 'rejected'          // Rechazada por el prestador
+  | 'completed'         // Servicio completado
+  | 'cancelled';        // Cancelada por el usuario
+
+// Niveles de urgencia
+export type EmergencyUrgencyLevel = 'high' | 'critical';
+
+// Constantes del sistema de emergencias discrecionales
+export const EMERGENCY_SYSTEM_CONSTANTS = {
+  MIN_SURCHARGE_PERCENT: 20,
+  MAX_SURCHARGE_PERCENT: 200,
+  MIN_RESPONSE_TIME_MINUTES: 15,
+  MAX_DISTANCE_KM: 50,
+  DEFAULT_RESPONSE_TIME: '30',
+  DEFAULT_MAX_DISTANCE: 15,
+  SEARCH_TIMEOUT_MINUTES: 5,
+  MAX_PROVIDERS_RETURNED: 10
+} as const;
+
+// Mapping de categorías de servicio a tipos de emergencia
+export const SERVICE_TO_EMERGENCY_TYPE_MAP: Record<string, EmergencyType> = {
+  'plumbing': 'plumbing',
+  'plumber': 'plumbing',
+  'electrical': 'electrical',
+  'electrician': 'electrical',
+  'locksmith': 'locksmith',
+  'appliance_repair': 'appliance',
+  'hvac': 'hvac',
+  'air_conditioning': 'hvac',
+  'heating': 'hvac',
+  'cleaning': 'cleaning',
+  'security': 'security',
+  'glass_repair': 'glass',
+  'window_repair': 'glass'
 } as const;

@@ -68,7 +68,7 @@ export async function validateChatPermissions(
     }
 
     // 4. Verificar permisos específicos por acción
-    if (action === 'write' && userModerationStatus.restrictions?.includes('no_messaging')) {
+    if (action === 'write' && userModerationStatus?.restrictions?.includes('no_messaging')) {
       return { allowed: false, reason: "Usuario sin permisos de escritura" };
     }
 
@@ -325,7 +325,7 @@ export const cleanupInactiveChats = onSchedule({
     
     await db.collection("cleanupErrors").add({
       type: 'inactive_chats_cleanup',
-      error: error.message,
+      error: error instanceof Error ? error.message : String(error),
       timestamp: admin.firestore.Timestamp.now()
     });
   }
@@ -515,32 +515,32 @@ export const generateSecurityAuditReport = onCall<{
         const data = doc.data();
         data.violations?.forEach((violation: any) => {
           const type = violation.type;
-          report.moderationStats.violationsByType[type] = 
-            (report.moderationStats.violationsByType[type] || 0) + 1;
+          (report.moderationStats.violationsByType as any)[type] = 
+            ((report.moderationStats.violationsByType as any)[type] || 0) + 1;
         });
       });
       
       moderationActionsSnapshot.docs.forEach(doc => {
         const action = doc.data().action;
-        report.moderationStats.actionsByType[action] = 
-          (report.moderationStats.actionsByType[action] || 0) + 1;
+        (report.moderationStats.actionsByType as any)[action] = 
+          ((report.moderationStats.actionsByType as any)[action] || 0) + 1;
       });
       
       rateLimitSnapshot.docs.forEach(doc => {
         const action = doc.data().action;
-        report.rateLimitStats.actionsByType[action] = 
-          (report.rateLimitStats.actionsByType[action] || 0) + 1;
+        (report.rateLimitStats.actionsByType as any)[action] = 
+          ((report.rateLimitStats.actionsByType as any)[action] || 0) + 1;
       });
       
       deletedChatsSnapshot.docs.forEach(doc => {
         const reason = doc.data().reason;
-        report.cleanupStats.deletionReasons[reason] = 
-          (report.cleanupStats.deletionReasons[reason] || 0) + 1;
+        (report.cleanupStats.deletionReasons as any)[reason] = 
+          ((report.cleanupStats.deletionReasons as any)[reason] || 0) + 1;
       });
       
       // Incluir detalles si se solicita
       if (includeDetails) {
-        report.details = {
+        (report as any).details = {
           recentViolations: moderationViolationsSnapshot.docs.slice(0, 10).map(doc => ({
             id: doc.id,
             ...doc.data()

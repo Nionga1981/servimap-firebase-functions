@@ -1,0 +1,291 @@
+// src/components/client/MapDisplay.tsx - Demo version for development
+"use client";
+
+import React, { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { MapPin, Phone, Star, Navigation, Map, Search, Users, Clock } from 'lucide-react';
+
+// Mock data for demo
+const demoProviders = [
+  {
+    id: 1,
+    name: "Carlos Martínez",
+    service: "Plomería",
+    rating: 4.9,
+    reviews: 156,
+    image: "/api/placeholder/60/60",
+    distance: "0.8 km",
+    available: true,
+    price: "Desde $300/hr",
+    location: { lat: 19.4326, lng: -99.1332 }
+  },
+  {
+    id: 2,
+    name: "Ana García", 
+    service: "Limpieza",
+    rating: 4.8,
+    reviews: 89,
+    image: "/api/placeholder/60/60",
+    distance: "1.2 km",
+    available: true,
+    price: "Desde $250/hr",
+    location: { lat: 19.4350, lng: -99.1300 }
+  },
+  {
+    id: 3,
+    name: "Miguel López",
+    service: "Electricidad", 
+    rating: 4.9,
+    reviews: 203,
+    image: "/api/placeholder/60/60",
+    distance: "2.1 km",
+    available: false,
+    price: "Desde $400/hr",
+    location: { lat: 19.4280, lng: -99.1380 }
+  }
+];
+
+export function MapDisplay() {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedProvider, setSelectedProvider] = useState<any>(null);
+  const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
+
+  const filteredProviders = demoProviders.filter(provider => 
+    provider.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    provider.service.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const handleContact = (provider: any) => {
+    alert(`Conectando con ${provider.name}...\n\nEste es un demo. En la versión real se abriría el chat directo.`);
+  };
+
+  const handleRequest = (provider: any) => {
+    alert(`Solicitando servicio de ${provider.service} con ${provider.name}...\n\nEste es un demo. En la versión real se enviaría la solicitud.`);
+  };
+
+  return (
+    <div className="relative h-full w-full bg-gradient-to-br from-blue-50 via-white to-green-50">
+      {/* Header con búsqueda */}
+      <div className="absolute top-0 left-0 right-0 z-20 bg-white/95 backdrop-blur-sm border-b border-gray-200">
+        <div className="p-4">
+          <div className="flex gap-3 items-center">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                type="text"
+                placeholder="Buscar servicios cerca de ti..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <Button
+              variant={viewMode === 'map' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setViewMode('map')}
+            >
+              <Map className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={viewMode === 'list' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setViewMode('list')}
+            >
+              <Users className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Contenido principal */}
+      <div className="pt-20 h-full">
+        {viewMode === 'map' ? (
+          // Vista de Mapa (Demo)
+          <div className="relative h-full">
+            {/* Fondo de mapa simulado */}
+            <div className="absolute inset-0 bg-gradient-to-br from-blue-100 to-green-100">
+              <div className="absolute inset-0 opacity-30">
+                <div className="w-full h-full bg-[url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><defs><pattern id=\"grid\" width=\"10\" height=\"10\" patternUnits=\"userSpaceOnUse\"><path d=\"M 10 0 L 0 0 0 10\" fill=\"none\" stroke=\"%23ddd\" stroke-width=\"1\"/></pattern></defs><rect width=\"100\" height=\"100\" fill=\"url(%23grid)\" /></svg>')]"></div>
+              </div>
+            </div>
+
+            {/* Marcadores simulados */}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="relative w-full max-w-4xl h-96">
+                {filteredProviders.map((provider, index) => (
+                  <div
+                    key={provider.id}
+                    className={`absolute cursor-pointer transform transition-all duration-200 hover:scale-110 ${
+                      index === 0 ? 'top-1/2 left-1/3' : 
+                      index === 1 ? 'top-1/4 left-2/3' : 
+                      'top-3/4 left-1/2'
+                    }`}
+                    onClick={() => setSelectedProvider(provider)}
+                  >
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg ${
+                      provider.available ? 'bg-green-500' : 'bg-gray-400'
+                    }`}>
+                      <MapPin className="h-6 w-6 text-white" />
+                    </div>
+                    <div className="absolute -top-2 -right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
+                      <span className="text-white text-xs font-bold">{provider.id}</span>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Marcador de usuario */}
+                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                  <div className="w-8 h-8 bg-blue-600 rounded-full border-4 border-white shadow-lg flex items-center justify-center">
+                    <div className="w-3 h-3 bg-white rounded-full"></div>
+                  </div>
+                  <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-sm font-medium text-gray-700 whitespace-nowrap">
+                    Tu ubicación
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Info del proveedor seleccionado */}
+            {selectedProvider && (
+              <div className="absolute bottom-4 left-4 right-4 z-10">
+                <Card className="shadow-xl">
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-4">
+                      <img
+                        src={selectedProvider.image}
+                        alt={selectedProvider.name}
+                        width={60}
+                        height={60}
+                        className="rounded-full"
+                      />
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="font-semibold text-gray-900">{selectedProvider.name}</h3>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedProvider(null)}
+                          >
+                            ×
+                          </Button>
+                        </div>
+                        <p className="text-sm text-gray-600 mb-2">{selectedProvider.service}</p>
+                        <div className="flex items-center gap-4 text-sm text-gray-500 mb-3">
+                          <div className="flex items-center gap-1">
+                            <Star className="h-4 w-4 text-yellow-400 fill-current" />
+                            <span>{selectedProvider.rating}</span>
+                            <span>({selectedProvider.reviews})</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <MapPin className="h-4 w-4" />
+                            <span>{selectedProvider.distance}</span>
+                          </div>
+                          <Badge className={selectedProvider.available ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}>
+                            {selectedProvider.available ? "Disponible" : "Ocupado"}
+                          </Badge>
+                        </div>
+                        <p className="font-medium text-blue-600 mb-3">{selectedProvider.price}</p>
+                        <div className="flex gap-2">
+                          <Button onClick={() => handleContact(selectedProvider)} className="flex-1">
+                            <Phone className="h-4 w-4 mr-2" />
+                            Contactar
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            onClick={() => handleRequest(selectedProvider)}
+                            disabled={!selectedProvider.available}
+                            className="flex-1"
+                          >
+                            <Clock className="h-4 w-4 mr-2" />
+                            Solicitar
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* Controles */}
+            <div className="absolute top-24 right-4 z-10">
+              <div className="bg-white rounded-lg shadow-lg p-2">
+                <Button variant="outline" size="sm">
+                  <Navigation className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          // Vista de Lista
+          <div className="p-4 space-y-4 h-full overflow-y-auto">
+            {filteredProviders.map((provider) => (
+              <Card key={provider.id} className="hover:shadow-lg transition-shadow">
+                <CardContent className="p-6">
+                  <div className="flex items-start gap-4">
+                    <img
+                      src={provider.image}
+                      alt={provider.name}
+                      width={60}
+                      height={60}
+                      className="rounded-full"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="font-semibold text-gray-900">{provider.name}</h3>
+                        <Badge className={provider.available ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}>
+                          {provider.available ? "Disponible" : "Ocupado"}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-2">{provider.service}</p>
+                      <div className="flex items-center gap-4 text-sm text-gray-500 mb-3">
+                        <div className="flex items-center gap-1">
+                          <Star className="h-4 w-4 text-yellow-400 fill-current" />
+                          <span>{provider.rating}</span>
+                          <span>({provider.reviews})</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <MapPin className="h-4 w-4" />
+                          <span>{provider.distance}</span>
+                        </div>
+                      </div>
+                      <p className="font-medium text-blue-600 mb-3">{provider.price}</p>
+                      <div className="flex gap-2">
+                        <Button onClick={() => handleContact(provider)} size="sm">
+                          <Phone className="h-4 w-4 mr-2" />
+                          Contactar
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          onClick={() => handleRequest(provider)}
+                          disabled={!provider.available}
+                          size="sm"
+                        >
+                          <Clock className="h-4 w-4 mr-2" />
+                          Solicitar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Footer con info */}
+      <div className="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-gray-200 p-3">
+        <div className="text-center text-sm text-gray-600">
+          <p>📍 <strong>Demo Mode:</strong> {filteredProviders.length} prestadores cerca de CDMX</p>
+          <p className="text-xs text-gray-500 mt-1">
+            En producción: GPS real, Google Maps, chat directo
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}

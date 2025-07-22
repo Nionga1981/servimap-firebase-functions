@@ -1,399 +1,432 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { 
   Wallet, 
   TrendingUp, 
-  Gift, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
+  Download, 
   History, 
   DollarSign,
-  Award
+  Gift,
+  CreditCard,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Target,
+  Sparkles,
+  Plus,
+  Minus
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
-import { Progress } from '../ui/progress';
-import { Badge } from '../ui/badge';
-import WithdrawMoney from './WithdrawMoney';
-import WalletTransactions from './WalletTransactions';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { useAuth } from '@/contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import { toast } from '@/hooks/use-toast';
 
-const WalletDashboard = ({ userId }) => {
+export default function WalletDashboard({ className = "" }) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [walletData, setWalletData] = useState(null);
+  const [recentTransactions, setRecentTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showWithdraw, setShowWithdraw] = useState(false);
-  const [showTransactions, setShowTransactions] = useState(false);
-  const [error, setError] = useState(null);
+  const [bonusProgress, setBonusProgress] = useState(0);
 
-  // Firebase function para obtener datos del wallet
-  const fetchWalletData = async () => {
+  // Datos de ejemplo para demostración
+  const mockWalletData = {
+    balance: 1250.50,
+    totalEarned: 8500.00,
+    totalSpent: 6200.00,
+    totalWithdrawn: 1050.00,
+    nextBonusThreshold: 2000,
+    progressToBonus: 1250.50,
+    lastBonusEarned: new Date('2024-01-15'),
+    pendingWithdrawals: 0
+  };
+
+  const mockTransactions = [
+    {
+      id: '1',
+      type: 'commission',
+      description: 'Comisión por servicio de plomería',
+      amount: 75.00,
+      date: new Date('2024-01-20'),
+      balance: 1250.50,
+      status: 'completed'
+    },
+    {
+      id: '2',
+      type: 'bonus',
+      description: 'Bonificación por fidelidad ($2000 alcanzados)',
+      amount: 20.00,
+      date: new Date('2024-01-15'),
+      balance: 1175.50,
+      status: 'completed'
+    },
+    {
+      id: '3',
+      type: 'payment',
+      description: 'Pago por servicio de limpieza',
+      amount: -120.00,
+      date: new Date('2024-01-12'),
+      balance: 1155.50,
+      status: 'completed'
+    },
+    {
+      id: '4',
+      type: 'withdrawal',
+      description: 'Retiro a cuenta bancaria',
+      amount: -500.00,
+      date: new Date('2024-01-10'),
+      balance: 1275.50,
+      status: 'completed'
+    },
+    {
+      id: '5',
+      type: 'commission',
+      description: 'Comisión por servicio de jardinería',
+      amount: 45.00,
+      date: new Date('2024-01-08'),
+      balance: 1775.50,
+      status: 'completed'
+    }
+  ];
+
+  useEffect(() => {
+    loadWalletData();
+  }, []);
+
+  useEffect(() => {
+    if (walletData) {
+      const progress = (walletData.progressToBonus / walletData.nextBonusThreshold) * 100;
+      setBonusProgress(Math.min(progress, 100));
+    }
+  }, [walletData]);
+
+  const loadWalletData = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      // Simular llamada a Cloud Function
-      // const getWalletBalance = firebase.functions().httpsCallable('getWalletBalance');
-      // const result = await getWalletBalance({ userId });
-      
-      // Datos de ejemplo para desarrollo
-      const mockData = {
-        success: true,
-        currentBalance: 125.50,
-        totalEarned: 345.00,
-        totalSpent: 2350.00,
-        totalWithdrawn: 200.00,
-        loyaltyBonusesEarned: 1,
-        walletExists: true,
-        nextBonusAt: 4000,
-        progressToNextBonus: 87.5,
-        amountNeededForNextBonus: 250.00,
-        recentTransactions: [
-          {
-            id: 'tx_001',
-            type: 'commission',
-            amount: 25.00,
-            description: 'Comisión por servicio de plomería',
-            createdAt: new Date('2025-01-19T10:30:00'),
-            balanceAfter: 125.50
-          },
-          {
-            id: 'tx_002', 
-            type: 'bonus',
-            amount: 20.00,
-            description: '¡Felicidades! $20.00 agregados por ser cliente frecuente',
-            createdAt: new Date('2025-01-18T15:20:00'),
-            balanceAfter: 100.50
-          },
-          {
-            id: 'tx_003',
-            type: 'payment',
-            amount: -150.00,
-            description: 'Pago por servicio de limpieza',
-            createdAt: new Date('2025-01-17T09:15:00'),
-            balanceAfter: 80.50
-          },
-          {
-            id: 'tx_004',
-            type: 'commission',
-            amount: 30.00,
-            description: 'Comisión por servicio de electricidad',
-            createdAt: new Date('2025-01-16T14:45:00'),
-            balanceAfter: 230.50
-          },
-          {
-            id: 'tx_005',
-            type: 'withdrawal',
-            amount: -100.00,
-            description: 'Retiro a cuenta bancaria',
-            createdAt: new Date('2025-01-15T11:00:00'),
-            balanceAfter: 200.50
-          }
-        ],
-        breakdown: {
-          totalEarnedFromBonuses: 25.00,
-          totalEarnedFromCommissions: 270.00,
-          totalEarnedFromRefunds: 50.00
-        },
-        limits: {
-          dailySpendingLimit: 10000,
-          withdrawalLimit: 5000,
-          dailySpentToday: 0,
-          blockedBalance: 0
-        }
-      };
-      
-      setWalletData(mockData);
-    } catch (err) {
-      console.error('Error fetching wallet data:', err);
-      setError('Error al cargar los datos del wallet');
+      // TODO: Reemplazar con llamada real a la API
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setWalletData(mockWalletData);
+      setRecentTransactions(mockTransactions);
+    } catch (error) {
+      console.error('Error loading wallet data:', error);
+      toast({
+        title: "Error",
+        description: "No se pudieron cargar los datos del wallet",
+        variant: "destructive"
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (userId) {
-      fetchWalletData();
-    }
-  }, [userId]);
+  const handleWithdraw = () => {
+    navigate('/wallet/withdraw');
+  };
+
+  const handleViewHistory = () => {
+    navigate('/wallet/transactions');
+  };
+
+  const handleUseWallet = () => {
+    navigate('/search');
+    toast({
+      title: "¡Usa tu wallet!",
+      description: "Busca un servicio y paga con tu saldo disponible",
+      variant: "default"
+    });
+  };
 
   const getTransactionIcon = (type) => {
     switch (type) {
       case 'commission':
-        return <TrendingUp className="w-4 h-4 text-[#3ce923]" />;
+        return <TrendingUp className="h-4 w-4 text-green-600" />;
       case 'bonus':
-        return <Gift className="w-4 h-4 text-[#FFD700]" />;
+        return <Gift className="h-4 w-4 text-yellow-600" />;
       case 'payment':
-        return <ArrowUpRight className="w-4 h-4 text-red-500" />;
+        return <ArrowUpRight className="h-4 w-4 text-blue-600" />;
       case 'withdrawal':
-        return <ArrowDownLeft className="w-4 h-4 text-red-500" />;
+        return <ArrowDownLeft className="h-4 w-4 text-purple-600" />;
       default:
-        return <DollarSign className="w-4 h-4 text-gray-500" />;
+        return <DollarSign className="h-4 w-4 text-gray-600" />;
     }
   };
 
-  const getTransactionColor = (type, amount) => {
-    if (amount > 0) return 'text-[#3ce923]';
-    return 'text-red-500';
+  const getTransactionTypeLabel = (type) => {
+    switch (type) {
+      case 'commission': return 'Comisión';
+      case 'bonus': return 'Bonificación';
+      case 'payment': return 'Pago';
+      case 'withdrawal': return 'Retiro';
+      default: return 'Transacción';
+    }
   };
 
-  const formatAmount = (amount) => {
-    const isNegative = amount < 0;
-    const absAmount = Math.abs(amount);
-    return (
-      <span className={getTransactionColor('', amount)}>
-        {isNegative ? '-' : '+'}${absAmount.toFixed(2)}
-      </span>
-    );
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('es-MX', {
+      style: 'currency',
+      currency: 'MXN'
+    }).format(amount);
   };
 
   const formatDate = (date) => {
-    return new Intl.DateTimeFormat('es-ES', {
-      day: '2-digit',
+    return new Intl.DateTimeFormat('es-MX', {
       month: 'short',
+      day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
-    }).format(new Date(date));
+    }).format(date);
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#ac7afc]"></div>
+      <div className={`space-y-6 ${className}`}>
+        <div className="animate-pulse">
+          <div className="h-32 bg-gray-200 rounded-lg mb-6"></div>
+          <div className="h-24 bg-gray-200 rounded-lg mb-4"></div>
+          <div className="h-48 bg-gray-200 rounded-lg"></div>
+        </div>
       </div>
     );
   }
 
-  if (error) {
+  if (!walletData) {
     return (
-      <div className="text-center py-8">
-        <p className="text-red-500 mb-4">{error}</p>
-        <Button onClick={fetchWalletData} variant="outline">
+      <div className={`text-center py-12 ${className}`}>
+        <Wallet className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+        <h3 className="text-lg font-semibold text-gray-900 mb-2">
+          Error cargando wallet
+        </h3>
+        <p className="text-gray-600 mb-4">
+          No se pudieron cargar los datos de tu wallet
+        </p>
+        <Button onClick={loadWalletData}>
           Reintentar
         </Button>
       </div>
     );
   }
 
-  if (!walletData?.walletExists) {
-    return (
-      <Card className="text-center py-8">
-        <CardContent>
-          <Wallet className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Wallet no inicializado</h3>
-          <p className="text-gray-600">Realiza tu primera transacción para activar tu wallet.</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      {/* Header con balance principal */}
-      <Card className="bg-gradient-to-r from-[#ac7afc] to-purple-600 text-white">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Wallet className="w-6 h-6" />
-            Mi Wallet ServiMap
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center">
-            <div className="text-4xl font-bold text-[#FFD700] mb-2">
-              ${walletData.currentBalance.toFixed(2)}
-            </div>
-            <p className="text-purple-100">Balance disponible</p>
+    <div className={`space-y-6 ${className}`}>
+      {/* Balance Principal */}
+      <Card className="premium-card relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-32 h-32 opacity-10">
+          <div className="w-full h-full bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-full transform rotate-45 translate-x-16 -translate-y-16"></div>
+        </div>
+        
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <div className="p-2 bg-gradient-to-r from-yellow-400 to-yellow-600 rounded-lg">
+                <Wallet className="h-5 w-5 text-white" />
+              </div>
+              Saldo Disponible
+            </CardTitle>
+            <Badge className="premium-badge">
+              <Sparkles className="h-3 w-3 mr-1" />
+              ServiMap Wallet
+            </Badge>
           </div>
-          
-          <div className="grid grid-cols-3 gap-4 mt-6 pt-4 border-t border-purple-400">
-            <div className="text-center">
-              <div className="text-lg font-semibold text-[#FFD700]">
-                ${walletData.totalEarned.toFixed(2)}
-              </div>
-              <p className="text-xs text-purple-100">Total ganado</p>
-            </div>
-            <div className="text-center">
-              <div className="text-lg font-semibold text-[#FFD700]">
-                ${walletData.totalSpent.toFixed(2)}
-              </div>
-              <p className="text-xs text-purple-100">Total gastado</p>
-            </div>
-            <div className="text-center">
-              <div className="text-lg font-semibold text-[#FFD700]">
-                ${walletData.totalWithdrawn.toFixed(2)}
-              </div>
-              <p className="text-xs text-purple-100">Total retirado</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Progreso hacia próximo bonus */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Award className="w-5 h-5 text-[#FFD700]" />
-            Progreso de Lealtad
-          </CardTitle>
         </CardHeader>
+        
         <CardContent>
           <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-600">
-                Próximo bonus en ${walletData.nextBonusAt.toLocaleString()}
-              </span>
-              <Badge variant="outline" className="text-[#FFD700] border-[#FFD700]">
-                {walletData.loyaltyBonusesEarned} bonos ganados
-              </Badge>
-            </div>
-            
-            <Progress 
-              value={walletData.progressToNextBonus} 
-              className="h-3"
-              style={{ 
-                background: '#f1f5f9',
-                '& [data-progress-bar]': { 
-                  background: 'linear-gradient(to right, #FFD700, #fbbf24)' 
-                }
-              }}
-            />
-            
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">
-                {walletData.progressToNextBonus.toFixed(1)}% completado
-              </span>
-              <span className="text-[#ac7afc] font-semibold">
-                ${walletData.amountNeededForNextBonus.toFixed(2)} restantes
-              </span>
-            </div>
-            
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-              <div className="flex items-center gap-2">
-                <Gift className="w-4 h-4 text-[#FFD700]" />
-                <span className="text-sm font-medium">¡Próximo bonus: $20.00!</span>
+            <div className="text-center">
+              <div className="text-4xl font-bold text-gray-900 mb-2">
+                {formatCurrency(walletData.balance)}
               </div>
-              <p className="text-xs text-gray-600 mt-1">
-                Gasta ${walletData.amountNeededForNextBonus.toFixed(2)} más para obtener tu bonus de lealtad
+              <p className="text-gray-600">
+                Dinero disponible para usar en servicios
               </p>
+            </div>
+
+            {/* Progreso hacia bonus */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-600">Progreso hacia próximo bonus</span>
+                <span className="font-medium text-yellow-600">
+                  {formatCurrency(walletData.progressToBonus)} / {formatCurrency(walletData.nextBonusThreshold)}
+                </span>
+              </div>
+              
+              <div className="relative">
+                <Progress 
+                  value={bonusProgress} 
+                  className="h-3"
+                  style={{
+                    background: 'linear-gradient(90deg, #FEF3C7 0%, #FCD34D 50%, #F59E0B 100%)'
+                  }}
+                />
+                <div className="absolute top-0 left-0 h-full flex items-center pl-2">
+                  <Target className="h-4 w-4 text-yellow-700" />
+                </div>
+              </div>
+              
+              <div className="text-center">
+                <p className="text-sm text-gray-600">
+                  Te faltan <span className="font-semibold text-yellow-600">
+                    {formatCurrency(walletData.nextBonusThreshold - walletData.progressToBonus)}
+                  </span> para ganar <span className="font-semibold text-green-600">$20 USD</span>
+                </p>
+              </div>
+            </div>
+
+            {/* Botones principales */}
+            <div className="flex gap-3 pt-2">
+              <Button 
+                onClick={handleWithdraw}
+                variant="outline" 
+                className="flex-1"
+                disabled={walletData.balance < 100}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Retirar
+              </Button>
+              <Button 
+                onClick={handleUseWallet}
+                className="flex-1 bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-600 hover:to-yellow-700"
+              >
+                <CreditCard className="h-4 w-4 mr-2" />
+                Usar Wallet
+              </Button>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Botones de acción */}
-      <div className="grid grid-cols-2 gap-4">
-        <Button 
-          onClick={() => setShowWithdraw(true)}
-          className="bg-[#ac7afc] hover:bg-purple-600 text-white py-6"
-          disabled={walletData.currentBalance < 10}
-        >
-          <ArrowDownLeft className="w-5 h-5 mr-2" />
-          Retirar Dinero
-        </Button>
-        
-        <Button 
-          onClick={() => setShowTransactions(true)}
-          variant="outline"
-          className="border-[#ac7afc] text-[#ac7afc] hover:bg-purple-50 py-6"
-        >
-          <History className="w-5 h-5 mr-2" />
-          Ver Historial
-        </Button>
+      {/* Estadísticas rápidas */}
+      <div className="grid grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="p-4 text-center">
+            <div className="flex items-center justify-center mb-2">
+              <div className="p-2 bg-green-100 rounded-lg">
+                <Plus className="h-4 w-4 text-green-600" />
+              </div>
+            </div>
+            <div className="text-lg font-bold text-green-600">
+              {formatCurrency(walletData.totalEarned)}
+            </div>
+            <div className="text-xs text-gray-600">Total Ganado</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 text-center">
+            <div className="flex items-center justify-center mb-2">
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <Minus className="h-4 w-4 text-blue-600" />
+              </div>
+            </div>
+            <div className="text-lg font-bold text-blue-600">
+              {formatCurrency(walletData.totalSpent)}
+            </div>
+            <div className="text-xs text-gray-600">Total Gastado</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 text-center">
+            <div className="flex items-center justify-center mb-2">
+              <div className="p-2 bg-purple-100 rounded-lg">
+                <ArrowDownLeft className="h-4 w-4 text-purple-600" />
+              </div>
+            </div>
+            <div className="text-lg font-bold text-purple-600">
+              {formatCurrency(walletData.totalWithdrawn)}
+            </div>
+            <div className="text-xs text-gray-600">Total Retirado</div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Últimas 5 transacciones */}
+      {/* Transacciones recientes */}
       <Card>
         <CardHeader>
-          <CardTitle>Transacciones Recientes</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <History className="h-5 w-5" />
+              Transacciones Recientes
+            </CardTitle>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={handleViewHistory}
+            >
+              Ver todo
+            </Button>
+          </div>
         </CardHeader>
+        
         <CardContent>
           <div className="space-y-3">
-            {walletData.recentTransactions.map((transaction) => (
+            {recentTransactions.slice(0, 5).map((transaction) => (
               <div 
                 key={transaction.id}
-                className="flex items-center justify-between p-3 rounded-lg border hover:bg-gray-50 transition-colors"
+                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
               >
-                <div className="flex items-center gap-3">
-                  {getTransactionIcon(transaction.type)}
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-white rounded-lg shadow-sm">
+                    {getTransactionIcon(transaction.type)}
+                  </div>
                   <div>
-                    <p className="font-medium text-sm">{transaction.description}</p>
-                    <p className="text-xs text-gray-500">{formatDate(transaction.createdAt)}</p>
+                    <p className="font-medium text-sm">
+                      {getTransactionTypeLabel(transaction.type)}
+                    </p>
+                    <p className="text-xs text-gray-600 truncate max-w-48">
+                      {transaction.description}
+                    </p>
                   </div>
                 </div>
                 
                 <div className="text-right">
-                  <div className="font-semibold">
-                    {formatAmount(transaction.amount)}
+                  <div className={`font-semibold ${
+                    transaction.amount > 0 ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {transaction.amount > 0 ? '+' : ''}{formatCurrency(transaction.amount)}
                   </div>
-                  <p className="text-xs text-gray-500">
-                    Saldo: ${transaction.balanceAfter.toFixed(2)}
-                  </p>
+                  <div className="text-xs text-gray-500">
+                    {formatDate(transaction.date)}
+                  </div>
                 </div>
               </div>
             ))}
           </div>
-          
-          {walletData.recentTransactions.length === 0 && (
-            <div className="text-center py-8 text-gray-500">
-              <History className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-              <p>No hay transacciones recientes</p>
+
+          {recentTransactions.length === 0 && (
+            <div className="text-center py-8">
+              <History className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-600">No hay transacciones recientes</p>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Call to action */}
+      <Card className="bg-gradient-to-r from-purple-50 to-blue-50 border-purple-200">
+        <CardContent className="p-6 text-center">
+          <div className="mb-4">
+            <div className="w-16 h-16 bg-gradient-to-r from-purple-500 to-blue-500 rounded-full mx-auto flex items-center justify-center mb-4">
+              <Sparkles className="h-8 w-8 text-white" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              ¡Usa tu Wallet ServiMap!
+            </h3>
+            <p className="text-gray-600 mb-4">
+              Paga servicios directamente desde tu wallet y gana bonificaciones por fidelidad
+            </p>
+          </div>
           
-          <div className="mt-4 pt-4 border-t">
-            <Button 
-              variant="ghost" 
-              className="w-full text-[#ac7afc] hover:bg-purple-50"
-              onClick={() => setShowTransactions(true)}
-            >
-              Ver todas las transacciones
-            </Button>
-          </div>
+          <Button 
+            onClick={handleUseWallet}
+            className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+          >
+            Buscar Servicios
+          </Button>
         </CardContent>
       </Card>
-
-      {/* Información de límites */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Límites y Configuración</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-gray-600">Límite de retiro</p>
-              <p className="font-semibold text-[#ac7afc]">
-                ${walletData.limits.withdrawalLimit.toLocaleString()}
-              </p>
-            </div>
-            <div>
-              <p className="text-gray-600">Límite diario</p>
-              <p className="font-semibold text-[#ac7afc]">
-                ${walletData.limits.dailySpendingLimit.toLocaleString()}
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Modales */}
-      {showWithdraw && (
-        <WithdrawMoney
-          isOpen={showWithdraw}
-          onClose={() => setShowWithdraw(false)}
-          currentBalance={walletData.currentBalance}
-          withdrawalLimit={walletData.limits.withdrawalLimit}
-          onSuccess={() => {
-            setShowWithdraw(false);
-            fetchWalletData(); // Refrescar datos
-          }}
-        />
-      )}
-
-      {showTransactions && (
-        <WalletTransactions
-          isOpen={showTransactions}
-          onClose={() => setShowTransactions(false)}
-          userId={userId}
-        />
-      )}
     </div>
   );
-};
-
-export default WalletDashboard;
+}

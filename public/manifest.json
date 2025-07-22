@@ -1,0 +1,245 @@
+{
+  "name": "ServiMap - Servicios a domicilio",
+  "short_name": "ServiMap",
+  "description": "La plataforma líder de servicios a domicilio en México. Encuentra profesionales confiables cerca de ti.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#3B82F6",
+  "id": "com.servimap.app",
+  "dir": "ltr",
+  "lang": "es-MX",
+  "categories": ["business", "lifestyle", "utilities"],
+  "iarc_rating_id": "e84b072d-71b3-4d3e-86ae-31a8ce4e53b7",
+  "prefer_related_applications": false,
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  
+  "icons": [
+    {
+      "src": "/icons/icon-48x48.png",
+      "sizes": "48x48",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-72x72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-128x128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-144x144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-152x152.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-384x384.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/maskable-icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/maskable-icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/monochrome-icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "monochrome"
+    }
+  ],
+  
+  "screenshots": [
+    {
+      "src": "/screenshots/home-mobile.png",
+      "sizes": "360x640",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Pantalla principal - Busca servicios cerca de ti"
+    },
+    {
+      "src": "/screenshots/search-mobile.png",
+      "sizes": "360x640",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Búsqueda avanzada - Encuentra el profesional perfecto"
+    },
+    {
+      "src": "/screenshots/chat-mobile.png",
+      "sizes": "360x640",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Chat en tiempo real - Comunícate directamente"
+    },
+    {
+      "src": "/screenshots/wallet-mobile.png",
+      "sizes": "360x640",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Wallet ServiMap - Pagos seguros y rápidos"
+    },
+    {
+      "src": "/screenshots/home-desktop.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Vista de escritorio - Experiencia completa"
+    },
+    {
+      "src": "/screenshots/dashboard-desktop.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Panel de control - Gestiona tus servicios"
+    }
+  ],
+  
+  "shortcuts": [
+    {
+      "name": "Buscar Servicios",
+      "short_name": "Buscar",
+      "description": "Encuentra servicios cerca de ti",
+      "url": "/search",
+      "icons": [{
+        "src": "/icons/shortcut-search-96x96.png",
+        "sizes": "96x96",
+        "type": "image/png"
+      }]
+    },
+    {
+      "name": "Mis Mensajes",
+      "short_name": "Mensajes",
+      "description": "Ver conversaciones",
+      "url": "/messages",
+      "icons": [{
+        "src": "/icons/shortcut-messages-96x96.png",
+        "sizes": "96x96",
+        "type": "image/png"
+      }]
+    },
+    {
+      "name": "Mi Wallet",
+      "short_name": "Wallet",
+      "description": "Gestionar pagos y saldo",
+      "url": "/wallet",
+      "icons": [{
+        "src": "/icons/shortcut-wallet-96x96.png",
+        "sizes": "96x96",
+        "type": "image/png"
+      }]
+    },
+    {
+      "name": "Solicitar Servicio",
+      "short_name": "Solicitar",
+      "description": "Crear nueva solicitud de servicio",
+      "url": "/request-service",
+      "icons": [{
+        "src": "/icons/shortcut-request-96x96.png",
+        "sizes": "96x96",
+        "type": "image/png"
+      }]
+    }
+  ],
+  
+  "related_applications": [],
+  
+  "protocol_handlers": [
+    {
+      "protocol": "web+servimap",
+      "url": "/handler?url=%s"
+    }
+  ],
+  
+  "share_target": {
+    "action": "/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [{
+        "name": "images",
+        "accept": ["image/*"]
+      }]
+    }
+  },
+  
+  "file_handlers": [
+    {
+      "action": "/open-file",
+      "accept": {
+        "image/*": [".jpg", ".jpeg", ".png", ".gif", ".webp"],
+        "application/pdf": [".pdf"]
+      },
+      "icons": [{
+        "src": "/icons/file-handler-icon.png",
+        "sizes": "192x192"
+      }],
+      "launch_type": "single-client"
+    }
+  ],
+  
+  "edge_side_panel": {
+    "preferred_width": 400
+  },
+  
+  "launch_handler": {
+    "client_mode": ["navigate-existing", "auto"]
+  },
+  
+  "handle_links": "preferred",
+  
+  "capture_links": "existing-client-navigate",
+  
+  "features": {
+    "badging": true,
+    "periodic-background-sync": {
+      "minInterval": 86400
+    },
+    "web-share": 2,
+    "window-controls-overlay": true
+  }
+}
