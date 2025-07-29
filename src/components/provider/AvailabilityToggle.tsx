@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Wifi, WifiOff, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { updateProviderRealtimeStatus, disconnectProvider } from '@/services/providerService'; // Importar los servicios
+// import { updateProviderRealtimeStatus, disconnectProvider } from '@/services/providerService'; // Temporarily disabled due to undici/Firebase compatibility issue
 
 // ID de proveedor de ejemplo. En una aplicación real, esto vendría de la sesión del usuario.
 const MOCK_PROVIDER_ID = "provider123"; 
@@ -58,7 +58,8 @@ export function AvailabilityToggle() {
           async (position) => {
             const { latitude, longitude } = position.coords;
             console.log('Nueva ubicación:', latitude, longitude);
-            await updateProviderRealtimeStatus(MOCK_PROVIDER_ID, true, { lat: latitude, lng: longitude });
+            // await updateProviderRealtimeStatus(MOCK_PROVIDER_ID, true, { lat: latitude, lng: longitude }); // Temporarily disabled
+            console.log('Mock: updating provider status to available at', { lat: latitude, lng: longitude });
             // Solo actualizar el estado del switch y mostrar toast una vez que se obtiene la primera ubicación
             if (!isAvailable) { 
                 setIsAvailable(true);
@@ -107,7 +108,8 @@ export function AvailabilityToggle() {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
       }
-      await disconnectProvider(MOCK_PROVIDER_ID);
+      // await disconnectProvider(MOCK_PROVIDER_ID); // Temporarily disabled
+      console.log('Mock: disconnecting provider', MOCK_PROVIDER_ID);
       setIsAvailable(false);
       toast({
         title: "Ahora Estás Desconectado",

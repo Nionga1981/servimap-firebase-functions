@@ -731,7 +731,7 @@ export default function ChatModerator({
                             </span>
                           </div>
                           <p className="text-sm text-gray-700 mb-2">
-                            "{moderation.message}"
+                            &quot;{moderation.message}&quot;
                           </p>
                           <div className="flex items-center space-x-4 text-xs text-gray-500">
                             <span>Usuario: {moderation.userId}</span>
@@ -859,7 +859,7 @@ export default function ChatModerator({
                   <Alert>
                     <Shield className="h-4 w-4" />
                     <AlertDescription>
-                      <strong>Recomendación:</strong> Mantén el nivel de estrictez en "Medio" 
+                      <strong>Recomendación:</strong> Mantén el nivel de estrictez en &quot;Medio&quot; 
                       para un balance óptimo entre seguridad y usabilidad.
                     </AlertDescription>
                   </Alert>

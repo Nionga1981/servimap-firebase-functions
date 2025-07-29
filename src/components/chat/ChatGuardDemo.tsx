@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Shield, ShieldAlert, ShieldCheck, MessageSquareWarning } from 'lucide-react';
+import { Shield, ShieldAlert, ShieldCheck, MessageSquare } from 'lucide-react';
 import { chatGuard, type ChatGuardInput, type ChatGuardOutput } from '@/ai/flows/chat-guard';
 import { useToast } from '@/hooks/use-toast';
 
@@ -51,7 +51,7 @@ export function ChatGuardDemo() {
     <Card className="w-full max-w-2xl mx-auto shadow-xl">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-xl">
-          <MessageSquareWarning className="text-accent" /> Demo del Guardián de Chat IA
+          <MessageSquare className="text-accent" /> Demo del Guardián de Chat IA
         </CardTitle>
         <CardDescription>
           Prueba nuestra moderación de chat impulsada por IA. Ingresa cualquier mensaje para ver si es marcado como potencialmente inapropiado.

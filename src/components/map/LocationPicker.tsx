@@ -1,7 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MapPin, Search, Navigation, Target, Check, X } from 'lucide-react';
 
-const LocationPicker = ({ 
+interface LocationPickerProps {
+  onLocationSelect: (location: any) => void;
+  initialLocation?: any;
+  allowManualEntry?: boolean;
+  showSearchBox?: boolean;
+  mapHeight?: string;
+  className?: string;
+}
+
+const LocationPicker: React.FC<LocationPickerProps> = ({ 
   onLocationSelect, 
   initialLocation = null,
   allowManualEntry = true,
@@ -9,19 +18,19 @@ const LocationPicker = ({
   mapHeight = '400px',
   className = ''
 }) => {
-  const [selectedLocation, setSelectedLocation] = useState(initialLocation);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState([]);
-  const [showResults, setShowResults] = useState(false);
-  const [mapLoaded, setMapLoaded] = useState(false);
-  const [currentUserLocation, setCurrentUserLocation] = useState(null);
-  const [draggedLocation, setDraggedLocation] = useState(null);
+  const [selectedLocation, setSelectedLocation] = useState<any>(initialLocation);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [showResults, setShowResults] = useState<boolean>(false);
+  const [mapLoaded, setMapLoaded] = useState<boolean>(false);
+  const [currentUserLocation, setCurrentUserLocation] = useState<any>(null);
+  const [draggedLocation, setDraggedLocation] = useState<any>(null);
   
-  const mapRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const markerRef = useRef(null);
-  const searchBoxRef = useRef(null);
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<google.maps.Map | null>(null);
+  const markerRef = useRef<google.maps.Marker | null>(null);
+  const searchBoxRef = useRef<HTMLInputElement>(null);
 
   // Initialize Google Maps
   useEffect(() => {
@@ -83,24 +92,28 @@ const LocationPicker = ({
     });
 
     // Handle marker drag
-    markerRef.current.addListener('dragend', (event) => {
-      const newLocation = {
-        lat: event.latLng.lat(),
-        lng: event.latLng.lng()
-      };
-      setDraggedLocation(newLocation);
-      reverseGeocode(newLocation);
+    markerRef.current.addListener('dragend', (event: google.maps.MapMouseEvent) => {
+      if (event.latLng) {
+        const newLocation = {
+          lat: event.latLng.lat(),
+          lng: event.latLng.lng()
+        };
+        setDraggedLocation(newLocation);
+        reverseGeocode(newLocation);
+      }
     });
 
     // Handle map click
-    mapInstanceRef.current.addListener('click', (event) => {
-      const newLocation = {
-        lat: event.latLng.lat(),
-        lng: event.latLng.lng()
-      };
-      setSelectedLocation(newLocation);
-      updateMarker(newLocation);
-      reverseGeocode(newLocation);
+    mapInstanceRef.current.addListener('click', (event: google.maps.MapMouseEvent) => {
+      if (event.latLng) {
+        const newLocation = {
+          lat: event.latLng.lat(),
+          lng: event.latLng.lng()
+        };
+        setSelectedLocation(newLocation);
+        updateMarker(newLocation);
+        reverseGeocode(newLocation);
+      }
     });
 
     // Initialize search box if enabled
@@ -122,7 +135,7 @@ const LocationPicker = ({
     // Listen for place changes
     searchBox.addListener('places_changed', () => {
       const places = searchBox.getPlaces();
-      if (places.length === 0) return;
+      if (!places || places.length === 0) return;
 
       const place = places[0];
       if (!place.geometry || !place.geometry.location) return;
@@ -134,7 +147,9 @@ const LocationPicker = ({
 
       setSelectedLocation(location);
       updateMarker(location);
-      mapInstanceRef.current.setCenter(location);
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.setCenter(location);
+      }
       
       // Clear search results
       setShowResults(false);
@@ -142,7 +157,7 @@ const LocationPicker = ({
     });
   };
 
-  const updateMarker = (location) => {
+  const updateMarker = (location: any) => {
     if (markerRef.current) {
       markerRef.current.setPosition(location);
     }
@@ -175,12 +190,13 @@ const LocationPicker = ({
     }
   };
 
-  const searchPlaces = async (query) => {
+  const searchPlaces = async (query: string) => {
     if (!query.trim() || !window.google) return;
 
     setIsSearching(true);
     
     try {
+      if (!mapInstanceRef.current) return;
       const service = new window.google.maps.places.PlacesService(mapInstanceRef.current);
       
       const request = {
@@ -194,13 +210,15 @@ const LocationPicker = ({
         setIsSearching(false);
         
         if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
-          const searchResults = results.slice(0, 5).map(place => ({
+          const searchResults = results.slice(0, 5)
+            .filter(place => place.geometry && place.geometry.location)
+            .map(place => ({
             id: place.place_id,
             name: place.name,
             address: place.formatted_address,
             location: {
-              lat: place.geometry.location.lat(),
-              lng: place.geometry.location.lng()
+              lat: place.geometry!.location!.lat(),
+              lng: place.geometry!.location!.lng()
             }
           }));
           
@@ -217,20 +235,20 @@ const LocationPicker = ({
     }
   };
 
-  const reverseGeocode = async (location) => {
+  const reverseGeocode = async (location: any) => {
     if (!window.google) return;
 
     const geocoder = new window.google.maps.Geocoder();
     
     geocoder.geocode({ location }, (results, status) => {
-      if (status === 'OK' && results[0]) {
+      if (status === 'OK' && results && results[0]) {
         const address = results[0].formatted_address;
         setSearchQuery(address);
       }
     });
   };
 
-  const handleSearchInputChange = (e) => {
+  const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setSearchQuery(value);
     
@@ -242,7 +260,7 @@ const LocationPicker = ({
     }
   };
 
-  const handleSearchResultClick = (result) => {
+  const handleSearchResultClick = (result: any) => {
     setSelectedLocation(result.location);
     setSearchQuery(result.address);
     setShowResults(false);
@@ -422,7 +440,7 @@ const LocationPicker = ({
       )}
 
       {/* Action Buttons */}
-      {onLocationSelect && (
+      {(
         <div className="flex items-center justify-end space-x-3 mt-6">
           <button
             onClick={handleCancel}

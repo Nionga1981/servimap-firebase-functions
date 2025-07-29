@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
-import { getPastClients, sendRehireReminder } from '@/services/providerService';
+// import { getPastClients, sendRehireReminder } from '@/services/providerService'; // Temporarily disabled due to undici/Firebase compatibility
 import type { PastClientInfo } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,7 +25,8 @@ export function PastClientsList() {
     async function fetchClients() {
       try {
         setIsLoading(true);
-        const pastClients = await getPastClients(MOCK_PROVIDER_ID);
+        // const pastClients = await getPastClients(MOCK_PROVIDER_ID); // Temporarily disabled
+        const pastClients: PastClientInfo[] = []; // Mock empty array
         setClients(pastClients);
       } catch (error) {
         toast({
@@ -43,7 +44,8 @@ export function PastClientsList() {
   const handleSendReminder = async (client: PastClientInfo) => {
     setSendingReminder(client.usuarioId);
     try {
-      await sendRehireReminder(client.usuarioId, client.ultimaCategoriaId);
+      // await sendRehireReminder(client.usuarioId, client.ultimaCategoriaId); // Temporarily disabled
+      console.log('Mock: sending rehire reminder to', client.usuarioId);
       toast({
         title: "¡Recordatorio Enviado!",
         description: `Se ha enviado un recordatorio a ${client.nombreUsuario}.`,

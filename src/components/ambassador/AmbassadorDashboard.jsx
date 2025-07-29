@@ -21,6 +21,7 @@ import { Badge } from '../ui/badge';
 import { Alert, AlertDescription } from '../ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Progress } from '../ui/progress';
+import { Label } from '../ui/label';
 
 const AmbassadorDashboard = ({ userId, onRegisterBusiness }) => {
   const [ambassadorData, setAmbassadorData] = useState(null);

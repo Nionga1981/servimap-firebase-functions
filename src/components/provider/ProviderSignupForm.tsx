@@ -20,7 +20,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { SERVICE_CATEGORIES } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Send, VenetianMask } from "lucide-react";
-import { registerProvider } from "@/services/providerService";
+import firebaseCompat from "@/lib/firebaseCompat";
 
 const providerSignupSchema = z.object({
   name: z.string().min(3, { message: "El nombre debe tener al menos 3 caracteres." }).max(50),
@@ -70,7 +70,9 @@ export function ProviderSignupForm() {
             ...(data.codigoInvitacion && { codigoInvitacion: data.codigoInvitacion }),
         };
 
-        await registerProvider(registrationData);
+        // Use compatibility layer to call Firebase function
+        const result = await firebaseCompat.callFunction('registerProviderProfile', registrationData);
+        console.log('Provider registration result:', result);
 
         toast({
             title: "¡Registro Enviado!",

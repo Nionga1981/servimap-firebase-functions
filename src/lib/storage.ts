@@ -43,7 +43,7 @@ class StorageManager {
       }
     } catch (error) {
       console.error('Error uploading file:', error);
-      throw new Error(`Failed to upload file: ${error.message}`);
+      throw new Error(`Failed to upload file: ${(error as Error).message}`);
     }
   }
 
@@ -207,7 +207,7 @@ class StorageManager {
       console.log('File deleted successfully:', filePath);
     } catch (error) {
       console.error('Error deleting file:', error);
-      throw new Error(`Failed to delete file: ${error.message}`);
+      throw new Error(`Failed to delete file: ${(error as Error).message}`);
     }
   }
 
@@ -224,7 +224,7 @@ class StorageManager {
       return urls;
     } catch (error) {
       console.error('Error listing files:', error);
-      throw new Error(`Failed to list files: ${error.message}`);
+      throw new Error(`Failed to list files: ${(error as Error).message}`);
     }
   }
 

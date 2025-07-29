@@ -342,7 +342,7 @@ ${this.state.errorInfo?.componentStack || 'No component stack available'}
 
 // Error boundary wrapper with retry logic
 export const withErrorBoundary = (Component, fallback) => {
-  return class extends React.Component {
+  const WrappedComponent = class extends React.Component {
     render() {
       return (
         <ErrorBoundary fallback={fallback}>
@@ -351,6 +351,10 @@ export const withErrorBoundary = (Component, fallback) => {
       );
     }
   };
+  
+  WrappedComponent.displayName = `withErrorBoundary(${Component.displayName || Component.name || 'Component'})`;
+  
+  return WrappedComponent;
 };
 
 // Async error boundary for handling promise rejections

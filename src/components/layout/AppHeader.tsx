@@ -37,10 +37,12 @@ type LanguageCode = 'es' | 'en';
 export function AppHeader() {
   const [currentLanguage, setCurrentLanguage] = useState<LanguageCode>('es');
   const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [isClient, setIsClient] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
+    setIsClient(true);
     const langData = mockIdiomas.find(lang => lang.codigo === currentLanguage);
     if (langData) {
       setTranslations(langData.recursos);

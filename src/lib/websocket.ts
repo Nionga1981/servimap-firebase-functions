@@ -11,6 +11,7 @@ export interface ChatMessage {
   isModerated: boolean;
   mediaUrls?: string[];
   quotationId?: string;
+  isRead?: boolean;
 }
 
 export interface ChatEvent {

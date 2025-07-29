@@ -387,7 +387,7 @@ export default function SearchBar({
             <div className="p-4 text-center text-gray-500">
               <Search className="h-8 w-8 mx-auto mb-2 opacity-50" />
               <p className="text-sm">No se encontraron sugerencias</p>
-              <p className="text-xs">Presiona Enter para buscar "{query}"</p>
+              <p className="text-xs">Presiona Enter para buscar &quot;{query}&quot;</p>
             </div>
           )}
         </div>

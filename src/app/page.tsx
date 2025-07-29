@@ -18,7 +18,7 @@ const featuredServices = [
     service: "Plomería",
     rating: 4.9,
     reviews: 156,
-    image: "/api/placeholder/60/60",
+    image: "https://placehold.co/60x60.png",
     distance: "0.8 km",
     available: true,
     price: "Desde $300/hr"
@@ -29,7 +29,7 @@ const featuredServices = [
     service: "Limpieza",
     rating: 4.8,
     reviews: 89,
-    image: "/api/placeholder/60/60",
+    image: "https://placehold.co/60x60.png",
     distance: "1.2 km",
     available: true,
     price: "Desde $250/hr"
@@ -40,7 +40,7 @@ const featuredServices = [
     service: "Electricidad",
     rating: 4.9,
     reviews: 203,
-    image: "/api/placeholder/60/60",
+    image: "https://placehold.co/60x60.png",
     distance: "2.1 km",
     available: false,
     price: "Desde $400/hr"

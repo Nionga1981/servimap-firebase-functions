@@ -1049,7 +1049,7 @@ export default function AntiDuplicateSystem({
                   <Alert>
                     <Shield className="h-4 w-4" />
                     <AlertDescription>
-                      <strong>Recomendación:</strong> Mantén la sensibilidad en "Media" 
+                      <strong>Recomendación:</strong> Mantén la sensibilidad en &quot;Media&quot; 
                       para un balance óptimo entre seguridad y experiencia de usuario.
                     </AlertDescription>
                   </Alert>

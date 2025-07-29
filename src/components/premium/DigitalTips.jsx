@@ -565,7 +565,7 @@ export default function DigitalTips({
                           <p className="text-sm text-gray-600">{tip.serviceType}</p>
                           {tip.message && (
                             <p className="text-sm text-gray-700 mt-1 italic">
-                              "{tip.message}"
+                              &quot;{tip.message}&quot;
                             </p>
                           )}
                           <p className="text-xs text-gray-500 mt-1">

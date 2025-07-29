@@ -2,12 +2,10 @@
 import type {Metadata} from 'next';
 import { Montserrat } from 'next/font/google';
 import './globals.css';
-import dynamic from 'next/dynamic';
 import { Toaster } from "@/components/ui/toaster";
 import { cn } from '@/lib/utils';
-
-// Dynamically import the AppHeader to optimize chunk loading
-const AppHeader = dynamic(() => import('@/components/layout/AppHeader').then(mod => mod.AppHeader), { ssr: false });
+import { AppHeader } from '@/components/layout/AppHeader';
+import { PWAInstaller } from '@/components/PWAInstaller';
 
 
 const montserrat = Montserrat({
@@ -19,6 +17,25 @@ const montserrat = Montserrat({
 export const metadata: Metadata = {
   title: 'ServiMap',
   description: 'Conecta con prestadores de servicios verificados en tiempo real.',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'ServiMap',
+  },
+  applicationName: 'ServiMap',
+  keywords: ['servicios', 'profesionales', 'plomeria', 'electricidad', 'limpieza', 'reparaciones'],
+  authors: [{ name: 'ServiMap Team' }],
+  creator: 'ServiMap',
+  publisher: 'ServiMap',
+  category: 'business',
+};
+
+export const viewport = {
+  themeColor: '#3b82f6',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
 };
 
 export default function RootLayout({
@@ -34,6 +51,7 @@ export default function RootLayout({
           <main className="flex-1">{children}</main>
         </div>
         <Toaster />
+        <PWAInstaller />
       </body>
     </html>
   );

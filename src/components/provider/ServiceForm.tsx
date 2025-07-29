@@ -31,7 +31,7 @@ import { PlusCircle } from "lucide-react";
 const serviceFormSchema = z.object({
   title: z.string().min(5, { message: "El título debe tener al menos 5 caracteres." }).max(100),
   description: z.string().min(20, { message: "La descripción debe tener al menos 20 caracteres." }).max(500),
-  price: z.coerce.number().positive({ message: "El precio debe ser un número positivo." }),
+  price: z.number().positive({ message: "El precio debe ser un número positivo." }),
   category: z.string().min(1, { message: "Por favor selecciona una categoría." }),
   // imageUrl: z.string().url().optional(), // Opcional por ahora
 });

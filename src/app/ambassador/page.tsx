@@ -1,16 +1,45 @@
 // src/app/ambassador/page.tsx
+"use client";
+
+import { useState, useEffect } from 'react';
 import { AmbassadorDashboard } from '@/components/ambassador/AmbassadorDashboard';
 import { getAmbassadorData } from '@/services/userService';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertCircle, Crown } from 'lucide-react';
+import { AlertCircle, Crown, Loader2 } from 'lucide-react';
 import { AdBanner } from '@/components/layout/AdBanner';
-
 
 // Simulación de ID de usuario actual. En una app real, esto vendría de una sesión de autenticación.
 const CURRENT_USER_ID = "currentUserDemoId";
 
-export default async function AmbassadorPage() {
-  const ambassadorData = await getAmbassadorData(CURRENT_USER_ID);
+export default function AmbassadorPage() {
+  const [ambassadorData, setAmbassadorData] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<any>(null);
+
+  useEffect(() => {
+    async function loadAmbassadorData() {
+      try {
+        const data = await getAmbassadorData(CURRENT_USER_ID);
+        setAmbassadorData(data);
+      } catch (err) {
+        setError(err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadAmbassadorData();
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="container mx-auto py-8">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Loader2 className="h-8 w-8 animate-spin" />
+          <span className="ml-2">Cargando datos del embajador...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto py-8">
@@ -23,7 +52,7 @@ export default async function AmbassadorPage() {
         </div>
       </div>
       
-      {!ambassadorData ? (
+      {error || !ambassadorData ? (
         <Card className="max-w-xl mx-auto">
             <CardHeader>
                 <CardTitle className="flex items-center gap-2">

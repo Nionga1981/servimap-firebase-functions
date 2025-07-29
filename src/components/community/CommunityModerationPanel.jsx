@@ -281,7 +281,7 @@ const CommunityModerationPanel = ({ communityId, userRole = 'moderator' }) => {
           )}
           {report.contentType === 'message' && (
             <p style={{ color: '#6b7280', fontSize: '14px', fontStyle: 'italic' }}>
-              "{report.content.message}"
+              &quot;{report.content.message}&quot;
             </p>
           )}
         </div>

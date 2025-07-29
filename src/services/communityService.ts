@@ -3,8 +3,7 @@
 "use client";
 
 import type { PreguntaComunidad, ProviderLocation, DemoUser, RespuestaPreguntaComunidad } from '@/types';
-import { getFunctions, httpsCallable } from 'firebase/functions';
-import { app } from '@/lib/firebase';
+import firebaseCompat from '@/lib/firebaseCompat';
 import { mockDemoUsers, mockProviders } from '@/lib/mockData'; // Para enriquecer los datos
 
 export const getCommunityQuestions = async (): Promise<PreguntaComunidad[]> => {
@@ -56,12 +55,10 @@ export const postCommunityQuestion = async (
     ubicacion: ProviderLocation,
 ): Promise<{ success: boolean; message: string; preguntaId: string; }> => {
     console.log('[CommunityService] Posting new community question...');
-    const functions = getFunctions(app);
-    const postQuestionFunction = httpsCallable(functions, 'publicarPreguntaComunidad');
 
     try {
-        const result = await postQuestionFunction({ pregunta, ubicacion });
-        return result.data as { success: boolean; message: string; preguntaId: string; };
+        const result = await firebaseCompat.callFunction('publicarPreguntaComunidad', { pregunta, ubicacion });
+        return result as { success: boolean; message: string; preguntaId: string; };
     } catch (error) {
         console.error("Error calling 'publicarPreguntaComunidad':", error);
         throw error; // Re-lanzar para que el componente UI pueda manejarlo
@@ -74,12 +71,10 @@ export const postCommunityAnswer = async (
   prestadorRecomendadoId?: string,
 ): Promise<{ success: boolean; message: string; }> => {
   console.log('[CommunityService] Posting new community answer...');
-  const functions = getFunctions(app);
-  const postAnswerFunction = httpsCallable(functions, 'responderPreguntaComunidad');
 
   try {
-    const result = await postAnswerFunction({ preguntaId, textoRespuesta, prestadorRecomendadoId });
-    return result.data as { success: boolean; message: string; };
+    const result = await firebaseCompat.callFunction('responderPreguntaComunidad', { preguntaId, textoRespuesta, prestadorRecomendadoId });
+    return result as { success: boolean; message: string; };
   } catch (error) {
     console.error("Error calling 'responderPreguntaComunidad':", error);
     throw error;

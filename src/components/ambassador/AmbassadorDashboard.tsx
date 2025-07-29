@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Crown, DollarSign, Users, Calendar, Handshake } from 'lucide-react';
+import { Crown, DollarSign, Users, Calendar, HeartHandshake } from 'lucide-react';
 import { DEFAULT_USER_AVATAR } from '@/lib/constants';
 
 interface AmbassadorDashboardProps {
@@ -67,7 +67,7 @@ export function AmbassadorDashboard({ data }: AmbassadorDashboardProps) {
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Handshake /> Tus Proveedores Referidos</CardTitle>
+            <CardTitle className="flex items-center gap-2"><HeartHandshake /> Tus Proveedores Referidos</CardTitle>
             <CardDescription>Lista de profesionales que se han unido con tu código.</CardDescription>
           </CardHeader>
           <CardContent>

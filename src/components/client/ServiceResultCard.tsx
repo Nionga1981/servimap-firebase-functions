@@ -5,7 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Star, DollarSign, MapPin, Route, Clock } from 'lucide-react';
+import { Star, DollarSign, MapPin, Navigation2, Clock } from 'lucide-react';
 import type { Service, Provider } from '@/types';
 import { DEFAULT_SERVICE_IMAGE, SERVICE_CATEGORIES } from '@/lib/constants';
 import { Badge } from '@/components/ui/badge';
@@ -102,7 +102,7 @@ export function ServiceResultCard({ service, provider, isCommunityResult, userLo
           <div className="w-full space-y-2">
             <Button asChild className="w-full bg-accent hover:bg-accent/90 text-accent-foreground">
               <Link href={`/?viewProviderRoute=${provider.id}&serviceId=${service.id}`}>
-                <Route className="mr-2 h-4 w-4" /> Ver en Mapa y Ruta
+                <Navigation2 className="mr-2 h-4 w-4" /> Ver en Mapa y Ruta
               </Link>
             </Button>
             <Button asChild variant="outline" className="w-full">

@@ -249,7 +249,7 @@ const CommunityCreator = ({ onCommunityCreated }) => {
           🏘️ Crear Nueva Comunidad
         </h2>
         <p style={{ color: '#6b7280', marginBottom: '32px' }}>
-          Conecta a tus vecinos y fomenta el "consume local" en tu área
+          Conecta a tus vecinos y fomenta el &quot;consume local&quot; en tu área
         </p>
 
         {error && (
