@@ -6,6 +6,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { cn } from '@/lib/utils';
 import { AppHeader } from '@/components/layout/AppHeader';
 import { PWAInstaller } from '@/components/PWAInstaller';
+import { AuthProvider } from '@/contexts/AuthContext';
+import { LocationProvider } from '@/contexts/LocationContext';
 
 
 const montserrat = Montserrat({
@@ -46,12 +48,16 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <body className={cn("min-h-screen bg-background font-sans antialiased", montserrat.variable)}>
-        <div className="relative flex min-h-screen flex-col">
-          <AppHeader />
-          <main className="flex-1">{children}</main>
-        </div>
-        <Toaster />
-        <PWAInstaller />
+        <AuthProvider>
+          <LocationProvider>
+            <div className="relative flex min-h-screen flex-col">
+              <AppHeader />
+              <main className="flex-1">{children}</main>
+            </div>
+            <Toaster />
+            <PWAInstaller />
+          </LocationProvider>
+        </AuthProvider>
       </body>
     </html>
   );
