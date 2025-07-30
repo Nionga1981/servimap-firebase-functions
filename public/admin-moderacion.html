@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ServiMap - Panel de Moderación</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --secondary: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-400: #9ca3af;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
+            --gray-900: #111827;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--gray-50);
+            color: var(--gray-900);
+            line-height: 1.5;
+        }
+
+        .admin-container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            width: 280px;
+            background: white;
+            border-right: 1px solid var(--gray-200);
+            padding: 24px 0;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        .sidebar-header {
+            padding: 0 24px 24px;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        .sidebar-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .sidebar-subtitle {
+            font-size: 0.875rem;
+            color: var(--gray-600);
+            margin-top: 4px;
+        }
+
+        .sidebar-nav {
+            padding: 24px 0;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 24px;
+            color: var(--gray-700);
+            text-decoration: none;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .nav-item:hover {
+            background: var(--gray-50);
+            color: var(--primary);
+        }
+
+        .nav-item.active {
+            background: rgba(37, 99, 235, 0.1);
+            color: var(--primary);
+            border-right: 3px solid var(--primary);
+        }
+
+        .nav-item .material-icons {
+            margin-right: 12px;
+            font-size: 20px;
+        }
+
+        .nav-badge {
+            background: var(--danger);
+            color: white;
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            margin-left: auto;
+            font-weight: 500;
+        }
+
+        .main-content {
+            margin-left: 280px;
+            flex: 1;
+            padding: 24px;
+        }
+
+        .page-header {
+            margin-bottom: 32px;
+        }
+
+        .page-title {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .page-description {
+            color: var(--gray-600);
+            font-size: 1.125rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            border-left: 4px solid;
+        }
+
+        .stat-card.pending {
+            border-left-color: var(--warning);
+        }
+
+        .stat-card.approved {
+            border-left-color: var(--secondary);
+        }
+
+        .stat-card.rejected {
+            border-left-color: var(--danger);
+        }
+
+        .stat-card.total {
+            border-left-color: var(--primary);
+        }
+
+        .stat-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 16px;
+        }
+
+        .stat-card.pending .stat-icon {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+        }
+
+        .stat-card.approved .stat-icon {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--secondary);
+        }
+
+        .stat-card.rejected .stat-icon {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+
+        .stat-card.total .stat-icon {
+            background: rgba(37, 99, 235, 0.1);
+            color: var(--primary);
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            color: var(--gray-600);
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .moderation-queue {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .queue-header {
+            padding: 24px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .queue-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .filter-tabs {
+            display: flex;
+            gap: 8px;
+        }
+
+        .filter-tab {
+            padding: 8px 16px;
+            border-radius: 8px;
+            background: transparent;
+            border: 1px solid var(--gray-300);
+            color: var(--gray-700);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .filter-tab.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .moderation-item {
+            padding: 24px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            gap: 20px;
+        }
+
+        .moderation-item:last-child {
+            border-bottom: none;
+        }
+
+        .item-content {
+            flex: 1;
+        }
+
+        .item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .item-type {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .item-type.verificacion {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+        }
+
+        .item-type.contenido {
+            background: rgba(37, 99, 235, 0.1);
+            color: var(--primary);
+        }
+
+        .item-type.imagen {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--secondary);
+        }
+
+        .item-type.mensaje {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+
+        .item-priority {
+            font-size: 0.75rem;
+            font-weight: 500;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .item-priority.alta {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+
+        .item-priority.media {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+        }
+
+        .item-priority.baja {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--secondary);
+        }
+
+        .item-description {
+            color: var(--gray-700);
+            margin-bottom: 12px;
+        }
+
+        .item-details {
+            display: flex;
+            gap: 16px;
+            font-size: 0.875rem;
+            color: var(--gray-500);
+            margin-bottom: 16px;
+        }
+
+        .item-detail {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .item-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-approve {
+            background: var(--secondary);
+            color: white;
+        }
+
+        .btn-approve:hover {
+            background: #059669;
+        }
+
+        .btn-reject {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-reject:hover {
+            background: #dc2626;
+        }
+
+        .btn-view {
+            background: var(--gray-100);
+            color: var(--gray-700);
+        }
+
+        .btn-view:hover {
+            background: var(--gray-200);
+        }
+
+        .item-preview {
+            width: 120px;
+            height: 90px;
+            background: var(--gray-100);
+            border-radius: 8px;
+            overflow: hidden;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .item-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .item-preview .material-icons {
+            font-size: 32px;
+            color: var(--gray-400);
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 48px;
+            color: var(--gray-500);
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            border: 3px solid var(--gray-300);
+            border-radius: 50%;
+            border-top-color: var(--primary);
+            animation: spin 0.8s linear infinite;
+            margin-right: 12px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 48px 24px;
+            color: var(--gray-500);
+        }
+
+        .empty-state .material-icons {
+            font-size: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            max-width: 800px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            padding: 24px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .close-modal {
+            background: none;
+            border: none;
+            font-size: 24px;
+            color: var(--gray-500);
+            cursor: pointer;
+        }
+
+        .modal-body {
+            padding: 24px;
+        }
+
+        .detail-section {
+            margin-bottom: 24px;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--gray-800);
+        }
+
+        .detail-value {
+            color: var(--gray-600);
+            background: var(--gray-50);
+            padding: 12px;
+            border-radius: 8px;
+            word-break: break-word;
+        }
+
+        .image-preview {
+            max-width: 100%;
+            border-radius: 8px;
+            margin-top: 8px;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .main-content {
+                margin-left: 0;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .moderation-item {
+                flex-direction: column;
+                gap: 16px;
+            }
+
+            .item-preview {
+                width: 100%;
+                height: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-title">ServiMap</div>
+                <div class="sidebar-subtitle">Panel de Moderación</div>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-section="queue">
+                    <span class="material-icons">pending_actions</span>
+                    Cola de moderación
+                    <span class="nav-badge" id="pendingCount">0</span>
+                </a>
+                
+                <a href="#" class="nav-item" data-section="identity">
+                    <span class="material-icons">verified_user</span>
+                    Verificación de identidad
+                    <span class="nav-badge" id="identityCount">0</span>
+                </a>
+                
+                <a href="#" class="nav-item" data-section="content">
+                    <span class="material-icons">content_paste</span>
+                    Contenido de prestadores
+                </a>
+                
+                <a href="#" class="nav-item" data-section="images">
+                    <span class="material-icons">image</span>
+                    Imágenes reportadas
+                </a>
+                
+                <a href="#" class="nav-item" data-section="messages">
+                    <span class="material-icons">chat</span>
+                    Mensajes de chat
+                </a>
+                
+                <a href="#" class="nav-item" data-section="analytics">
+                    <span class="material-icons">analytics</span>
+                    Estadísticas
+                </a>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="page-header">
+                <h1 class="page-title">Moderación con IA</h1>
+                <p class="page-description">Supervisa y gestiona el contenido moderado automáticamente por inteligencia artificial</p>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card pending">
+                    <div class="stat-icon">
+                        <span class="material-icons">pending</span>
+                    </div>
+                    <div class="stat-value" id="statPending">0</div>
+                    <div class="stat-label">Pendientes de revisión</div>
+                </div>
+                
+                <div class="stat-card approved">
+                    <div class="stat-icon">
+                        <span class="material-icons">check_circle</span>
+                    </div>
+                    <div class="stat-value" id="statApproved">0</div>
+                    <div class="stat-label">Aprobados hoy</div>
+                </div>
+                
+                <div class="stat-card rejected">
+                    <div class="stat-icon">
+                        <span class="material-icons">cancel</span>
+                    </div>
+                    <div class="stat-value" id="statRejected">0</div>
+                    <div class="stat-label">Rechazados hoy</div>
+                </div>
+                
+                <div class="stat-card total">
+                    <div class="stat-icon">
+                        <span class="material-icons">assessment</span>
+                    </div>
+                    <div class="stat-value" id="statTotal">0</div>
+                    <div class="stat-label">Total procesados</div>
+                </div>
+            </div>
+
+            <!-- Moderation Queue -->
+            <div class="moderation-queue">
+                <div class="queue-header">
+                    <h2 class="queue-title">Cola de moderación</h2>
+                    <div class="filter-tabs">
+                        <button class="filter-tab active" data-filter="all">Todos</button>
+                        <button class="filter-tab" data-filter="alta">Prioridad alta</button>
+                        <button class="filter-tab" data-filter="verificacion_identidad">Identidad</button>
+                        <button class="filter-tab" data-filter="contenido_prestador">Contenido</button>
+                        <button class="filter-tab" data-filter="imagen">Imágenes</button>
+                        <button class="filter-tab" data-filter="mensaje_chat">Chat</button>
+                    </div>
+                </div>
+                
+                <div id="moderationItems">
+                    <div class="loading">
+                        <span class="loading-spinner"></span>
+                        Cargando elementos de moderación...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for detailed view -->
+    <div class="modal" id="detailModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Detalles del elemento</h3>
+                <button class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Content will be populated dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-functions-compat.js"></script>
+
+    <script src="js/admin-moderacion.js"></script>
+</body>
+</html>
