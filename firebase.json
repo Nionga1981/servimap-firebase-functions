@@ -29,6 +29,10 @@
     ],
     "rewrites": [
       {
+        "source": "/admin-moderacion.html",
+        "destination": "/admin-moderacion.html"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

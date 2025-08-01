@@ -1,254 +1,200 @@
-// ==================== ADMIN AUTHENTICATION & FUNCTIONALITY ====================
+// ==================== ADMIN FUNCTIONALITY ====================
 
-// Elements
-const loadingScreen = document.getElementById('loading-screen');
-const accessDenied = document.getElementById('access-denied');
-const adminPanel = document.getElementById('admin-panel');
-const adminEmail = document.getElementById('admin-email');
-const logoutBtn = document.getElementById('logout-btn');
+// Show admin login modal
+function showAdminLogin() {
+    document.getElementById('admin-login-modal').style.display = 'flex';
+}
 
-// Navigation elements
-const navItems = document.querySelectorAll('.admin-nav__item');
-const navLinks = document.querySelectorAll('.admin-nav__link');
-const sections = document.querySelectorAll('.admin-section');
+// Hide admin login modal
+function hideAdminLogin() {
+    document.getElementById('admin-login-modal').style.display = 'none';
+    document.getElementById('login-error').style.display = 'none';
+}
 
-// Initialize Firebase Auth
-let auth = null;
-let db = null;
-
-document.addEventListener('DOMContentLoaded', () => {
-    // Wait for Firebase to initialize
-    const checkFirebase = setInterval(() => {
-        if (typeof firebase !== 'undefined') {
-            clearInterval(checkFirebase);
-            initializeFirebase();
-        }
-    }, 100);
-    
-    // Timeout after 5 seconds
-    setTimeout(() => {
-        clearInterval(checkFirebase);
-        if (!auth) {
-            showAccessDenied('Error al cargar Firebase. Por favor, recarga la página.');
-        }
-    }, 5000);
-});
-
-// Initialize Firebase
-function initializeFirebase() {
-    try {
-        auth = firebase.auth();
-        db = firebase.firestore();
-        
-        // Check authentication state
-        auth.onAuthStateChanged(async (user) => {
+// Initialize Firebase Auth listener
+document.addEventListener('DOMContentLoaded', function() {
+    // Check if Firebase is available
+    if (typeof firebase !== 'undefined') {
+        firebase.auth().onAuthStateChanged(function(user) {
             if (user) {
-                // User is signed in
-                await checkAdminRole(user);
-            } else {
-                // No user signed in
-                showAccessDenied('Debes iniciar sesión para acceder al panel de administración.');
+                checkAdminStatus(user);
             }
         });
+    }
+    
+    // Admin login form handler
+    const loginForm = document.getElementById('admin-login-form');
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleAdminLogin);
+    }
+});
+
+// Handle admin login
+async function handleAdminLogin(e) {
+    e.preventDefault();
+    
+    const email = document.getElementById('admin-email').value;
+    const password = document.getElementById('admin-password').value;
+    const errorDiv = document.getElementById('login-error');
+    
+    try {
+        // Sign in with Firebase Auth
+        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+        const user = userCredential.user;
+        
+        // Check if user is admin
+        await checkAdminStatus(user);
+        
     } catch (error) {
-        console.error('Error initializing Firebase:', error);
-        showAccessDenied('Error al inicializar la aplicación.');
+        console.error('Login error:', error);
+        errorDiv.textContent = getErrorMessage(error.code);
+        errorDiv.style.display = 'block';
     }
 }
 
-// Check if user has admin role
-async function checkAdminRole(user) {
+// Check if user has admin privileges
+async function checkAdminStatus(user) {
     try {
-        // First, try to get user document from Firestore
-        const userDoc = await db.collection('users').doc(user.uid).get();
+        // Get user's custom claims
+        const idTokenResult = await user.getIdTokenResult();
+        const isAdmin = idTokenResult.claims.admin || false;
         
-        if (userDoc.exists) {
-            const userData = userDoc.data();
-            
-            if (userData.rol === 'admin' || userData.role === 'admin') {
-                // User is admin
-                showAdminPanel(user);
-            } else {
-                // User exists but is not admin
-                showAccessDenied('No tienes permisos de administrador.');
-            }
+        if (isAdmin) {
+            // User is admin, show admin panel
+            hideAdminLogin();
+            showAdminPanel();
+            loadAdminData();
         } else {
-            // User document doesn't exist, check if it's a known admin email
-            const adminEmails = ['fernandobillard@gmail.com']; // Add admin emails here
+            // User is not admin
+            const errorDiv = document.getElementById('login-error');
+            errorDiv.textContent = 'No tienes permisos de administrador';
+            errorDiv.style.display = 'block';
             
-            if (adminEmails.includes(user.email)) {
-                // Create admin user document
-                await db.collection('users').doc(user.uid).set({
-                    email: user.email,
-                    rol: 'admin',
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                showAdminPanel(user);
-            } else {
-                showAccessDenied('No tienes permisos de administrador.');
-            }
+            // Sign out non-admin user
+            await firebase.auth().signOut();
         }
+        
     } catch (error) {
-        console.error('Error checking admin role:', error);
-        showAccessDenied('Error al verificar permisos.');
+        console.error('Error checking admin status:', error);
+        const errorDiv = document.getElementById('login-error');
+        errorDiv.textContent = 'Error al verificar permisos';
+        errorDiv.style.display = 'block';
     }
 }
 
 // Show admin panel
-function showAdminPanel(user) {
-    loadingScreen.style.display = 'none';
-    accessDenied.style.display = 'none';
-    adminPanel.style.display = 'block';
-    
-    // Set user email in header
-    adminEmail.textContent = user.email;
-    
-    // Load dashboard data
-    loadDashboardData();
-    
-    // Initialize navigation
-    initializeNavigation();
+function showAdminPanel() {
+    document.getElementById('admin-panel').style.display = 'block';
+    document.body.style.overflow = 'hidden'; // Prevent background scroll
 }
 
-// Show access denied screen
-function showAccessDenied(message) {
-    loadingScreen.style.display = 'none';
-    adminPanel.style.display = 'none';
-    accessDenied.style.display = 'flex';
-    
-    if (message) {
-        const infoElement = document.querySelector('.access-denied__info');
-        infoElement.textContent = message;
-    }
+// Hide admin panel
+function hideAdminPanel() {
+    document.getElementById('admin-panel').style.display = 'none';
+    document.body.style.overflow = 'auto'; // Restore scroll
 }
 
-// Load dashboard data
-async function loadDashboardData() {
+// Logout function
+async function logout() {
     try {
-        // Get users count
-        const usersSnapshot = await db.collection('users').get();
-        updateStatNumber('users', usersSnapshot.size);
+        await firebase.auth().signOut();
+        hideAdminPanel();
         
-        // Get providers count
-        const providersSnapshot = await db.collection('users')
-            .where('tipoUsuario', '==', 'prestador')
-            .get();
-        updateStatNumber('providers', providersSnapshot.size);
-        
-        // Get business count
-        const businessSnapshot = await db.collection('negocios').get();
-        updateStatNumber('business', businessSnapshot.size);
-        
-        // Get transactions (this month)
-        const startOfMonth = new Date();
-        startOfMonth.setDate(1);
-        startOfMonth.setHours(0, 0, 0, 0);
-        
-        const transactionsSnapshot = await db.collection('pagos')
-            .where('fecha', '>=', startOfMonth)
-            .get();
-        updateStatNumber('transactions', transactionsSnapshot.size);
+        // Reset form
+        document.getElementById('admin-email').value = '';
+        document.getElementById('admin-password').value = '';
         
     } catch (error) {
-        console.error('Error loading dashboard data:', error);
+        console.error('Logout error:', error);
     }
 }
 
-// Update stat number with animation
-function updateStatNumber(type, value) {
-    const statElements = document.querySelectorAll('.stat-number');
-    let element;
-    
-    switch(type) {
-        case 'users':
-            element = statElements[0];
-            break;
-        case 'providers':
-            element = statElements[1];
-            break;
-        case 'business':
-            element = statElements[2];
-            break;
-        case 'transactions':
-            element = statElements[3];
-            break;
+// Load admin dashboard data
+async function loadAdminData() {
+    try {
+        // Simulate loading admin stats (replace with actual Firebase calls)
+        document.getElementById('total-users').textContent = 'Cargando...';
+        document.getElementById('total-services').textContent = 'Cargando...';
+        document.getElementById('avg-rating').textContent = 'Cargando...';
+        document.getElementById('total-revenue').textContent = 'Cargando...';
+        
+        // Call your Cloud Functions to get real data
+        // Example:
+        // const statsResponse = await fetch('/api/admin/stats');
+        // const stats = await statsResponse.json();
+        
+        // For now, show sample data
+        setTimeout(() => {
+            document.getElementById('total-users').textContent = '1,234';
+            document.getElementById('total-services').textContent = '567';
+            document.getElementById('avg-rating').textContent = '4.8';
+            document.getElementById('total-revenue').textContent = '$12,345';
+        }, 1000);
+        
+    } catch (error) {
+        console.error('Error loading admin data:', error);
+    }
+}
+
+// Admin action functions
+function viewUsers() {
+    alert('Funcionalidad de ver usuarios en desarrollo. Se integrará con las Cloud Functions existentes.');
+}
+
+function moderateContent() {
+    // This could redirect to the existing moderation panel
+    window.open('/admin-moderacion.html', '_blank');
+}
+
+function viewAnalytics() {
+    alert('Funcionalidad de analytics en desarrollo. Se integrará con el sistema de reportes existente.');
+}
+
+function exportData() {
+    alert('Funcionalidad de exportar datos en desarrollo.');
+}
+
+function systemSettings() {
+    alert('Configuración del sistema en desarrollo.');
+}
+
+function systemLogs() {
+    alert('Logs del sistema en desarrollo. Se integrará con Firebase Functions logs.');
+}
+
+// Helper function to get user-friendly error messages
+function getErrorMessage(errorCode) {
+    switch (errorCode) {
+        case 'auth/user-not-found':
+            return 'Usuario no encontrado';
+        case 'auth/wrong-password':
+            return 'Contraseña incorrecta';
+        case 'auth/invalid-email':
+            return 'Email inválido';
+        case 'auth/too-many-requests':
+            return 'Demasiados intentos. Intenta más tarde';
+        default:
+            return 'Error de autenticación';
+    }
+}
+
+// Close modal when clicking outside
+window.addEventListener('click', function(e) {
+    const modal = document.getElementById('admin-login-modal');
+    if (e.target === modal) {
+        hideAdminLogin();
+    }
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    // ESC to close modal
+    if (e.key === 'Escape') {
+        hideAdminLogin();
     }
     
-    if (element) {
-        animateNumber(element, value);
+    // Ctrl+Alt+A to open admin login (hidden shortcut)
+    if (e.ctrlKey && e.altKey && e.key === 'a') {
+        showAdminLogin();
     }
-}
-
-// Animate number
-function animateNumber(element, target) {
-    const duration = 1000;
-    const increment = target / (duration / 16);
-    let current = 0;
-    
-    const updateNumber = () => {
-        current += increment;
-        if (current < target) {
-            element.textContent = Math.floor(current).toLocaleString();
-            requestAnimationFrame(updateNumber);
-        } else {
-            element.textContent = target.toLocaleString();
-        }
-    };
-    
-    updateNumber();
-}
-
-// Initialize navigation
-function initializeNavigation() {
-    navLinks.forEach((link, index) => {
-        link.addEventListener('click', (e) => {
-            e.preventDefault();
-            
-            // Remove active class from all items
-            navItems.forEach(item => item.classList.remove('active'));
-            sections.forEach(section => section.classList.remove('active'));
-            
-            // Add active class to clicked item
-            navItems[index].classList.add('active');
-            
-            // Show corresponding section
-            const targetId = link.getAttribute('href').substring(1);
-            const targetSection = document.getElementById(targetId);
-            if (targetSection) {
-                targetSection.classList.add('active');
-            }
-        });
-    });
-}
-
-// Logout functionality
-if (logoutBtn) {
-    logoutBtn.addEventListener('click', async () => {
-        try {
-            await auth.signOut();
-            window.location.href = '/';
-        } catch (error) {
-            console.error('Error signing out:', error);
-            alert('Error al cerrar sesión. Por favor, intenta de nuevo.');
-        }
-    });
-}
-
-// Helper function to format dates
-function formatDate(timestamp) {
-    if (!timestamp) return '-';
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleDateString('es-MX', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-    });
-}
-
-// Helper function to format currency
-function formatCurrency(amount) {
-    return new Intl.NumberFormat('es-MX', {
-        style: 'currency',
-        currency: 'MXN'
-    }).format(amount);
-}
+});
