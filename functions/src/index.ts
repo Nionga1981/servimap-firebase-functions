@@ -5799,7 +5799,7 @@ export const createCustomQuotation = onCall<{
 
         // 6. Crear mensaje de sistema en el chat con nueva estructura
         const messageRef = db.collection("chatMessages").doc();
-        const systemMessage: ChatMessage = {
+        const systemMessage = {
           chatId,
           senderId: "system",
           messageType: "quotation",
@@ -5985,7 +5985,7 @@ export const acceptRejectQuotation = onCall<{
 
           // Crear mensaje de sistema
           const messageRef = db.collection("chatMessages").doc();
-          const systemMessage: ChatMessage = {
+          const systemMessage = {
             chatId: quotationData.chatId,
             senderId: "system",
             senderType: "system",
@@ -6031,7 +6031,7 @@ export const acceptRejectQuotation = onCall<{
 
           // Crear mensaje de sistema
           const messageRef = db.collection("chatMessages").doc();
-          const systemMessage: ChatMessage = {
+          const systemMessage = {
             chatId: quotationData.chatId,
             senderId: "system",
             senderType: "system",
@@ -6063,7 +6063,7 @@ export const acceptRejectQuotation = onCall<{
 
           // Crear mensaje de negociación
           const messageRef = db.collection("chatMessages").doc();
-          const negotiationMessage: ChatMessage = {
+          const negotiationMessage = {
             chatId: quotationData.chatId,
             senderId: userId,
             senderType: "user",
@@ -6219,7 +6219,7 @@ export const handleAsyncQuotation = onCall<{
         const chatRef = db.collection("chats").doc();
         chatId = chatRef.id;
 
-        const chatData: ChatData = {
+        const chatData = {
           userId,
           providerId,
           serviceType,
@@ -6240,16 +6240,14 @@ export const handleAsyncQuotation = onCall<{
 
       // 3. Crear mensaje inicial con la descripción del problema
       const messageRef = db.collection("chatMessages").doc();
-      const initialMessage: ChatMessage = {
+      const initialMessage = {
         chatId,
         senderId: userId,
         senderType: "user",
         message: `🔧 Solicitud de cotización:\n\n${description}${preferredTime ? `\n\n⏰ Tiempo preferido: ${preferredTime.toDate().toLocaleString()}` : ''}`,
         messageType: "text",
         createdAt: now,
-        readBy: {
-          user: now
-        }
+        readBy: []
       };
 
       await messageRef.set(initialMessage);
@@ -6264,16 +6262,14 @@ export const handleAsyncQuotation = onCall<{
 
       // 5. Crear mensaje de sistema explicando el proceso asíncrono
       const systemMessageRef = db.collection("chatMessages").doc();
-      const systemMessage: ChatMessage = {
+      const systemMessage = {
         chatId,
         senderId: "system",
         senderType: "system",
         message: `📲 Tu solicitud ha sido enviada al prestador. Te notificaremos cuando esté disponible para revisar tu caso.`,
         messageType: "system",
         createdAt: now,
-        readBy: {
-          user: now
-        }
+        readBy: []
       };
 
       await systemMessageRef.set(systemMessage);
@@ -6296,13 +6292,13 @@ export const handleAsyncQuotation = onCall<{
               userId,
               urgency,
               serviceType,
-              priority: urgency === 'high' ? "high" : "normal"
+              priority: urgency
             },
             tokens: providerData.fcmTokens,
             android: {
-              priority: urgency === 'high' ? "high" : "normal",
+              priority: (urgency === 'high' ? "high" : "normal") as "high" | "normal",
               notification: {
-                priority: urgency === 'high' ? "high" : "default"
+                priority: (urgency === 'high' ? "high" : "default") as "high" | "default" | "low" | "min" | "max"
               }
             },
             apns: {
@@ -6348,7 +6344,7 @@ export const handleAsyncQuotation = onCall<{
         "usuario",
         "ASYNC_QUOTATION_REQUESTED" as ActivityLogAction,
         `⏰ Solicitud de cotización asíncrona: ${serviceType}`,
-        { tipo: "async_quotation_request", chatId },
+        { tipo: "async_quotation_request", id: chatId },
         {
           providerId,
           serviceType,
@@ -6380,6 +6376,147 @@ export const handleAsyncQuotation = onCall<{
       }
       
       throw new HttpsError("internal", "Error interno procesando solicitud asíncrona");
+    }
+  }
+);
+
+// ====================================================================
+// 🖼️ LOGO UPDATE FUNCTIONS
+// ====================================================================
+
+/**
+ * 🖼️ updateProviderLogo
+ * Actualiza el logo URL de un prestador
+ */
+export const updateProviderLogo = onCall<{
+  providerId: string;
+  logoURL: string;
+}>(
+  async (request): Promise<{
+    success: boolean;
+    message: string;
+  }> => {
+    const { providerId, logoURL } = request.data;
+    const userId = request.auth?.uid;
+
+    if (!userId) {
+      throw new HttpsError("unauthenticated", "Usuario no autenticado");
+    }
+
+    console.log(`🖼️ Actualizando logo para prestador: ${providerId}`);
+
+    try {
+      // Verificar que el usuario es el dueño del perfil
+      if (userId !== providerId) {
+        throw new HttpsError("permission-denied", "No tienes permiso para actualizar este perfil");
+      }
+
+      // Actualizar el documento del prestador
+      await db.collection("prestadores").doc(providerId).update({
+        logoURL,
+        updatedAt: admin.firestore.Timestamp.now()
+      });
+
+      // Registrar actividad
+      await logActivity(
+        userId,
+        "prestador",
+        "PROFILE_LOGO_UPDATED" as ActivityLogAction,
+        `🖼️ Logo de perfil actualizado`,
+        { tipo: "profile_update", id: providerId },
+        { logoURL }
+      );
+
+      console.log(`✅ Logo actualizado para prestador: ${providerId}`);
+
+      return {
+        success: true,
+        message: "Logo actualizado exitosamente"
+      };
+
+    } catch (error) {
+      console.error("❌ Error actualizando logo:", error);
+      
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      
+      throw new HttpsError("internal", "Error interno actualizando logo");
+    }
+  }
+);
+
+/**
+ * 🏢 updateBusinessLogo
+ * Actualiza el logo URL de un negocio fijo
+ */
+export const updateBusinessLogo = onCall<{
+  businessId: string;
+  logoURL: string;
+}>(
+  async (request): Promise<{
+    success: boolean;
+    message: string;
+  }> => {
+    const { businessId, logoURL } = request.data;
+    const userId = request.auth?.uid;
+
+    if (!userId) {
+      throw new HttpsError("unauthenticated", "Usuario no autenticado");
+    }
+
+    console.log(`🖼️ Actualizando logo para negocio: ${businessId}`);
+
+    try {
+      // Verificar permisos (el usuario debe ser el embajador del negocio)
+      const businessDoc = await db.collection("negocios_fijos").doc(businessId).get();
+      
+      if (!businessDoc.exists) {
+        throw new HttpsError("not-found", "Negocio no encontrado");
+      }
+
+      const businessData = businessDoc.data();
+      
+      // Verificar que el usuario es el embajador del negocio
+      if (businessData?.embajadorId !== userId) {
+        // También verificar si es admin
+        const adminCheck = await db.collection("admins").doc(userId).get();
+        if (!adminCheck.exists) {
+          throw new HttpsError("permission-denied", "No tienes permiso para actualizar este negocio");
+        }
+      }
+
+      // Actualizar el documento del negocio
+      await businessDoc.ref.update({
+        logoURL,
+        updatedAt: admin.firestore.Timestamp.now()
+      });
+
+      // Registrar actividad
+      await logActivity(
+        userId,
+        businessData?.embajadorId === userId ? "usuario" : "admin",
+        "BUSINESS_LOGO_UPDATED" as ActivityLogAction,
+        `🖼️ Logo de negocio actualizado: ${businessData?.nombre}`,
+        { tipo: "business_update", id: businessId },
+        { logoURL, businessName: businessData?.nombre }
+      );
+
+      console.log(`✅ Logo actualizado para negocio: ${businessId}`);
+
+      return {
+        success: true,
+        message: "Logo del negocio actualizado exitosamente"
+      };
+
+    } catch (error) {
+      console.error("❌ Error actualizando logo del negocio:", error);
+      
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      
+      throw new HttpsError("internal", "Error interno actualizando logo del negocio");
     }
   }
 );

@@ -1423,7 +1423,7 @@ export const addBusinessToCommunity = onCall<{
       // 6. Crear actividad en el feed
       await createFeedActivity(communityId, "business_verified", businessId, {
         businessName: businessDoc.data()?.businessName || "Negocio",
-        consumeLocalPoints: consumeLocalProgram.pointsPerPurchase || 0,
+        consumeLocalPoints: (consumeLocalProgram as any).pointsPerPurchase || 0,
         offersDiscount: consumeLocalProgram.discountForMembers > 0
       });
 

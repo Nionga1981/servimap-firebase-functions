@@ -184,7 +184,22 @@ export default function MapDisplay({
   };
 
   // Crear íconos personalizados para markers
-  const getMarkerIcon = (type, isAvailable, isPremium) => {
+  const getMarkerIcon = (type, isAvailable, isPremium, logoURL) => {
+    // Si hay logo personalizado, usarlo
+    if (logoURL) {
+      return {
+        url: logoURL,
+        scaledSize: new google.maps.Size(40, 40),
+        origin: new google.maps.Point(0, 0),
+        anchor: new google.maps.Point(20, 20),
+        shape: {
+          coords: [20, 20, 20],
+          type: 'circle'
+        }
+      };
+    }
+    
+    // Íconos por defecto
     let color = '#9ca3af'; // Gris por defecto
     
     if (type === 'provider') {
@@ -304,7 +319,7 @@ export default function MapDisplay({
               lat: provider.location._latitude,
               lng: provider.location._longitude
             }}
-            icon={getMarkerIcon('provider', provider.isAvailable, provider.isPremium)}
+            icon={getMarkerIcon('provider', provider.isAvailable, provider.isPremium, provider.logoURL)}
             onClick={() => handleMarkerClick(provider, 'provider')}
             title={provider.displayName}
           />
@@ -318,7 +333,7 @@ export default function MapDisplay({
               lat: business.location._latitude,
               lng: business.location._longitude
             }}
-            icon={getMarkerIcon('business')}
+            icon={getMarkerIcon('business', true, false, business.logoURL)}
             onClick={() => handleMarkerClick(business, 'business')}
             title={business.businessName}
           />
@@ -455,7 +470,21 @@ function MarkerInfoCard({ item }) {
       <CardContent className="p-4">
         <div className="space-y-3">
           {/* Header */}
-          <div className="flex items-start justify-between">
+          <div className="flex items-start gap-3">
+            {/* Logo */}
+            {item.logoURL && (
+              <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
+                <img 
+                  src={item.logoURL} 
+                  alt={isProvider ? item.displayName : item.businessName}
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                  }}
+                />
+              </div>
+            )}
+            
             <div className="flex-1">
               <h3 className="font-semibold text-sm">
                 {isProvider ? item.displayName : item.businessName}

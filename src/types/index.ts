@@ -51,6 +51,7 @@ export interface Provider {
   id: string;
   name: string;
   avatarUrl: string;
+  logoURL?: string;
   dataAiHint?: string;
   rating: number;
   ratingCount: number;
@@ -907,6 +908,40 @@ export interface PreguntaComunidad {
   // Para enriquecer la UI
   nombreUsuario?: string;
   avatarUsuario?: string;
+}
+
+export interface NegocioFijo {
+  id?: string;
+  nombre: string;
+  categoria: string;
+  direccion: string;
+  ubicacion: ProviderLocation;
+  logoURL?: string;
+  descripcion?: string;
+  fotos?: string[];
+  video?: string;
+  horarios?: {
+    [dia: string]: {
+      open: string;
+      close: string;
+      closed: boolean;
+    };
+  };
+  contacto?: {
+    telefono?: string;
+    email?: string;
+    website?: string;
+    whatsapp?: string;
+    facebook?: string;
+  };
+  activo: boolean;
+  embajadorId?: string;
+  fechaCreacion: number;
+  updatedAt?: number;
+  calificacion?: number;
+  numCalificaciones?: number;
+  isPromotedBusiness?: boolean;
+  promotionExpiresAt?: number;
 }
     
 

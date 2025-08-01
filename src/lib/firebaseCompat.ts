@@ -100,6 +100,22 @@ class FirebaseFunctionCompat {
     }
     return '';
   }
+
+  // Helper method to update provider logo
+  async updateProviderLogo(providerId: string, logoURL: string): Promise<void> {
+    try {
+      const { db } = await import('@/lib/firebase');
+      const { doc, updateDoc } = await import('firebase/firestore');
+      
+      const providerRef = doc(db, 'prestadores', providerId);
+      await updateDoc(providerRef, { logoURL });
+      
+      console.log('[FirebaseCompat] Provider logo updated successfully');
+    } catch (error) {
+      console.error('[FirebaseCompat] Error updating provider logo:', error);
+      throw error;
+    }
+  }
 }
 
 // Create singleton instance

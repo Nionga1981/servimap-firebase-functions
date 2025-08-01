@@ -21,6 +21,9 @@ import { SERVICE_CATEGORIES } from "@/lib/constants";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Send, VenetianMask } from "lucide-react";
 import firebaseCompat from "@/lib/firebaseCompat";
+import { LogoUpload } from "@/components/ui/LogoUpload";
+import { uploadLogo } from "@/lib/storage";
+import { useState } from "react";
 
 const providerSignupSchema = z.object({
   name: z.string().min(3, { message: "El nombre debe tener al menos 3 caracteres." }).max(50),
@@ -45,6 +48,10 @@ type ProviderSignupFormValues = z.infer<typeof providerSignupSchema>;
 
 export function ProviderSignupForm() {
   const { toast } = useToast();
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  
   const form = useForm<ProviderSignupFormValues>({
     resolver: zodResolver(providerSignupSchema),
     defaultValues: {
@@ -62,6 +69,10 @@ export function ProviderSignupForm() {
 
   async function onSubmit(data: ProviderSignupFormValues) {
     try {
+        setUploadingLogo(true);
+        let logoURL = "";
+        
+        // First register the provider to get the ID
         const registrationData = {
             name: data.name,
             specialties: data.specialties.split(',').map(s => s.trim()),
@@ -73,12 +84,28 @@ export function ProviderSignupForm() {
         // Use compatibility layer to call Firebase function
         const result = await firebaseCompat.callFunction('registerProviderProfile', registrationData);
         console.log('Provider registration result:', result);
+        
+        // If registration successful and logo provided, upload it
+        if (result.data?.providerId && logoFile) {
+            try {
+                const uploadResult = await uploadLogo(logoFile, 'prestador', result.data.providerId);
+                logoURL = uploadResult.url;
+                
+                // Update the provider document with the logo URL
+                await firebaseCompat.updateProviderLogo(result.data.providerId, logoURL);
+            } catch (uploadError) {
+                console.error('Error uploading logo:', uploadError);
+                // Don't fail the registration if logo upload fails
+            }
+        }
 
         toast({
             title: "¡Registro Enviado!",
             description: "Tu perfil de proveedor ha sido creado exitosamente. Si propusiste una nueva categoría, será revisada por nuestro equipo.",
         });
         form.reset();
+        setLogoFile(null);
+        setLogoPreview(null);
     } catch (error: any) {
         console.error("Error en el registro:", error);
         toast({
@@ -86,6 +113,8 @@ export function ProviderSignupForm() {
             description: error.message || "Ocurrió un problema al enviar tu registro. Por favor, intenta de nuevo.",
             variant: "destructive",
         });
+    } finally {
+        setUploadingLogo(false);
     }
   }
 
@@ -107,6 +136,22 @@ export function ProviderSignupForm() {
               <FormMessage />
             </FormItem>
           )}
+        />
+        
+        <LogoUpload
+          value={logoPreview || undefined}
+          onChange={(file, preview) => {
+            setLogoFile(file);
+            setLogoPreview(preview);
+          }}
+          onRemove={() => {
+            setLogoFile(null);
+            setLogoPreview(null);
+          }}
+          label="Logo del Negocio (Opcional)"
+          description="Tu logo aparecerá en el mapa y en tu perfil. PNG, JPG, WebP o SVG, máx 1MB"
+          disabled={form.formState.isSubmitting || uploadingLogo}
+          loading={uploadingLogo}
         />
         
         <FormField
@@ -238,11 +283,11 @@ export function ProviderSignupForm() {
           )}
         />
         
-        <Button type="submit" disabled={form.formState.isSubmitting} size="lg">
-          {form.formState.isSubmitting ? (
+        <Button type="submit" disabled={form.formState.isSubmitting || uploadingLogo} size="lg">
+          {(form.formState.isSubmitting || uploadingLogo) ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Enviando Registro...
+              {uploadingLogo ? 'Subiendo Logo...' : 'Enviando Registro...'}
             </>
           ) : (
             <>

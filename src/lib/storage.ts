@@ -272,6 +272,60 @@ class StorageManager {
     return originalUrl;
   }
 
+  // Upload logo for businesses or providers
+  async uploadLogo(
+    file: File,
+    type: 'prestador' | 'negocio',
+    id: string,
+    onProgress?: (progress: UploadProgress) => void
+  ): Promise<UploadResult> {
+    // Validate logo file
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'];
+    if (!allowedTypes.includes(file.type)) {
+      throw new Error('Solo se permiten archivos de imagen (JPEG, PNG, WebP, SVG) para logos');
+    }
+
+    if (file.size > 1 * 1024 * 1024) { // 1MB limit for logos
+      throw new Error('El logo debe ser menor a 1MB');
+    }
+
+    // Compress image if it's not SVG
+    let processedFile = file;
+    if (file.type !== 'image/svg+xml') {
+      processedFile = await this.compressImage(file, 512, 0.9); // Max 512px for logos
+    }
+
+    // Determine path based on type
+    const basePath = type === 'prestador' ? 'prestadores/logos' : 'negociosFijos/logos';
+    const fileName = `${id}.${this.getFileExtension(processedFile.type)}`;
+    const fullPath = `${basePath}/${fileName}`;
+    
+    // Delete existing logo if any
+    try {
+      await this.deleteFile(fullPath);
+    } catch (error) {
+      // Ignore error if file doesn't exist
+      console.log('No existing logo to delete');
+    }
+
+    // Upload new logo
+    const storageRef = ref(storage, fullPath);
+    const result = await this.uploadDirect(processedFile, storageRef);
+    
+    return result;
+  }
+
+  // Helper function to get file extension from MIME type
+  private getFileExtension(mimeType: string): string {
+    const mimeToExt: { [key: string]: string } = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'image/svg+xml': 'svg'
+    };
+    return mimeToExt[mimeType] || 'png';
+  }
+
   // Compress image before upload
   async compressImage(file: File, maxWidth = 1920, quality = 0.8): Promise<File> {
     return new Promise((resolve) => {
@@ -315,5 +369,6 @@ export const uploadProfileImage = storageManager.uploadProfileImage.bind(storage
 export const uploadVerificationDocument = storageManager.uploadVerificationDocument.bind(storageManager);
 export const uploadPortfolioImage = storageManager.uploadPortfolioImage.bind(storageManager);
 export const uploadQuotationAttachment = storageManager.uploadQuotationAttachment.bind(storageManager);
+export const uploadLogo = storageManager.uploadLogo.bind(storageManager);
 export const deleteFile = storageManager.deleteFile.bind(storageManager);
 export const compressImage = storageManager.compressImage.bind(storageManager);

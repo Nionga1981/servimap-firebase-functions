@@ -114,9 +114,9 @@ export const validateFreeUserRestrictions = onCall(async (request) => {
   }
 
   try {
-    const premiumCheck = await checkPremiumStatus({ auth: request.auth, data: {} });
+    const premiumCheck = await (checkPremiumStatus as any)({ auth: request.auth, data: {} }, {});
     
-    if (premiumCheck.data.isPremium) {
+    if ((premiumCheck as any)?.data?.isPremium) {
       return { allowed: true, restrictions: [] };
     }
 
@@ -483,14 +483,14 @@ export const handleLastMinuteConfirmation = onCall(async (request) => {
         });
 
         // Reconfigurar recordatorios para nuevo horario
-        await setupAutomaticReminders({
+        await (setupAutomaticReminders as any)({
           auth: request.auth,
           data: {
             serviceRequestId,
             scheduledDateTime: newDateTime,
             userTimezone: serviceData?.userTimezone || 'America/Mexico_City'
           }
-        });
+        }, {});
 
         return { 
           success: true, 
@@ -588,9 +588,9 @@ export const getPremiumRecommendations = onCall(async (request) => {
 
   try {
     // Verificar estado Premium
-    const premiumCheck = await checkPremiumStatus({ auth: request.auth, data: {} });
+    const premiumCheck = await (checkPremiumStatus as any)({ auth: request.auth, data: {} }, {});
     
-    if (!premiumCheck.data.isPremium) {
+    if (!(premiumCheck as any)?.data?.isPremium) {
       throw new HttpsError('permission-denied', 'Función disponible solo para usuarios Premium');
     }
 

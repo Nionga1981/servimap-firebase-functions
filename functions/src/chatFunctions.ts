@@ -699,14 +699,14 @@ export const sendChatMessage = onCall<{
       if (messageType === 'text') {
         try {
           const moderateChatWithAI = (await import("./chatFunctions.js")).moderateChatWithAI;
-          const moderationRequest = await moderateChatWithAI.run({
+          const moderationRequest = await (moderateChatWithAI as any)({
             data: {
               chatId,
               senderId,
               message,
               messageType: 'text'
             }
-          });
+          }, {});
           
           moderationResult = moderationRequest;
         } catch (moderationError) {
@@ -746,7 +746,6 @@ export const sendChatMessage = onCall<{
         mediaUrl,
         // Campos de seguridad
         // Remove encrypted fields as they're not part of ChatMessage interface
-        moderationScore: moderationResult.severityScore || 0,
         rateLimitRemaining: rateLimitCheck.remaining
       };
 

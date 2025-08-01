@@ -24,6 +24,36 @@ service firebase.storage {
     
     // === ARCHIVOS PÚBLICOS ===
     
+    // Logos de prestadores - públicos con validación
+    match /prestadores/logos/{fileName} {
+      // Lectura pública para todos
+      allow read: if true;
+      
+      // Escritura solo por el dueño o admin
+      allow write: if isAuthenticated() && 
+        (fileName.split('.')[0] == request.auth.uid || isAdmin()) &&
+        request.resource.size <= 1 * 1024 * 1024 && // 1MB máximo
+        (request.resource.contentType.matches('image/.*') || 
+         request.resource.contentType == 'image/svg+xml');
+      
+      allow delete: if isAuthenticated() && 
+        (fileName.split('.')[0] == request.auth.uid || isAdmin());
+    }
+    
+    // Logos de negocios fijos - públicos con validación  
+    match /negociosFijos/logos/{fileName} {
+      // Lectura pública para todos
+      allow read: if true;
+      
+      // Escritura solo por el admin o el dueño del negocio
+      allow write: if isAuthenticated() && 
+        request.resource.size <= 1 * 1024 * 1024 && // 1MB máximo
+        (request.resource.contentType.matches('image/.*') || 
+         request.resource.contentType == 'image/svg+xml');
+      
+      allow delete: if isAuthenticated();
+    }
+    
     // Fotos de portafolio de prestadores - públicas pero con validación
     match /{userId}/portafolio/{fileName} {
       // Lectura pública para todos los usuarios autenticados

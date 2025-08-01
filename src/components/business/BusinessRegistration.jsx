@@ -15,6 +15,8 @@ import {
   Building,
   Gift
 } from 'lucide-react';
+import { LogoUpload } from '../ui/LogoUpload';
+import { uploadLogo } from '@/lib/storage';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -45,6 +47,11 @@ const BusinessRegistration = ({
     address: '',
     location: { lat: null, lng: null }
   });
+  
+  // Logo state
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   // Perfil del negocio
   const [profileData, setProfileData] = useState({
@@ -144,7 +151,11 @@ const BusinessRegistration = ({
 
     try {
       // Usar función optimizada de validación
-      const validateBusinessRegistration = firebase.functions().httpsCallable('validateBusinessRegistration');
+      const validateBusinessRegistration = window.firebase ? window.firebase.functions().httpsCallable('validateBusinessRegistration') : null;
+      if (!validateBusinessRegistration) {
+        setError('Firebase no está inicializado');
+        return;
+      }
       
       const result = await validateBusinessRegistration({
         businessData: {
@@ -201,11 +212,15 @@ const BusinessRegistration = ({
   const handleCompleteRegistration = async () => {
     setLoading(true);
     setStep(5); // Procesando
+    setUploadingLogo(true);
 
     try {
       // Usar función de promoción especial o función normal
       const functionName = useLaunchPromo ? 'registerLaunchPromotionBusiness' : 'registerCompleteFixedBusiness';
-      const registrationFunction = firebase.functions().httpsCallable(functionName);
+      const registrationFunction = window.firebase ? window.firebase.functions().httpsCallable(functionName) : null;
+      if (!registrationFunction) {
+        throw new Error('Firebase no está inicializado');
+      }
       
       const registrationParams = useLaunchPromo ? {
         // Parámetros para promoción especial
@@ -243,11 +258,29 @@ const BusinessRegistration = ({
       };
       
       const registrationResult = await registrationFunction(registrationParams);
+      
+      // Upload logo if provided and registration successful
+      if (registrationResult.data?.businessId && logoFile) {
+        try {
+          const uploadResult = await uploadLogo(logoFile, 'negocio', registrationResult.data.businessId);
+          const logoURL = uploadResult.url;
+          
+          // Update business document with logo URL
+          const db = window.firebase.firestore();
+          await db.collection('negocios_fijos').doc(registrationResult.data.businessId).update({ logoURL });
+        } catch (uploadError) {
+          console.error('Error uploading logo:', uploadError);
+          // Don't fail the registration if logo upload fails
+        }
+      }
 
       // Solo procesar acciones post-registro si NO es promoción especial
       // (la promoción especial ya incluye todo el procesamiento)
       if (!useLaunchPromo) {
-        const processPostRegistrationActions = firebase.functions().httpsCallable('processPostRegistrationActions');
+        const processPostRegistrationActions = window.firebase ? window.firebase.functions().httpsCallable('processPostRegistrationActions') : null;
+        if (!processPostRegistrationActions) {
+          throw new Error('Firebase no está inicializado');
+        }
         
         await processPostRegistrationActions({
           businessId: registrationResult.data.businessId,
@@ -273,6 +306,7 @@ const BusinessRegistration = ({
       setStep(4); // Volver a preview
     } finally {
       setLoading(false);
+      setUploadingLogo(false);
     }
   };
 
@@ -432,6 +466,22 @@ const BusinessRegistration = ({
                 onChange={(e) => setBusinessData(prev => ({ ...prev, address: e.target.value }))}
               />
             </div>
+            
+            <LogoUpload
+              value={logoPreview || undefined}
+              onChange={(file, preview) => {
+                setLogoFile(file);
+                setLogoPreview(preview);
+              }}
+              onRemove={() => {
+                setLogoFile(null);
+                setLogoPreview(null);
+              }}
+              label="Logo del Negocio (Opcional)"
+              description="Tu logo aparecerá en el mapa y en tu perfil. PNG, JPG, WebP o SVG, máx 1MB"
+              disabled={loading || uploadingLogo}
+              loading={uploadingLogo}
+            />
 
             {/* Promoción de lanzamiento */}
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
@@ -728,8 +778,16 @@ const BusinessRegistration = ({
             <CardContent>
               <div className="border rounded-lg p-6 bg-gradient-to-br from-white to-gray-50">
                 <div className="flex items-start gap-4 mb-4">
-                  <div className="w-16 h-16 bg-[#ac7afc] rounded-lg flex items-center justify-center">
-                    <Building className="w-8 h-8 text-white" />
+                  <div className="w-16 h-16 bg-[#ac7afc] rounded-lg flex items-center justify-center overflow-hidden">
+                    {logoPreview ? (
+                      <img 
+                        src={logoPreview} 
+                        alt="Logo del negocio" 
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <Building className="w-8 h-8 text-white" />
+                    )}
                   </div>
                   <div className="flex-1">
                     <h3 className="text-xl font-bold text-[#ac7afc]">{businessData.name}</h3>
@@ -853,9 +911,9 @@ const BusinessRegistration = ({
             <Button 
               onClick={handleCompleteRegistration}
               className="flex-1 bg-gradient-to-r from-[#ac7afc] to-[#3ce923] text-white hover:opacity-90"
-              disabled={loading}
+              disabled={loading || uploadingLogo}
             >
-              {loading ? 'Registrando...' : 'Confirmar Registro'}
+              {loading ? (uploadingLogo ? 'Subiendo Logo...' : 'Registrando...') : 'Confirmar Registro'}
             </Button>
           </div>
         </div>

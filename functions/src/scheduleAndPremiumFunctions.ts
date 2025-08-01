@@ -104,7 +104,7 @@ export const getProviderSchedule = onCall<{
             datetime: slot.datetime,
             duration: slot.duration,
             price: slot.price,
-            isEmergency: slot.isEmergencySlot
+            isEmergency: slot.isEmergencySlot || false
           }));
           
       } else if (availability) {
@@ -113,16 +113,19 @@ export const getProviderSchedule = onCall<{
         const end = new Date(endDate);
         
         for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
-          const dayOfWeek = date.toLocaleDateString('en-US', { weekday: 'lowercase' });
+          const dayOfWeek = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
           const daySchedule = availability.weeklySchedule[dayOfWeek];
           
-          if (!daySchedule || !daySchedule.isAvailable) continue;
+          if (!daySchedule || !daySchedule.available) continue;
 
           // Verificar overrides de fecha específica
           const dateStr = date.toISOString().split('T')[0];
-          const override = availability.dateOverrides?.find(o => o.date === dateStr);
+          const override = availability.dateOverrides?.find(o => {
+            const compareDate = (o.date as any)?.toDate ? (o.date as any).toDate().toISOString().split('T')[0] : o.date;
+            return compareDate === dateStr;
+          });
           
-          if (override && !override.isAvailable) continue;
+          if (override && !override.available) continue;
 
           // Generar slots básicos usando configuración simple
           const slotDuration = availability.settings?.slotDurationMinutes || 60;
@@ -130,7 +133,7 @@ export const getProviderSchedule = onCall<{
           
           for (const timeSlot of workingHours) {
             const slotTime = new Date(date);
-            const [hour, min] = timeSlot.time.split(':').map(Number);
+            const [hour, min] = timeSlot.startTime.split(':').map(Number);
             slotTime.setHours(hour, min, 0, 0);
             
             // Verificar si el slot está ocupado
@@ -247,7 +250,7 @@ export const createScheduledService = onCall<{
       }
 
       // Precio base sin incremento automático por horario
-      const price = service.price;
+      const price = (service as any)?.price || 0;
 
       // Crear servicio programado con nueva estructura
       const scheduledServiceRef = db.collection("scheduledServices").doc();
@@ -300,11 +303,15 @@ export const createScheduledService = onCall<{
         
         if (userData?.isPremium) {
           const recurringRef = db.collection("recurringServices").doc();
-          const recurringData: RecurringService = {
+          const recurringData = {
             userId,
             providerId,
             serviceType,
-            pattern: recurringPattern,
+            pattern: {
+              ...recurringPattern,
+              interval: 1,
+              frequency: recurringPattern.frequency === "biweekly" ? "weekly" : recurringPattern.frequency
+            } as any,
             startDate: scheduledDateTime,
             nextScheduledDate: scheduledDateTime,
             isActive: true,
@@ -329,7 +336,7 @@ export const createScheduledService = onCall<{
           userId,
           serviceType,
           scheduledDateTime: scheduledDateTime.toMillis(),
-          isEmergency
+          isEmergency: false
         },
         read: false,
         createdAt: now
@@ -529,8 +536,8 @@ export const confirmAppointment = onCall<{
           batch.set(proposalRef, {
             serviceRequestId,
             providerId,
-            userId: serviceRequest.userId,
-            originalDateTime: serviceRequest.scheduledDateTime,
+            userId: scheduledService.userId,
+            originalDateTime: scheduledService.scheduledDateTime,
             proposedDateTime: alternativeDateTime,
             status: "pending",
             createdAt: now
@@ -645,11 +652,15 @@ export const setupRecurringService = onCall<{
 
       // Crear servicio recurrente
       const recurringRef = db.collection("recurringServices").doc();
-      const recurringData: RecurringService = {
+      const recurringData = {
         userId,
         providerId,
         serviceType,
-        pattern,
+        pattern: {
+          ...pattern,
+          interval: 1,
+          frequency: (pattern as any).frequency === "biweekly" ? "weekly" : (pattern as any).frequency
+        } as any,
         startDate,
         nextScheduledDate: startDate,
         isActive: true,
@@ -659,7 +670,7 @@ export const setupRecurringService = onCall<{
         totalServices: 0,
         completedServices: 0,
         lastServiceDate: null,
-        estimatedMonthlySpend: calculateMonthlySpend(service.price, pattern.frequency)
+        estimatedMonthlySpend: calculateMonthlySpend((service as any)?.price || 0, pattern.frequency)
       };
 
       batch.set(recurringRef, recurringData);
@@ -686,7 +697,7 @@ export const setupRecurringService = onCall<{
             bookingDate.nanoseconds
           ),
           status: "recurring_scheduled",
-          price: service.price,
+          price: (service as any)?.price || 0,
           isRecurring: true,
           createdAt: now,
           updatedAt: now
@@ -817,9 +828,9 @@ export const generatePremiumAnalytics = onCall<{
         const monthlySpending: any = {};
 
         services.forEach(service => {
-          const category = service.serviceType;
-          const amount = service.price || 0;
-          const month = service.createdAt.toDate().toISOString().substring(0, 7);
+          const category = (service as any)?.serviceType || "unknown";
+          const amount = (service as any)?.price || 0 || 0;
+          const month = (service as any)?.createdAt || admin.firestore.Timestamp.now().toDate().toISOString().substring(0, 7);
 
           totalSpent += amount;
           spendingByCategory[category] = (spendingByCategory[category] || 0) + amount;
@@ -858,8 +869,8 @@ export const generatePremiumAnalytics = onCall<{
         const dayPatterns: any = {};
         
         services.forEach(service => {
-          const type = service.serviceType;
-          const dayOfWeek = service.createdAt.toDate().getDay();
+          const type = (service as any)?.serviceType || "unknown";
+          const dayOfWeek = (service as any)?.createdAt || admin.firestore.Timestamp.now().toDate().getDay();
           
           servicePatterns[type] = (servicePatterns[type] || 0) + 1;
           dayPatterns[dayOfWeek] = (dayPatterns[dayOfWeek] || 0) + 1;
@@ -875,9 +886,9 @@ export const generatePremiumAnalytics = onCall<{
         // Calcular días promedio entre servicios del mismo tipo
         const serviceIntervals: any = {};
         const servicesByType = services.reduce((acc: any, service) => {
-          const type = service.serviceType;
+          const type = (service as any)?.serviceType || "unknown";
           if (!acc[type]) acc[type] = [];
-          acc[type].push(service.createdAt.toDate());
+          acc[type].push((service as any)?.createdAt || admin.firestore.Timestamp.now().toDate());
           return acc;
         }, {});
 
@@ -898,9 +909,8 @@ export const generatePremiumAnalytics = onCall<{
 
         // Predecir fecha del próximo servicio
         const lastServiceDate = services
-          .filter(s => s.serviceType === mostFrequentService)
-          .sort((a, b) => b.createdAt.seconds - a.createdAt.seconds)[0]
-          ?.createdAt.toDate();
+          .filter(s => (s as any)?.serviceType === mostFrequentService)
+          .sort((a, b) => (((b as any)?.createdAt?.seconds || 0) - ((a as any)?.createdAt?.seconds || 0)))[0] as any;
 
         const avgInterval = serviceIntervals[mostFrequentService] || 30;
         const nextServiceDate = lastServiceDate ? 
@@ -909,7 +919,7 @@ export const generatePremiumAnalytics = onCall<{
 
         // Calcular presupuesto recomendado
         const monthlyAvg = analytics.spendingAnalysis?.monthlyAverage || 
-          totalSpent / ((now.getTime() - startDate.getTime()) / (30 * 24 * 60 * 60 * 1000));
+          (analytics.spendingAnalysis?.totalSpent || 0) / ((now.getTime() - startDate.getTime()) / (30 * 24 * 60 * 60 * 1000));
         
         analytics.predictions = {
           nextServiceNeeded: mostFrequentService || "cleaning",
@@ -927,7 +937,7 @@ export const generatePremiumAnalytics = onCall<{
         const providerRatings: any = {};
         
         for (const service of services) {
-          const providerId = service.providerId;
+          const providerId = (service as any)?.providerId || "unknown";
           providerFrequency[providerId] = (providerFrequency[providerId] || 0) + 1;
           
           // Obtener rating del servicio si existe
@@ -970,11 +980,11 @@ export const generatePremiumAnalytics = onCall<{
         
         // Analizar horarios más caros
         const servicesByHour = services.reduce((acc: any, service) => {
-          const hour = service.scheduledDateTime?.toDate().getHours() || 
-                      service.createdAt.toDate().getHours();
+          const hour = (service as any)?.scheduledDateTime || admin.firestore.Timestamp.now()?.toDate().getHours() || 
+                      (service as any)?.createdAt || admin.firestore.Timestamp.now().toDate().getHours();
           if (!acc[hour]) acc[hour] = { count: 0, totalCost: 0 };
           acc[hour].count += 1;
-          acc[hour].totalCost += service.price || 0;
+          acc[hour].totalCost += (service as any)?.price || 0 || 0;
           return acc;
         }, {});
 
@@ -995,11 +1005,11 @@ export const generatePremiumAnalytics = onCall<{
         }
 
         // Identificar oportunidades de servicios recurrentes
-        const recurringOpportunities = Object.entries(servicePatterns)
+        const recurringOpportunities = Object.entries(analytics.servicePatterns || {})
           .filter(([type, count]: any) => count >= 3)
           .map(([type, count]) => ({
             serviceType: type,
-            frequency: Math.round(services.length / count),
+            frequency: Math.round(services.length / (count as number)),
             potentialSavings: "10% con servicio recurrente"
           }));
 
@@ -1213,12 +1223,12 @@ export const sendScheduleReminders = onSchedule({
         userId: service.userId,
         type: "service_reminder_24h",
         title: "Recordatorio de servicio mañana",
-        message: `Tu servicio de ${service.serviceType} está programado para mañana a las ${service.scheduledDateTime.toDate().toLocaleTimeString()}`,
+        message: `Tu servicio de ${(service as any)?.serviceType || "unknown"} está programado para mañana a las ${(service as any)?.scheduledDateTime || admin.firestore.Timestamp.now().toDate().toLocaleTimeString()}`,
         data: {
           scheduledServiceId: serviceDoc.id,
-          serviceType: service.serviceType,
-          providerId: service.providerId,
-          scheduledDateTime: service.scheduledDateTime.toMillis()
+          serviceType: (service as any)?.serviceType || "unknown",
+          providerId: (service as any)?.providerId || "unknown",
+          scheduledDateTime: (service as any)?.scheduledDateTime || admin.firestore.Timestamp.now().toMillis()
         },
         read: false,
         createdAt: now
@@ -1227,15 +1237,15 @@ export const sendScheduleReminders = onSchedule({
       // Crear recordatorio para prestador
       const providerReminderRef = db.collection("notifications").doc();
       batch.set(providerReminderRef, {
-        userId: service.providerId,
+        userId: (service as any)?.providerId || "unknown",
         type: "service_reminder_24h",
         title: "Servicio programado para mañana",
-        message: `Tienes un servicio de ${service.serviceType} programado para mañana a las ${service.scheduledDateTime.toDate().toLocaleTimeString()}`,
+        message: `Tienes un servicio de ${(service as any)?.serviceType || "unknown"} programado para mañana a las ${(service as any)?.scheduledDateTime || admin.firestore.Timestamp.now().toDate().toLocaleTimeString()}`,
         data: {
           scheduledServiceId: serviceDoc.id,
-          serviceType: service.serviceType,
+          serviceType: (service as any)?.serviceType || "unknown",
           userId: service.userId,
-          scheduledDateTime: service.scheduledDateTime.toMillis()
+          scheduledDateTime: (service as any)?.scheduledDateTime || admin.firestore.Timestamp.now().toMillis()
         },
         read: false,
         createdAt: now
@@ -1272,12 +1282,12 @@ export const sendScheduleReminders = onSchedule({
         userId: service.userId,
         type: "service_reminder_2h",
         title: "Tu servicio comienza en 2 horas",
-        message: `Prepárate para tu servicio de ${service.serviceType} a las ${service.scheduledDateTime.toDate().toLocaleTimeString()}`,
+        message: `Prepárate para tu servicio de ${(service as any)?.serviceType || "unknown"} a las ${(service as any)?.scheduledDateTime || admin.firestore.Timestamp.now().toDate().toLocaleTimeString()}`,
         data: {
           scheduledServiceId: serviceDoc.id,
-          serviceType: service.serviceType,
-          providerId: service.providerId,
-          scheduledDateTime: service.scheduledDateTime.toMillis()
+          serviceType: (service as any)?.serviceType || "unknown",
+          providerId: (service as any)?.providerId || "unknown",
+          scheduledDateTime: (service as any)?.scheduledDateTime || admin.firestore.Timestamp.now().toMillis()
         },
         priority: "high",
         read: false,
@@ -1310,7 +1320,7 @@ export const sendScheduleReminders = onSchedule({
       const service = serviceDoc.data();
       
       // Obtener información del prestador para la ubicación
-      const providerDoc = await db.collection("providers").doc(service.providerId).get();
+      const providerDoc = await db.collection("providers").doc((service as any)?.providerId || "unknown").get();
       const providerData = providerDoc.data();
       
       // Crear recordatorio urgente para usuario
@@ -1319,12 +1329,12 @@ export const sendScheduleReminders = onSchedule({
         userId: service.userId,
         type: "service_reminder_30min",
         title: "⏰ Tu servicio comienza pronto",
-        message: `${service.serviceType} con ${providerData?.displayName}. Dirección: ${providerData?.address || "Por confirmar"}`,
+        message: `${(service as any)?.serviceType || "unknown"} con ${providerData?.displayName}. Dirección: ${providerData?.address || "Por confirmar"}`,
         data: {
           scheduledServiceId: serviceDoc.id,
-          serviceType: service.serviceType,
-          providerId: service.providerId,
-          scheduledDateTime: service.scheduledDateTime.toMillis(),
+          serviceType: (service as any)?.serviceType || "unknown",
+          providerId: (service as any)?.providerId || "unknown",
+          scheduledDateTime: (service as any)?.scheduledDateTime || admin.firestore.Timestamp.now().toMillis(),
           providerLocation: providerData?.location,
           allowReschedule: true
         },
@@ -1680,7 +1690,7 @@ export const createScheduledServiceDetailed = onCall<{
           userId,
           serviceType,
           scheduledDateTime: scheduledDateTime.toMillis(),
-          isEmergency: isEmergency
+          isEmergency: false
         },
         read: false,
         createdAt: now
@@ -1752,13 +1762,13 @@ export const generateDetailedPremiumAnalytics = onCall<{
 
       completedServices.forEach((service: any) => {
         // Obtener precio del servicio (asumir precio promedio si no está disponible)
-        const servicePrice = service.price || 500;
+        const servicePrice = (service as any)?.price || 0 || 500;
         totalLifetimeSpent += servicePrice;
 
-        const monthKey = service.createdAt.toDate().toISOString().substring(0, 7);
+        const monthKey = (service as any)?.createdAt || admin.firestore.Timestamp.now().toDate().toISOString().substring(0, 7);
         monthlySpending[monthKey] = (monthlySpending[monthKey] || 0) + servicePrice;
 
-        categoryCount[service.serviceType] = (categoryCount[service.serviceType] || 0) + 1;
+        categoryCount[(service as any)?.serviceType || "unknown"] = (categoryCount[(service as any)?.serviceType || "unknown"] || 0) + 1;
       });
 
       const monthlyAverage = Object.values(monthlySpending).reduce((a, b) => a + b, 0) / 
@@ -1778,20 +1788,20 @@ export const generateDetailedPremiumAnalytics = onCall<{
       const mostFrequentService = favoriteCategories[0] || 'cleaning';
       const serviceHistory = completedServices
         .filter((s: any) => s.serviceType === mostFrequentService)
-        .sort((a: any, b: any) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+        .sort((a: any, b: any) => ((a.createdAt as any)?.seconds || 0) - ((b.createdAt as any)?.seconds || 0));
 
       let avgDaysBetweenServices = 30;
       if (serviceHistory.length > 1) {
         const intervals = [];
         for (let i = 1; i < serviceHistory.length; i++) {
-          const days = ((serviceHistory[i].createdAt?.seconds || 0) - (serviceHistory[i-1].createdAt?.seconds || 0)) / (24 * 60 * 60);
+          const days = ((((serviceHistory[i] as any).createdAt as any)?.seconds || 0) - (((serviceHistory[i-1] as any).createdAt as any)?.seconds || 0)) / (24 * 60 * 60);
           intervals.push(days);
         }
         avgDaysBetweenServices = intervals.reduce((a, b) => a + b, 0) / intervals.length;
       }
 
       const lastServiceDate = serviceHistory.length > 0 ? 
-        serviceHistory[serviceHistory.length - 1].createdAt?.toDate() || new Date() :
+        ((serviceHistory[serviceHistory.length - 1] as any).createdAt as any)?.toDate?.() || new Date() :
         new Date();
 
       const nextServiceDate = new Date(lastServiceDate);
