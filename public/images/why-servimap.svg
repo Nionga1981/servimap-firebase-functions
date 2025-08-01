@@ -1,0 +1,10 @@
+<svg width="500" height="400" xmlns="http://www.w3.org/2000/svg">
+  <rect width="500" height="400" fill="#f9fafb" rx="10"/>
+  <rect x="50" y="50" width="400" height="300" fill="#ffffff" stroke="#e5e7eb" stroke-width="2" rx="10"/>
+  <text x="250" y="100" font-family="Arial, sans-serif" font-size="24" font-weight="bold" text-anchor="middle" fill="#1f2937">90%</text>
+  <text x="250" y="130" font-family="Arial, sans-serif" font-size="16" text-anchor="middle" fill="#6b7280">de ganancias</text>
+  <rect x="100" y="180" width="300" height="40" fill="#10b981" rx="5"/>
+  <text x="250" y="205" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="white">Sin intermediarios</text>
+  <rect x="100" y="240" width="300" height="40" fill="#2563eb" rx="5"/>
+  <text x="250" y="265" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="white">Crea tu servicio</text>
+</svg>

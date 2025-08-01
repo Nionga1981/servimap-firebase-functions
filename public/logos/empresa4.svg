@@ -1,0 +1,5 @@
+<svg width="150" height="60" xmlns="http://www.w3.org/2000/svg">
+  <rect width="150" height="60" fill="#ffffff"/>
+  <rect x="10" y="15" width="30" height="30" fill="#005592" rx="5"/>
+  <text x="50" y="35" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#1f2937">Empresa 4</text>
+</svg>

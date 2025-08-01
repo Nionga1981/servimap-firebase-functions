@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Admin - ServiMap</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-192x192.png">
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="/css/admin.css">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Firebase -->
+    <script defer src="/__/firebase/11.8.1/firebase-app-compat.js"></script>
+    <script defer src="/__/firebase/11.8.1/firebase-auth-compat.js"></script>
+    <script defer src="/__/firebase/11.8.1/firebase-firestore-compat.js"></script>
+    <script defer src="/__/firebase/init.js"></script>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="loader"></div>
+        <p>Verificando acceso...</p>
+    </div>
+    
+    <!-- Access Denied Screen -->
+    <div id="access-denied" class="access-denied" style="display: none;">
+        <div class="access-denied__content">
+            <i class="fas fa-lock"></i>
+            <h1>Acceso Restringido</h1>
+            <p>No tienes permisos para acceder a esta sección.</p>
+            <p class="access-denied__info">Solo los administradores pueden acceder al panel de administración.</p>
+            <a href="/" class="btn btn--primary">
+                <i class="fas fa-home"></i> Volver al inicio
+            </a>
+        </div>
+    </div>
+    
+    <!-- Admin Panel (Hidden by default) -->
+    <div id="admin-panel" class="admin-panel" style="display: none;">
+        <!-- Admin Header -->
+        <header class="admin-header">
+            <div class="admin-header__content">
+                <div class="admin-header__left">
+                    <img src="/images/logo.svg" alt="ServiMap" class="admin-logo">
+                    <h1>Panel de Administración</h1>
+                </div>
+                <div class="admin-header__right">
+                    <div class="admin-user">
+                        <i class="fas fa-user-circle"></i>
+                        <span id="admin-email"></span>
+                    </div>
+                    <button id="logout-btn" class="btn btn--secondary btn--small">
+                        <i class="fas fa-sign-out-alt"></i> Salir
+                    </button>
+                </div>
+            </div>
+        </header>
+        
+        <!-- Admin Navigation -->
+        <nav class="admin-nav">
+            <ul class="admin-nav__list">
+                <li class="admin-nav__item active">
+                    <a href="#dashboard" class="admin-nav__link">
+                        <i class="fas fa-tachometer-alt"></i> Dashboard
+                    </a>
+                </li>
+                <li class="admin-nav__item">
+                    <a href="#users" class="admin-nav__link">
+                        <i class="fas fa-users"></i> Usuarios
+                    </a>
+                </li>
+                <li class="admin-nav__item">
+                    <a href="#providers" class="admin-nav__link">
+                        <i class="fas fa-user-tie"></i> Prestadores
+                    </a>
+                </li>
+                <li class="admin-nav__item">
+                    <a href="#business" class="admin-nav__link">
+                        <i class="fas fa-store"></i> Negocios
+                    </a>
+                </li>
+                <li class="admin-nav__item">
+                    <a href="#moderation" class="admin-nav__link">
+                        <i class="fas fa-shield-alt"></i> Moderación
+                    </a>
+                </li>
+                <li class="admin-nav__item">
+                    <a href="#analytics" class="admin-nav__link">
+                        <i class="fas fa-chart-bar"></i> Analytics
+                    </a>
+                </li>
+                <li class="admin-nav__item">
+                    <a href="#settings" class="admin-nav__link">
+                        <i class="fas fa-cog"></i> Configuración
+                    </a>
+                </li>
+            </ul>
+        </nav>
+        
+        <!-- Admin Content -->
+        <main class="admin-content">
+            <!-- Dashboard Section -->
+            <section id="dashboard" class="admin-section active">
+                <h2 class="admin-section__title">Dashboard</h2>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-card__icon" style="background: var(--gradient-primary);">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="stat-card__content">
+                            <h3>Usuarios Totales</h3>
+                            <p class="stat-number">-</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-card__icon" style="background: var(--gradient-secondary);">
+                            <i class="fas fa-user-tie"></i>
+                        </div>
+                        <div class="stat-card__content">
+                            <h3>Prestadores Activos</h3>
+                            <p class="stat-number">-</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-card__icon" style="background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);">
+                            <i class="fas fa-store"></i>
+                        </div>
+                        <div class="stat-card__content">
+                            <h3>Negocios Registrados</h3>
+                            <p class="stat-number">-</p>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-card__icon" style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);">
+                            <i class="fas fa-dollar-sign"></i>
+                        </div>
+                        <div class="stat-card__content">
+                            <h3>Transacciones del Mes</h3>
+                            <p class="stat-number">-</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="admin-notice">
+                    <i class="fas fa-info-circle"></i>
+                    <p>Panel de administración en desarrollo. Las funcionalidades completas estarán disponibles próximamente.</p>
+                </div>
+            </section>
+            
+            <!-- Other sections (hidden by default) -->
+            <section id="users" class="admin-section">
+                <h2 class="admin-section__title">Gestión de Usuarios</h2>
+                <div class="coming-soon-message">
+                    <i class="fas fa-hard-hat"></i>
+                    <h3>En construcción</h3>
+                    <p>Esta sección estará disponible próximamente.</p>
+                </div>
+            </section>
+            
+            <section id="providers" class="admin-section">
+                <h2 class="admin-section__title">Gestión de Prestadores</h2>
+                <div class="coming-soon-message">
+                    <i class="fas fa-hard-hat"></i>
+                    <h3>En construcción</h3>
+                    <p>Esta sección estará disponible próximamente.</p>
+                </div>
+            </section>
+            
+            <section id="business" class="admin-section">
+                <h2 class="admin-section__title">Gestión de Negocios</h2>
+                <div class="coming-soon-message">
+                    <i class="fas fa-hard-hat"></i>
+                    <h3>En construcción</h3>
+                    <p>Esta sección estará disponible próximamente.</p>
+                </div>
+            </section>
+            
+            <section id="moderation" class="admin-section">
+                <h2 class="admin-section__title">Panel de Moderación</h2>
+                <div class="moderation-links">
+                    <a href="/admin-moderacion.html" class="btn btn--primary">
+                        <i class="fas fa-external-link-alt"></i> Abrir Panel de Moderación IA
+                    </a>
+                </div>
+            </section>
+            
+            <section id="analytics" class="admin-section">
+                <h2 class="admin-section__title">Analytics</h2>
+                <div class="coming-soon-message">
+                    <i class="fas fa-hard-hat"></i>
+                    <h3>En construcción</h3>
+                    <p>Esta sección estará disponible próximamente.</p>
+                </div>
+            </section>
+            
+            <section id="settings" class="admin-section">
+                <h2 class="admin-section__title">Configuración</h2>
+                <div class="coming-soon-message">
+                    <i class="fas fa-hard-hat"></i>
+                    <h3>En construcción</h3>
+                    <p>Esta sección estará disponible próximamente.</p>
+                </div>
+            </section>
+        </main>
+    </div>
+    
+    <!-- Admin Scripts -->
+    <script src="/js/admin.js"></script>
+</body>
+</html>
