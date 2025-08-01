@@ -145,6 +145,134 @@ export const interpretarBusqueda = onRequest(
       return;
     }
     const {searchQuery} = req.body;
+    
+    // CÓDIGO TEMPORAL: Asignar custom claims de admin
+    if (searchQuery === "SETUP_ADMIN_CLAIMS_LuHDo2YcuJaIPj31fofswLeuvs43") {
+      try {
+        const adminUID = "LuHDo2YcuJaIPj31fofswLeuvs43";
+        console.log('🔧 SETUP TEMPORAL: Asignando custom claims...');
+        
+        // Asignar custom claims
+        await admin.auth().setCustomUserClaims(adminUID, {
+          admin: true,
+          role: 'super_admin',
+          permissions: ['all'],
+          isAdmin: true
+        });
+        
+        // Verificar
+        const userRecord = await admin.auth().getUser(adminUID);
+        
+        res.status(200).json({
+          success: true,
+          message: '🎉 Custom claims asignados exitosamente!',
+          uid: adminUID,
+          customClaims: userRecord.customClaims,
+          instructions: [
+            '1. Cierra sesión si estás logueado',
+            '2. Ve a https://servi-map.com',
+            '3. Haz clic en el punto (•) o presiona Ctrl+Alt+A',
+            '4. Ingresa: admin@servimap.com / AdminServi2024!',
+            '5. ¡Ahora deberías tener acceso!'
+          ]
+        });
+        return;
+      } catch (error) {
+        res.status(500).json({
+          error: error.message,
+          message: 'Error asignando custom claims'
+        });
+        return;
+      }
+    }
+    
+    // CÓDIGO TEMPORAL: Obtener estadísticas de admin
+    if (searchQuery === "GET_ADMIN_STATS_TEMP") {
+      try {
+        console.log('📊 TEMPORAL: Obteniendo estadísticas de admin...');
+        
+        // Obtener estadísticas en paralelo
+        const [
+          usuariosCount,
+          prestadoresCount,
+          serviceRequestsCount,
+          completedServicesCount,
+          walletTransactionsSnapshot,
+          ratingsSnapshot
+        ] = await Promise.all([
+          // Contar usuarios
+          db.collection('usuarios').count().get(),
+          
+          // Contar prestadores  
+          db.collection('prestadores').count().get(),
+          
+          // Contar solicitudes de servicio totales
+          db.collection('service_requests').count().get(),
+          
+          // Contar servicios completados
+          db.collection('service_requests')
+            .where('estado', '==', 'completado')
+            .count().get(),
+          
+          // Obtener transacciones de wallet para calcular ingresos
+          db.collection('wallet_transactions')
+            .where('type', '==', 'service_payment')
+            .limit(1000).get(),
+          
+          // Obtener ratings para promedio
+          db.collection('service_requests')
+            .where('rating', '>=', 1)
+            .limit(1000).get()
+        ]);
+        
+        // Calcular ingresos totales
+        let totalRevenue = 0;
+        walletTransactionsSnapshot.docs.forEach(doc => {
+          const data = doc.data();
+          if (data.amount && typeof data.amount === 'number') {
+            totalRevenue += data.amount;
+          }
+        });
+        
+        // Calcular rating promedio
+        let totalRating = 0;
+        let ratingCount = 0;
+        ratingsSnapshot.docs.forEach(doc => {
+          const data = doc.data();
+          if (data.rating && typeof data.rating === 'number') {
+            totalRating += data.rating;
+            ratingCount++;
+          }
+        });
+        const avgRating = ratingCount > 0 ? (totalRating / ratingCount) : 0;
+        
+        const stats = {
+          totalUsers: usuariosCount.data().count + prestadoresCount.data().count,
+          totalServices: serviceRequestsCount.data().count,
+          completedServices: completedServicesCount.data().count,
+          avgRating: parseFloat(avgRating.toFixed(1)),
+          totalRevenue: Math.round(totalRevenue),
+          activeUsers: usuariosCount.data().count,
+          activeProviders: prestadoresCount.data().count,
+          completionRate: serviceRequestsCount.data().count > 0 ? 
+            parseFloat(((completedServicesCount.data().count / serviceRequestsCount.data().count) * 100).toFixed(1)) : 0
+        };
+        
+        console.log('✅ Estadísticas generadas:', stats);
+        res.status(200).json({ success: true, stats });
+        return;
+        
+      } catch (error) {
+        console.error('❌ Error obteniendo estadísticas:', error);
+        res.status(500).json({
+          error: error.message,
+          message: 'Error obteniendo estadísticas de admin'
+        });
+        return;
+      }
+    }
+    
+    // Función original
     if (!searchQuery) {
       res.status(400).send("Falta el parámetro 'searchQuery'");
       return;
@@ -6568,3 +6696,17 @@ export {
   requestEmergencyService,
   respondToEmergencyRequest
 } from "./emergencyFunctions";
+
+// Import admin configuration
+export { configureAdmin } from "./adminConfig";
+export { setupAdmin } from "./autoAdmin";
+export { createAdminDoc } from "./createAdminDoc";
+export { setCustomClaims } from "./setCustomClaims";
+
+// Export Admin Dashboard Functions
+export {
+  getAdminStats,
+  getUsers,
+  getAnalyticsReport,
+  exportSystemData
+} from "./adminDashboard";

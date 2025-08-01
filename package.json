@@ -56,7 +56,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "crypto-browserify": "^3.12.1",
-    "firebase": "^10.7.1",
+    "firebase": "^10.14.1",
     "genkit": "1.13.0",
     "lucide-react": "^0.263.1",
     "next": "14.0.4",

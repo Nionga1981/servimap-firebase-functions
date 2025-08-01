@@ -151,13 +151,6 @@ service cloud.firestore {
 
     // === COLECCIONES PRINCIPALES ===
     
-    // Colección users (para documentos de admin y usuarios generales)
-    match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow write: if isOwner(userId);
-      allow create: if isAuthenticated();
-    }
-    
     // Usuarios - Lectura propia y de admins, escritura propia limitada
     match /usuarios/{userId} {
       allow read: if isOwner(userId) || isAdmin();
