@@ -73,12 +73,12 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+    <div className="min-h-screen bg-gradient-to-b from-[#209ded]/10 to-white">
       {/* Hero Section */}
       <section className="relative px-4 py-16 text-center">
         <div className="mx-auto max-w-4xl">
           <h1 className="mb-6 text-4xl font-bold text-gray-900 md:text-6xl">
-            Encuentra <span className="text-blue-600">Profesionales</span>
+            Encuentra <span className="text-[#209ded]">Profesionales</span>
             <br />
             Cerca de Ti
           </h1>
@@ -175,7 +175,7 @@ export default function HomePage() {
                           <span>{service.distance}</span>
                         </div>
                       </div>
-                      <p className="mt-2 font-medium text-blue-600">{service.price}</p>
+                      <p className="mt-2 font-medium text-[#209ded]">{service.price}</p>
                     </div>
                   </div>
                 </CardContent>
@@ -194,8 +194,8 @@ export default function HomePage() {
           
           <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
             <div className="text-center">
-              <div className="mx-auto mb-4 h-12 w-12 rounded-lg bg-blue-100 flex items-center justify-center">
-                <Shield className="h-6 w-6 text-blue-600" />
+              <div className="mx-auto mb-4 h-12 w-12 rounded-lg bg-[#209ded]/10 flex items-center justify-center">
+                <Shield className="h-6 w-6 text-[#209ded]" />
               </div>
               <h3 className="mb-2 text-lg font-semibold">Prestadores Verificados</h3>
               <p className="text-gray-600">
@@ -257,7 +257,7 @@ export default function HomePage() {
       </section>
 
       {/* CTA Section */}
-      <section className="px-4 py-16 bg-blue-600 text-white">
+      <section className="px-4 py-16 bg-[#209ded] text-white">
         <div className="mx-auto max-w-4xl text-center">
           <h2 className="mb-4 text-3xl font-bold">
             ¿Eres un prestador de servicios?
@@ -270,7 +270,7 @@ export default function HomePage() {
               size="lg" 
               variant="secondary"
               onClick={() => router.push('/provider-signup')}
-              className="bg-white text-blue-600 hover:bg-gray-100"
+              className="bg-white text-[#209ded] hover:bg-gray-100"
             >
               Registrarse como Prestador
             </Button>
@@ -278,7 +278,7 @@ export default function HomePage() {
               size="lg" 
               variant="outline"
               onClick={() => router.push('/ambassador')}
-              className="border-white text-white hover:bg-white hover:text-blue-600"
+              className="border-white text-white hover:bg-white hover:text-[#209ded]"
             >
               Programa de Embajadores
             </Button>

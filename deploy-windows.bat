@@ -1,139 +1,98 @@
 @echo off
-echo ========================================
-echo   SERVIMAP ADMIN FUNCTIONS DEPLOYMENT
-echo ========================================
+REM deploy-windows.bat - Script de deployment para Windows
+REM Ejecutar desde la raíz del proyecto
+
+echo.
+echo =========================================
+echo    SERVIMAP - DEPLOYMENT PARA WINDOWS
+echo =========================================
 echo.
 
-REM Change to project directory
-cd /d "%~dp0"
-
-echo [1/7] Verificando directorio del proyecto...
-if not exist "firebase.json" (
-    echo ERROR: No se encontro firebase.json. Verifica que estas en el directorio correcto.
+REM Verificar que estamos en el directorio correcto
+if not exist "functions\src\adminDashboard.ts" (
+    echo ERROR: No se encuentra functions\src\adminDashboard.ts
+    echo Asegurate de ejecutar este script desde la raiz del proyecto
     pause
     exit /b 1
 )
-echo ✓ Directorio correcto encontrado
+
+echo [1/6] Verificando estructura del proyecto...
+if exist "functions\src\adminDashboard.ts" echo     ✓ adminDashboard.ts encontrado
+if exist "functions\src\index.ts" echo     ✓ index.ts encontrado
+if exist "firebase.json" echo     ✓ firebase.json encontrado
 
 echo.
-echo [2/7] Verificando autenticacion Firebase...
-firebase login:list
-if %errorlevel% neq 0 (
-    echo ERROR: No estas autenticado en Firebase
-    echo Ejecuta: firebase login
-    pause
-    exit /b 1
-)
-echo ✓ Autenticacion verificada
-
-echo.
-echo [3/7] Seleccionando proyecto...
-firebase use servimap-nyniz
-if %errorlevel% neq 0 (
-    echo ERROR: No se pudo seleccionar el proyecto
-    pause
-    exit /b 1
-)
-echo ✓ Proyecto seleccionado
-
-echo.
-echo [4/7] Navegando a functions...
+echo [2/6] Instalando dependencias...
 cd functions
-if %errorlevel% neq 0 (
-    echo ERROR: No se encontro el directorio functions
-    pause
-    exit /b 1
-)
-
-echo.
-echo [5/7] Instalando dependencias...
 call npm install
-if %errorlevel% neq 0 (
+if errorlevel 1 (
     echo ERROR: Fallo la instalacion de dependencias
     pause
     exit /b 1
 )
-echo ✓ Dependencias instaladas
 
 echo.
-echo [6/7] Compilando TypeScript...
+echo [3/6] Compilando TypeScript...
 call npm run build
-if %errorlevel% neq 0 (
-    echo ERROR: Fallo la compilacion
+if errorlevel 1 (
+    echo ERROR: Fallo la compilacion de TypeScript
     pause
     exit /b 1
 )
-echo ✓ Compilacion exitosa
 
-echo.
-echo [7/7] Volviendo al directorio raiz...
 cd ..
 
 echo.
-echo ========================================
-echo        INICIANDO DEPLOYMENT
-echo ========================================
-
-REM Intentar deployment completo
-echo Intentando deployment completo...
-firebase deploy --only functions
-if %errorlevel% equ 0 (
+echo [4/6] Verificando autenticacion Firebase...
+firebase projects:list >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: No estas autenticado en Firebase
     echo.
-    echo ✓✓✓ DEPLOYMENT EXITOSO ✓✓✓
-    echo.
-    echo Verificando funciones desplegadas...
-    firebase functions:list
-    echo.
-    echo PRUEBA EL ADMIN DASHBOARD:
-    echo URL: https://servi-map.com
-    echo Acceso: Ctrl+Alt+A o click en • del footer
-    echo Login: admin@servimap.com / AdminServi2024!
+    echo Por favor ejecuta primero:
+    echo   firebase login
     echo.
     pause
-    exit /b 0
+    exit /b 1
 )
 
 echo.
-echo ⚠️  Deployment completo fallo, intentando funciones individuales...
-echo.
-
-REM Intentar deployment individual
-echo Desplegando getAdminStats...
-firebase deploy --only functions:getAdminStats
-if %errorlevel% neq 0 (
-    echo ERROR: Fallo getAdminStats
-)
-
-echo Desplegando getUsers...
-firebase deploy --only functions:getUsers
-if %errorlevel% neq 0 (
-    echo ERROR: Fallo getUsers
-)
-
-echo Desplegando getAnalyticsReport...
-firebase deploy --only functions:getAnalyticsReport
-if %errorlevel% neq 0 (
-    echo ERROR: Fallo getAnalyticsReport
-)
-
-echo Desplegando exportSystemData...
-firebase deploy --only functions:exportSystemData
-if %errorlevel% neq 0 (
-    echo ERROR: Fallo exportSystemData
+echo [5/6] Seleccionando proyecto...
+firebase use servimap-nyniz
+if errorlevel 1 (
+    echo ERROR: No se pudo seleccionar el proyecto servimap-nyniz
+    pause
+    exit /b 1
 )
 
 echo.
-echo ========================================
-echo         DEPLOYMENT COMPLETADO
-echo ========================================
+echo [6/6] Deployando Cloud Functions...
+firebase deploy --only functions
+if errorlevel 1 (
+    echo ERROR: Fallo el deployment de funciones
+    echo.
+    echo Intentando deployment individual de funciones admin...
+    firebase deploy --only functions:getAdminStats
+    firebase deploy --only functions:getUsers
+    firebase deploy --only functions:getAnalyticsReport
+    firebase deploy --only functions:exportSystemData
+)
+
 echo.
-echo Verificando funciones desplegadas...
-firebase functions:list
+echo =========================================
+echo           DEPLOYMENT COMPLETADO
+echo =========================================
 echo.
-echo PRUEBA EL ADMIN DASHBOARD:
-echo URL: https://servi-map.com
-echo Acceso: Ctrl+Alt+A o click en • del footer
-echo Login: admin@servimap.com / AdminServi2024!
+echo Funciones deployadas:
+echo   - getAdminStats
+echo   - getUsers
+echo   - getAnalyticsReport
+echo   - exportSystemData
 echo.
+echo Para probar:
+echo   1. Ve a: https://servi-map.com
+echo   2. Presiona Ctrl+Alt+A
+echo   3. Login: admin@servimap.com / AdminServi2024!
+echo.
+echo =========================================
 
 pause

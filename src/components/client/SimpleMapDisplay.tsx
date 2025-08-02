@@ -162,7 +162,7 @@ export function SimpleMapDisplay() {
                     <span className="text-sm">{selectedProvider.rating}</span>
                     <span className="text-sm text-gray-500">({selectedProvider.reviews} reseñas)</span>
                   </div>
-                  <p className="font-medium text-blue-600">{selectedProvider.price}</p>
+                  <p className="font-medium text-[#209ded]">{selectedProvider.price}</p>
                   <div className="flex gap-2">
                     <Button 
                       size="sm" 

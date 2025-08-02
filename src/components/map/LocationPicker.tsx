@@ -315,11 +315,11 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
               value={searchQuery}
               onChange={handleSearchInputChange}
               placeholder="Buscar dirección o lugar..."
-              className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#209ded] focus:border-transparent"
             />
             {isSearching && (
               <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-[#209ded]"></div>
               </div>
             )}
           </div>
@@ -351,7 +351,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
       <div className="flex items-center justify-between mb-4">
         <button
           onClick={handleUseCurrentLocation}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
+          className="flex items-center space-x-2 px-4 py-2 bg-[#209ded]/10 text-[#209ded] rounded-lg hover:bg-[#209ded]/20 transition-colors"
         >
           <Navigation className="w-4 h-4" />
           <span className="text-sm font-medium">Usar mi ubicación</span>
@@ -374,7 +374,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
         {!mapLoaded && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-100 rounded-lg">
             <div className="text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#209ded] mx-auto mb-2"></div>
               <span className="text-gray-600">Cargando mapa...</span>
             </div>
           </div>
@@ -393,7 +393,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
                   `${(draggedLocation || selectedLocation).lat.toFixed(6)}, ${(draggedLocation || selectedLocation).lng.toFixed(6)}`}
               </div>
               {draggedLocation && (
-                <div className="text-xs text-blue-600 mt-1">
+                <div className="text-xs text-[#209ded] mt-1">
                   ℹ️ Ubicación modificada arrastrando el marcador
                 </div>
               )}
@@ -413,7 +413,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
               type="number"
               step="any"
               placeholder="Latitud"
-              className="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#209ded] text-sm"
               onChange={(e) => {
                 const lat = parseFloat(e.target.value);
                 if (!isNaN(lat) && selectedLocation) {
@@ -426,7 +426,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
               type="number"
               step="any"
               placeholder="Longitud"
-              className="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-[#209ded] text-sm"
               onChange={(e) => {
                 const lng = parseFloat(e.target.value);
                 if (!isNaN(lng) && selectedLocation) {
@@ -453,7 +453,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
           <button
             onClick={handleConfirmLocation}
             disabled={!selectedLocation && !draggedLocation}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+            className="flex items-center space-x-2 px-4 py-2 bg-[#209ded] text-white rounded-lg hover:bg-[#209ded]/90 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
           >
             <Check className="w-4 h-4" />
             <span>Confirmar ubicación</span>

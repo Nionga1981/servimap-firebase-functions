@@ -284,7 +284,7 @@ const RealTimeChatInterface: React.FC<RealTimeChatInterfaceProps> = ({
     if (message.senderId !== currentUserId) return null;
     
     if (message.isRead) {
-      return <CheckCircle2 className="w-4 h-4 text-blue-500" />;
+      return <CheckCircle2 className="w-4 h-4 text-[#209ded]" />;
     }
     
     return <Clock className="w-4 h-4 text-gray-400" />;
@@ -364,7 +364,7 @@ const RealTimeChatInterface: React.FC<RealTimeChatInterfaceProps> = ({
             <div
               className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
                 message.senderId === currentUserId
-                  ? 'bg-blue-500 text-white'
+                  ? 'bg-[#209ded] text-white'
                   : 'bg-gray-100 text-gray-900'
               } ${message.isModerated ? 'opacity-50 border-2 border-red-300' : ''}`}
             >
@@ -399,7 +399,7 @@ const RealTimeChatInterface: React.FC<RealTimeChatInterfaceProps> = ({
               )}
 
               <div className={`flex items-center justify-between mt-1 ${
-                message.senderId === currentUserId ? 'text-blue-100' : 'text-gray-500'
+                message.senderId === currentUserId ? 'text-[#209ded]/20' : 'text-gray-500'
               }`}>
                 <span className="text-xs">
                   {formatMessageTime(message.timestamp)}
@@ -469,14 +469,14 @@ const RealTimeChatInterface: React.FC<RealTimeChatInterfaceProps> = ({
               onKeyPress={handleKeyPress}
               placeholder={isConnected ? "Escribe un mensaje..." : "Sin conexión..."}
               disabled={!isConnected || uploadingMedia}
-              className="w-full px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+              className="w-full px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-[#209ded] focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
             />
           </div>
           
           <button
             onClick={handleSendMessage}
             disabled={!newMessage.trim() || !isConnected || uploadingMedia}
-            className="p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+            className="p-2 bg-[#209ded] text-white rounded-full hover:bg-[#209ded]/90 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
           >
             <Send className="w-5 h-5" />
           </button>
@@ -493,7 +493,7 @@ const RealTimeChatInterface: React.FC<RealTimeChatInterfaceProps> = ({
         
         {uploadingMedia && (
           <div className="mt-2 text-sm text-gray-600 flex items-center">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500 mr-2"></div>
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-[#209ded] mr-2"></div>
             Subiendo archivo...
           </div>
         )}

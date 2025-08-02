@@ -95,7 +95,7 @@ export default function SearchPage() {
                       <span>{result.distance}</span>
                     </div>
                   </div>
-                  <p className="mt-2 font-medium text-blue-600">{result.price}</p>
+                  <p className="mt-2 font-medium text-[#209ded]">{result.price}</p>
                 </div>
               </div>
             </CardContent>

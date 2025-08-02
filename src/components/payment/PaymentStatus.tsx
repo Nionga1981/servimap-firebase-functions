@@ -45,7 +45,7 @@ const statusConfig = {
     icon: RefreshCw,
     label: 'Procesando',
     description: 'Tu pago está siendo procesado',
-    color: 'bg-blue-500',
+    color: 'bg-[#209ded]',
     variant: 'secondary' as const,
   },
   succeeded: {
