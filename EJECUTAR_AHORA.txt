@@ -1,0 +1,65 @@
+========================================
+  INSTRUCCIONES INMEDIATAS - DEPLOYMENT
+========================================
+
+PROBLEMA IDENTIFICADO:
+- Git Bash causa conflictos con Firebase CLI
+- Error: /usr/bin/bash: Files\Git\bin\bash.exe: No such file or directory
+
+SOLUCION:
+Usar Command Prompt NATIVO de Windows
+
+PASOS A SEGUIR AHORA MISMO:
+
+1. CERRAR Git Bash (si está abierto)
+
+2. ABRIR COMMAND PROMPT COMO ADMINISTRADOR:
+   - Presionar Windows + R
+   - Escribir: cmd
+   - Presionar Ctrl + Shift + Enter
+
+3. EJECUTAR ESTOS COMANDOS:
+   cd C:\Users\ferna\Projects\servimap-firebase-functions
+   deploy-windows.bat
+
+4. EL SCRIPT HARA TODO AUTOMATICAMENTE:
+   ✓ Verificar autenticación
+   ✓ Seleccionar proyecto servimap-nyniz
+   ✓ Compilar funciones
+   ✓ Desplegar 4 funciones admin
+   ✓ Verificar deployment
+
+5. SI EL SCRIPT FALLA, EJECUTAR MANUALMENTE:
+   firebase use servimap-nyniz
+   cd functions
+   npm install
+   npm run build
+   cd ..
+   firebase deploy --only functions
+
+6. VERIFICAR DEPLOYMENT EXITOSO:
+   firebase functions:list
+
+7. PROBAR EL ADMIN DASHBOARD:
+   - URL: https://servi-map.com
+   - Acceso: Ctrl+Alt+A o click en • del footer
+   - Login: admin@servimap.com / AdminServi2024!
+
+FUNCIONES QUE DEBEN APARECER:
+✓ getAdminStats
+✓ getUsers
+✓ getAnalyticsReport
+✓ exportSystemData
+
+SI AUN HAY PROBLEMAS:
+- Usar PowerShell en lugar de CMD
+- Ejecutar: .\deploy-windows.ps1
+
+NOTA IMPORTANTE:
+El código está 100% listo y compilado.
+Solo falta el deployment por el problema de shell.
+
+========================================
+Archivo creado: 2025-08-02 00:30 UTC
+Estado: LISTO PARA DEPLOYMENT
+========================================
