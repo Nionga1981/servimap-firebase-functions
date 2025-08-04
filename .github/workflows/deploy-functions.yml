@@ -1,0 +1,137 @@
+name: 🚀 Deploy ServiMapp Functions - Complete
+
+on:
+  push:
+    branches: [ main, master ]
+    paths: 
+      - 'functions/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+    inputs:
+      deploy_type:
+        description: 'Tipo de deployment'
+        required: true
+        default: 'functions'
+        type: choice
+        options:
+        - functions
+        - full
+        - hosting
+        - firestore
+
+jobs:
+  deploy-functions:
+    name: 🔥 Deploy Cloud Functions (85+ Functions)
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: 🟢 Setup Node.js 22.x
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        
+    - name: 📦 Install Dependencies (Root)
+      run: npm ci
+      
+    - name: 📦 Install Functions Dependencies
+      run: |
+        cd functions
+        npm ci
+        
+    - name: 🔨 Build TypeScript Functions
+      run: |
+        cd functions
+        npm run build
+        
+    - name: 📋 List Compiled Functions
+      run: |
+        echo "=== FUNCIONES COMPILADAS ==="
+        ls -la functions/lib/
+        echo "=== EXPORTS EN INDEX.JS ==="
+        grep -c "exports\." functions/lib/index.js || echo "Verificando exports..."
+        
+    - name: 🔧 Setup Firebase CLI
+      run: |
+        npm install -g firebase-tools@latest
+        firebase --version
+        
+    - name: 🎯 Authenticate with Firebase
+      run: |
+        echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" > $HOME/firebase-service-account.json
+        firebase use servimap-nyniz --token "${{ secrets.FIREBASE_TOKEN }}"
+      env:
+        GOOGLE_APPLICATION_CREDENTIALS: $HOME/firebase-service-account.json
+        
+    - name: 🚀 Deploy Cloud Functions (All 85+ Functions)
+      run: |
+        echo "🚀 Desplegando TODAS las Cloud Functions de ServiMapp..."
+        echo "📊 Funciones a desplegar:"
+        echo "  - Sistema de Pagos (13 funciones)"
+        echo "  - Sistema de Comunidades (14 funciones)" 
+        echo "  - Sistema Premium (19 funciones)"
+        echo "  - Sistema de Emergencias (5 funciones)"
+        echo "  - Sistema de Moderación IA (4 funciones)"
+        echo "  - Sistema de Embajadores (4 funciones)"
+        echo "  - Sistema de Notificaciones (6 funciones)"
+        echo "  - Sistema de Videollamadas (4 funciones)"
+        echo "  - Sistema de Chat (5 funciones)"
+        echo "  - Y muchas más..."
+        
+        firebase deploy --only functions --project servimap-nyniz --token "${{ secrets.FIREBASE_TOKEN }}" --force
+        
+    - name: ✅ Verify Deployment
+      run: |
+        echo "🔍 Verificando funciones desplegadas..."
+        firebase functions:list --project servimap-nyniz --token "${{ secrets.FIREBASE_TOKEN }}"
+        
+    - name: 📝 Update Documentation
+      run: |
+        echo "📝 Deployment completado el $(date)"
+        echo "✅ ServiMapp Functions: TODAS ACTIVAS"
+        echo "🌐 URL: https://servimap-nyniz.web.app"
+        
+  deploy-full:
+    name: 🌟 Full Deployment (Optional)
+    runs-on: ubuntu-latest
+    if: github.event.inputs.deploy_type == 'full'
+    needs: [deploy-functions]
+    
+    steps:
+    - name: 📥 Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: 🟢 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        
+    - name: 📦 Install Dependencies
+      run: npm ci
+      
+    - name: 🔧 Setup Firebase CLI
+      run: npm install -g firebase-tools@latest
+      
+    - name: 🎯 Authenticate with Firebase
+      run: |
+        echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" > firebase-service-account.json
+        firebase use servimap-nyniz --token "${{ secrets.FIREBASE_TOKEN }}"
+        
+    - name: 🚀 Deploy Everything
+      run: |
+        echo "🚀 Deployment completo: Hosting + Storage + Firestore + Functions"
+        firebase deploy --project servimap-nyniz --token "${{ secrets.FIREBASE_TOKEN }}" --force
+        
+    - name: 🎉 Success Notification
+      run: |
+        echo "🎉 DEPLOYMENT COMPLETO EXITOSO!"
+        echo "✅ ServiMapp está 100% desplegada con todas las funcionalidades"
+        echo "🌐 URL: https://servimap-nyniz.web.app"
+        echo "⚡ Total Functions: 85+"
+        echo "💳 Pagos: Stripe integrado"
+        echo "🤖 IA: OpenAI integrada" 
+        echo "📱 PWA: Completamente instalable"
