@@ -1,17 +1,42 @@
 {
-  "name": "servimap",
+  "name": "servimapp",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:export": "next build && next export",
     "start": "next start",
     "lint": "next lint",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "type-check": "tsc --noEmit",
-    "pre-commit": "npm run type-check && npm run lint && npm run test"
+    "pre-commit": "npm run type-check && npm run lint && npm run test",
+    
+    "mobile:prepare": "npm run build:export && cap sync",
+    "mobile:build": "npm run mobile:prepare && cap build",
+    "mobile:run:android": "cap run android",
+    "mobile:run:ios": "cap run ios",
+    "mobile:open:android": "cap open android",
+    "mobile:open:ios": "cap open ios",
+    
+    "android:build": "npm run mobile:prepare && cap build android",
+    "android:build:release": "npm run mobile:prepare && cap build android --release",
+    "android:run": "cap run android",
+    "android:open": "cap open android",
+    
+    "ios:build": "npm run mobile:prepare && cap build ios",
+    "ios:build:release": "npm run mobile:prepare && cap build ios --release",
+    "ios:run": "cap run ios",
+    "ios:open": "cap open ios",
+    
+    "pwa:build": "npm run build && npm run pwa:generate-sw",
+    "pwa:generate-sw": "node scripts/generate-sw.js",
+    "pwa:serve": "npm run pwa:build && npx serve out",
+    
+    "deploy:mobile": "npm run android:build:release && npm run ios:build:release",
+    "deploy:all": "npm run build && npm run deploy:mobile"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.2",

@@ -1,14 +1,14 @@
 {
-  "name": "ServiMap - Servicios a domicilio",
-  "short_name": "ServiMap",
-  "description": "La plataforma líder de servicios a domicilio en México. Encuentra profesionales confiables cerca de ti.",
+  "name": "ServiMapp - Servicios a domicilio",
+  "short_name": "ServiMapp",
+  "description": "La aplicación líder de servicios a domicilio en México. Encuentra profesionales confiables cerca de ti.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#ffffff",
-  "theme_color": "#3B82F6",
-  "id": "com.servimap.app",
+  "theme_color": "#209ded",
+  "id": "com.servimapp.app",
   "dir": "ltr",
   "lang": "es-MX",
   "categories": ["business", "lifestyle", "utilities"],
@@ -187,7 +187,7 @@
   
   "protocol_handlers": [
     {
-      "protocol": "web+servimap",
+      "protocol": "web+servimapp",
       "url": "/handler?url=%s"
     }
   ],

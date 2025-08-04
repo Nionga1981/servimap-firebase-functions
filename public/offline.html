@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sin conexión - ServiMapp</title>
+    
+    <!-- SEO Meta Tags -->
+    <meta name="description" content="ServiMapp sin conexión - La app funciona parcialmente sin internet">
+    <meta name="robots" content="noindex, nofollow">
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#209ded">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    
+    <!-- Preload critical resources -->
+    <link rel="preload" href="/icons/icon-192x192.png" as="image">
+    
+    <style>
+        :root {
+            --primary-color: #209ded;
+            --primary-hover: #1e88e5;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --background: #f8fafc;
+            --surface: #ffffff;
+            --border: #e2e8f0;
+            --shadow: rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 
+                         'Helvetica Neue', Arial, sans-serif;
+            background: var(--background);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .offline-container {
+            background: var(--surface);
+            border-radius: 16px;
+            box-shadow: 0 10px 40px var(--shadow);
+            padding: 48px 40px;
+            text-align: center;
+            max-width: 480px;
+            width: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .offline-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary-color), #42a5f5);
+        }
+
+        .offline-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 24px;
+            background: linear-gradient(135deg, var(--primary-color), #42a5f5);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            position: relative;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .offline-icon::after {
+            content: '';
+            position: absolute;
+            inset: -8px;
+            border-radius: 50%;
+            border: 2px solid var(--primary-color);
+            opacity: 0.3;
+            animation: ripple 2s infinite;
+        }
+
+        @keyframes ripple {
+            0% { transform: scale(1); opacity: 0.3; }
+            100% { transform: scale(1.2); opacity: 0; }
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: var(--text-primary);
+        }
+
+        .subtitle {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 32px;
+        }
+
+        .features-offline {
+            background: #f1f5f9;
+            border-radius: 12px;
+            padding: 24px;
+            margin: 32px 0;
+            text-align: left;
+        }
+
+        .features-offline h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--text-primary);
+            text-align: center;
+        }
+
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .feature-list li {
+            padding: 8px 0;
+            color: var(--text-secondary);
+            position: relative;
+            padding-left: 24px;
+        }
+
+        .feature-list li::before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            color: #10b981;
+            font-weight: bold;
+        }
+
+        .buttons-container {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 32px;
+        }
+
+        .btn {
+            padding: 14px 28px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 140px;
+            justify-content: center;
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(32, 157, 237, 0.3);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--primary-color);
+            border: 2px solid var(--primary-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--primary-color);
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        .connection-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: #fee2e2;
+            color: #dc2626;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 24px;
+        }
+
+        .connection-status.online {
+            background: #dcfce7;
+            color: #16a34a;
+        }
+
+        .connection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: blink 1.5s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+        }
+
+        .footer-links {
+            margin-top: 40px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+
+        .footer-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+            transition: color 0.2s;
+        }
+
+        .footer-links a:hover {
+            color: var(--primary-color);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 640px) {
+            .offline-container {
+                padding: 32px 24px;
+                margin: 16px;
+            }
+            
+            h1 {
+                font-size: 24px;
+            }
+            
+            .buttons-container {
+                flex-direction: column;
+            }
+            
+            .btn {
+                width: 100%;
+            }
+            
+            .footer-links {
+                flex-direction: column;
+                gap: 12px;
+                text-align: center;
+            }
+        }
+
+        /* Dark mode support */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --text-primary: #f1f5f9;
+                --text-secondary: #94a3b8;
+                --background: #0f172a;
+                --surface: #1e293b;
+                --border: #334155;
+                --shadow: rgba(0, 0, 0, 0.3);
+            }
+            
+            .features-offline {
+                background: #334155;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="offline-container">
+        <div class="connection-status" id="connectionStatus">
+            <span class="connection-dot"></span>
+            Sin conexión a internet
+        </div>
+
+        <div class="offline-icon">
+            📱
+        </div>
+
+        <h1>¡ServiMapp sigue funcionando!</h1>
+        <p class="subtitle">
+            Aunque no tengas internet, puedes usar algunas funciones de la app
+        </p>
+
+        <div class="features-offline">
+            <h3>🎯 Funciones disponibles sin conexión:</h3>
+            <ul class="feature-list">
+                <li>Ver prestadores visitados recientemente</li>
+                <li>Consultar tu historial de servicios</li>
+                <li>Revisar conversaciones guardadas</li>
+                <li>Escribir solicitudes (se enviarán al reconectar)</li>
+                <li>Ver tu información de perfil</li>
+                <li>Acceder a tu wallet (balance cacheado)</li>
+            </ul>
+        </div>
+
+        <div class="buttons-container">
+            <button class="btn btn-primary" onclick="retryConnection()">
+                🔄 Reintentar conexión
+            </button>
+            <a href="/" class="btn btn-secondary">
+                🏠 Ir al inicio
+            </a>
+        </div>
+
+        <div class="footer-links">
+            <a href="/help">Centro de ayuda</a>
+            <a href="/contact">Contacto</a>
+            <a href="/app-download">Descargar app</a>
+        </div>
+    </div>
+
+    <script>
+        // Monitor de conexión
+        function updateConnectionStatus() {
+            const statusElement = document.getElementById('connectionStatus');
+            const dot = statusElement.querySelector('.connection-dot');
+            
+            if (navigator.onLine) {
+                statusElement.innerHTML = '<span class="connection-dot"></span>Conectado a internet';
+                statusElement.classList.add('online');
+                
+                // Auto-reload después de 2 segundos si hay conexión
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            } else {
+                statusElement.innerHTML = '<span class="connection-dot"></span>Sin conexión a internet';
+                statusElement.classList.remove('online');
+            }
+        }
+
+        // Event listeners para cambios de conexión
+        window.addEventListener('online', updateConnectionStatus);
+        window.addEventListener('offline', updateConnectionStatus);
+
+        // Verificar conexión al cargar
+        updateConnectionStatus();
+
+        // Función para reintentar
+        function retryConnection() {
+            const btn = event.target;
+            const originalText = btn.innerHTML;
+            
+            btn.innerHTML = '⏳ Verificando...';
+            btn.disabled = true;
+            
+            // Simular verificación
+            setTimeout(() => {
+                if (navigator.onLine) {
+                    btn.innerHTML = '✅ ¡Conectado!';
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                } else {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                    
+                    // Mostrar mensaje temporal
+                    showTemporaryMessage('Aún sin conexión. Intenta de nuevo en unos momentos.');
+                }
+            }, 1500);
+        }
+
+        function showTemporaryMessage(message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.style.cssText = `
+                position: fixed;
+                top: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: #3b82f6;
+                color: white;
+                padding: 12px 24px;
+                border-radius: 8px;
+                z-index: 1000;
+                animation: slideDown 0.3s ease;
+            `;
+            messageDiv.textContent = message;
+            
+            document.body.appendChild(messageDiv);
+            
+            setTimeout(() => {
+                messageDiv.style.animation = 'slideUp 0.3s ease';
+                setTimeout(() => {
+                    document.body.removeChild(messageDiv);
+                }, 300);
+            }, 3000);
+        }
+
+        // Verificar conexión periódicamente
+        setInterval(() => {
+            if (navigator.onLine) {
+                // Test real de conectividad
+                fetch('/?_test=1', { method: 'HEAD', mode: 'no-cors' })
+                    .then(() => {
+                        updateConnectionStatus();
+                    })
+                    .catch(() => {
+                        // Aún sin conexión real
+                    });
+            }
+        }, 5000);
+
+        // Preload de la página principal
+        if (navigator.onLine) {
+            const link = document.createElement('link');
+            link.rel = 'prefetch';
+            link.href = '/';
+            document.head.appendChild(link);
+        }
+
+        // Analytics offline (se enviará cuando haya conexión)
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.ready.then(registration => {
+                // Enviar evento a service worker para tracking offline
+                if (registration.active) {
+                    registration.active.postMessage({
+                        type: 'OFFLINE_PAGE_VIEW',
+                        timestamp: Date.now(),
+                        userAgent: navigator.userAgent
+                    });
+                }
+            });
+        }
+    </script>
+
+    <!-- CSS adicional con keyframes -->
+    <style>
+        @keyframes slideDown {
+            from { transform: translateX(-50%) translateY(-100%); }
+            to { transform: translateX(-50%) translateY(0); }
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateX(-50%) translateY(0); }
+            to { transform: translateX(-50%) translateY(-100%); }
+        }
+    </style>
+</body>
+</html>
