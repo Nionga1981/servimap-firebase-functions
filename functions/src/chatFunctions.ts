@@ -12,6 +12,10 @@ import {
   VIDEO_CALL_DURATION_LIMIT
 } from "./types";
 
+// Inicializar Firebase Admin si no está inicializado
+if (admin.apps.length === 0) {
+  admin.initializeApp();
+}
 const db = admin.firestore();
 
 /**
