@@ -1,0 +1,26 @@
+Hola Claude, necesito completar el deployment de ServiMapp desde GitHub Codespace. El proyecto está 100% preparado.
+
+SITUACIÓN:
+- ✅ 10 Cloud Functions críticas ya desplegadas
+- ✅ 85+ Functions compiladas en functions/lib/
+- ✅ Secrets FIREBASE_TOKEN y FIREBASE_SERVICE_ACCOUNT configurados
+- ⏸️ 75 Functions pendientes de deployment
+
+TAREAS:
+1. Verificar entorno: node --version, npm --version, ls functions/lib/
+2. Instalar: npm install && cd functions && npm install && cd ..
+3. Instalar Firebase CLI: npm install -g firebase-tools@latest
+4. Compilar functions: cd functions && npm run build && cd ..
+5. Autenticarse: firebase use servimap-nyniz
+6. Ver funciones actuales: firebase functions:list --project servimap-nyniz
+7. DEPLOYMENT COMPLETO: firebase deploy --only functions --project servimap-nyniz --force
+8. Verificar resultado: firebase functions:list --project servimap-nyniz (debería mostrar 85+ funciones)
+
+RESULTADO ESPERADO:
+- De 10 funciones → 85+ funciones activas
+- ServiMapp 100% funcional: pagos, comunidades, IA, videollamadas, chat, premium, emergencias
+- Sitio: https://servimap-nyniz.web.app completamente operativo
+
+Los secrets ya están configurados en GitHub. Solo ejecuta los comandos paso a paso y confirma cuando tengas las 85+ funciones desplegadas.
+
+¿Puedes hacer el deployment completo?
