@@ -333,6 +333,8 @@ input, textarea, select {
 .nav-logo {
     width: 40px;
     height: 40px;
+    border-radius: var(--rounded-lg);
+    object-fit: cover;
 }
 
 .nav-menu {
@@ -1381,7 +1383,9 @@ input, textarea, select {
 .footer-logo {
     width: 40px;
     height: 40px;
-    filter: brightness(0) invert(1);
+    border-radius: var(--rounded-lg);
+    object-fit: cover;
+    /* Removido el filtro para mantener los colores originales del logo */
 }
 
 .footer-brand-text {
