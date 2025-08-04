@@ -153,7 +153,7 @@ export const getUsers = onCall(async (request) => {
       throw new HttpsError('permission-denied', 'No tienes permisos de administrador');
     }
 
-    let users = [];
+    const users = [];
     
     if (type === 'all' || type === 'usuarios') {
       const usuariosSnapshot = await db.collection('usuarios')

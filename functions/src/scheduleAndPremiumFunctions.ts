@@ -429,7 +429,7 @@ export const confirmAppointment = onCall<{
       let notificationMessage = "";
       
       switch (action) {
-        case 'confirm':
+        case 'confirm': {
           newStatus = "confirmed";
           notificationMessage = "Tu servicio ha sido confirmado";
           
@@ -473,8 +473,9 @@ export const confirmAppointment = onCall<{
           }
           
           break;
+        }
           
-        case 'reject':
+        case 'reject': {
           newStatus = "cancelled";
           notificationMessage = `Tu servicio fue rechazado: ${rejectionReason || "Sin especificar"}`;
           
@@ -522,8 +523,9 @@ export const confirmAppointment = onCall<{
           });
           
           break;
+        }
           
-        case 'propose_alternative':
+        case 'propose_alternative': {
           if (!alternativeDateTime) {
             throw new HttpsError("invalid-argument", "Fecha alternativa requerida");
           }
@@ -544,6 +546,7 @@ export const confirmAppointment = onCall<{
           });
           
           break;
+        }
       }
 
       // Crear notificación para el usuario
@@ -677,7 +680,7 @@ export const setupRecurringService = onCall<{
 
       // Programar servicios para los próximos 6 meses
       const scheduledDates = [];
-      let currentDate = new Date(startDate.toDate());
+      const currentDate = new Date(startDate.toDate());
       const endDate = new Date(currentDate);
       endDate.setMonth(endDate.getMonth() + pattern.duration);
 
@@ -819,7 +822,7 @@ export const generatePremiumAnalytics = onCall<{
         ...doc.data()
       }));
 
-      let analytics: any = {};
+      const analytics: any = {};
 
       // Análisis de gastos
       if (analysisType === 'spending' || analysisType === 'full') {
@@ -1520,7 +1523,7 @@ export const initializeProviderSchedule = onCall<{
  * 📅 generateTimeSlots
  * Genera slots de tiempo específicos para un prestador
  */
-async function generateTimeSlots(providerId: string, daysAhead: number = 30): Promise<void> {
+async function generateTimeSlots(providerId: string, daysAhead = 30): Promise<void> {
   const scheduleDoc = await db.collection("providerSchedules").doc(providerId).get();
   if (!scheduleDoc.exists) {
     throw new Error("Horario no encontrado");

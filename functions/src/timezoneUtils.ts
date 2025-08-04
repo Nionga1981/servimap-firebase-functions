@@ -338,8 +338,8 @@ export const MEXICO_TIMEZONES = {
 // Utilidades para formateo de fecha/hora específicas de México
 export const formatMexicanDateTime = (
   timestamp: admin.firestore.Timestamp,
-  timezone: string = 'America/Mexico_City',
-  includeSeconds: boolean = false
+  timezone = 'America/Mexico_City',
+  includeSeconds = false
 ): string => {
   const date = TimezoneManager.convertFromUTC(timestamp, timezone);
   

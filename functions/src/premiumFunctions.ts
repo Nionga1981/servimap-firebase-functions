@@ -449,7 +449,7 @@ export const handleLastMinuteConfirmation = onCall(async (request) => {
     const timeUntilService = (serviceTime.getTime() - currentTime.getTime()) / (1000 * 60); // minutos
 
     switch (action) {
-      case 'confirm':
+      case 'confirm': {
         await db.collection('scheduledServices').doc(serviceRequestId).update({
           lastMinuteConfirmation: {
             confirmed: true,
@@ -463,8 +463,9 @@ export const handleLastMinuteConfirmation = onCall(async (request) => {
           message: 'Servicio confirmado para último momento',
           timeUntilService: Math.round(timeUntilService)
         };
+      }
 
-      case 'reschedule':
+      case 'reschedule': {
         if (!newDateTime) {
           throw new HttpsError('invalid-argument', 'Nueva fecha y hora requeridas');
         }
@@ -497,8 +498,9 @@ export const handleLastMinuteConfirmation = onCall(async (request) => {
           message: 'Servicio reprogramado exitosamente',
           newDateTime: newServiceTime
         };
+      }
 
-      case 'cancel':
+      case 'cancel': {
         await db.collection('scheduledServices').doc(serviceRequestId).update({
           status: 'cancelled',
           lastMinuteCancel: {
@@ -513,6 +515,7 @@ export const handleLastMinuteConfirmation = onCall(async (request) => {
           message: 'Servicio cancelado',
           refundEligible: timeUntilService > 60 // Elegible para reembolso si se cancela con más de 1 hora
         };
+      }
 
       default:
         throw new HttpsError('invalid-argument', 'Acción no válida');
