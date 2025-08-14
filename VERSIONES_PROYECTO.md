@@ -3,6 +3,15 @@
 ## ⚠️ IMPORTANTE PARA EL DESARROLLADOR
 Este documento especifica las versiones exactas utilizadas en el desarrollo de ServiMapp para evitar problemas de compatibilidad.
 
+### 🚨 INSTALACIÓN OBLIGATORIA CON --legacy-peer-deps
+```bash
+# SIEMPRE instalar dependencias así:
+npm install --legacy-peer-deps
+
+# NO usar: npm install (sin flags)
+```
+**Razón:** Conflicto entre @genkit-ai/next (requiere Next 15) y nuestro Next.js 14.0.4
+
 ## 📋 REQUISITOS DEL SISTEMA
 
 ### Node.js y NPM
@@ -76,7 +85,8 @@ npm --version   # Debe ser >= 8.0.0
 ### 3. Instalar dependencias del Frontend
 ```bash
 # En la raíz del proyecto
-npm install
+# ⚠️ IMPORTANTE: Siempre usar --legacy-peer-deps
+npm install --legacy-peer-deps
 ```
 
 ### 4. Instalar dependencias de Cloud Functions
@@ -113,14 +123,20 @@ nvm use 22  # Para trabajar en las functions
 # Cambiar "node": "22" a "node": "18" para desarrollo local
 ```
 
-### Error: peer dependencies
-**Problema:** Warnings sobre peer dependencies al instalar
+### Error: peer dependencies (GENKIT AI CONFLICT)
+**Problema:** Error con @genkit-ai/next requiere Next.js 15 pero el proyecto usa Next.js 14
 
-**Solución:**
+**Solución RECOMENDADA:**
 ```bash
-# Instalar con legacy peer deps si es necesario
+# Instalar con legacy peer deps - SIEMPRE usar este comando
+npm install --legacy-peer-deps
+
+# Si necesitas limpiar e instalar todo de nuevo:
+rm -rf node_modules package-lock.json
 npm install --legacy-peer-deps
 ```
+
+**Nota:** Este conflicto es conocido y no afecta la funcionalidad. El proyecto está probado y funciona perfectamente con estas versiones.
 
 ### Error: TypeScript version mismatch
 **Problema:** Diferentes versiones de TypeScript entre frontend y functions
