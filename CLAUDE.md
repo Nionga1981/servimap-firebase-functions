@@ -4,8 +4,9 @@
 **ServiMapp** es una plataforma de servicios profesionales geolocalizados con 200+ funcionalidades.
 - **Stack:** React + Firebase + Stream Video + OpenAI + Stripe
 - **Estado:** 100% funcional en producción
-- **URL:** https://servimap-nyniz.web.app
-- **Repo:** https://github.com/Nionga1981/servimap-firebase-functions
+- **URL Producción:** https://servimap-nyniz.web.app
+- **Repo Principal:** https://github.com/Nionga1981/servimap-firebase-functions
+- **Rama Desarrollo:** master (branch principal para desarrollo activo)
 
 ## 🎯 Arquitectura Resumida
 
@@ -73,6 +74,10 @@ npm run ios:build             # Build iOS
 - **Región:** us-central1
 - **Admin:** admin@servimap.com / AdminServi2024!
 
+### Desarrollo Local
+- **Variables de Entorno:** Configuradas en `.env.local` (ver `GUIA_DESARROLLO_LOCAL.md`)
+- **Instalación:** Siempre usar `npm install --legacy-peer-deps`
+
 ## 🔧 Problemas Comunes y Soluciones
 
 1. **Error de versiones Node:**
@@ -89,9 +94,10 @@ npm run ios:build             # Build iOS
 ## 📚 Documentación Adicional
 
 Para información detallada consultar:
-- `CLAUDE_DETALLE.md` - Documentación completa (1000+ líneas)
-- `VERSIONES_PROYECTO.md` - Versiones y compatibilidad
-- `SERVIMAP_DESIGN_SYSTEM.md` - Sistema de diseño UI/UX
+- `GUIA_DESARROLLO_LOCAL.md` - **Guía paso a paso para nuevos desarrolladores** (configuración desde cero)
+- `CLAUDE_DETALLE.md` - Documentación completa del proyecto (1000+ líneas)
+- `VERSIONES_PROYECTO.md` - Versiones y compatibilidad detallada
+- `SERVIMAP_DESIGN_SYSTEM.md` - Sistema de diseño UI/UX completo
 
 ## 🎯 Estado Actual (Agosto 2025)
 
@@ -102,6 +108,7 @@ Para información detallada consultar:
 - PWA y apps móviles configuradas
 - Panel admin funcional
 - Moderación con IA operativa
+- Guía completa de desarrollo local para nuevos colaboradores
 
 🚧 **Pendiente:**
 - Publicación en App Store/Play Store
@@ -115,7 +122,16 @@ Para información detallada consultar:
 2. **No crear archivos** innecesarios, preferir editar existentes
 3. **Usar TodoWrite** para tareas complejas
 4. **Compilar antes de deploy:** `cd functions && npm run build`
-5. **Para más contexto** revisar CLAUDE_DETALLE.md si es necesario
+5. **Para configuración inicial** seguir `GUIA_DESARROLLO_LOCAL.md`
+6. **Para más contexto** revisar CLAUDE_DETALLE.md si es necesario
+
+## 👥 Para Nuevos Desarrolladores
+
+**IMPORTANTE:** Si eres un nuevo desarrollador, comienza por:
+1. Leer `GUIA_DESARROLLO_LOCAL.md` - Contiene TODO lo necesario para empezar
+2. Incluye las variables de entorno reales necesarias para compilar
+3. Soluciones a problemas comunes de instalación
+4. Proceso paso a paso desde cero hasta tener el proyecto funcionando
 
 ---
-*Última actualización: Agosto 2025 - Post-deployment 85+ functions*
+*Última actualización: Agosto 2025 - Agregada guía completa para desarrolladores*
